@@ -14,4 +14,10 @@ Play: (not deployed yet)
 
 ## Controls
 
-Left and right arrows (or A / D, or keypad 4 / 6) to steer. Let go to ski straight, which is fastest. Space to start. On mobile, hold the left or right half of the screen.
+Like snake, the skier keeps going whichever way you last pointed them:
+
+- **A** or **←** turns left
+- **D** or **→** turns right
+- **S** or **↓** goes straight, and the longer you hold a straight line the faster you go
+
+Keypad 4 / 6 / 2 work too. Space to start. On mobile, tap the left third of the screen to turn left, the right third to turn right, the middle to go straight.

@@ -151,7 +151,9 @@
   let straightFor = 0;         // seconds since the skier last steered
   let passed, missed, reds, nextGate;
   let runStart = 0, runEnd = null;
-  const held = { left: false, right: false };
+  // Snake-style: the skier holds whichever heading was last set, with no
+  // need to keep a key down. One heading per skiing sprite.
+  let heading = 'down';        // 'left' | 'down' | 'right'
 
   // --------------------------------------------------------- session edges
   // Unlike snake-bit, the session opens when the run starts, not on page
@@ -204,7 +206,7 @@
     buildCourse(seed);
     skierX = course.centerAt(0);
     skierY = 0;
-    vx = 0; speed = 0; mode = 'down'; straightFor = 0;
+    vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     passed = 0; missed = 0; reds = 0; nextGate = 0;
     runEnd = null;
     runStart = performance.now();
@@ -251,41 +253,33 @@
   // ----------------------------------------------------------------- input
   const LEFT = new Set(['ArrowLeft', 'a', 'A', '4']);
   const RIGHT = new Set(['ArrowRight', 'd', 'D', '6']);
+  const STRAIGHT = new Set(['ArrowDown', 's', 'S', '2']);
   const GO = new Set([' ', 'Enter']);
 
   window.addEventListener('keydown', (e) => {
     if (document.activeElement === initialsInputEl) return;
-    if (LEFT.has(e.key)) { held.left = true; e.preventDefault(); }
-    else if (RIGHT.has(e.key)) { held.right = true; e.preventDefault(); }
+    if (LEFT.has(e.key)) { heading = 'left'; e.preventDefault(); }
+    else if (RIGHT.has(e.key)) { heading = 'right'; e.preventDefault(); }
+    else if (STRAIGHT.has(e.key)) { heading = 'down'; e.preventDefault(); }
     else if (GO.has(e.key)) {
       e.preventDefault();
       if (state === 'title' || (overlayEl.hidden === false && state !== 'running')) startRun();
     }
   });
-  window.addEventListener('keyup', (e) => {
-    if (LEFT.has(e.key)) held.left = false;
-    if (RIGHT.has(e.key)) held.right = false;
-  });
 
-  // Touch: hold the left or right half of the screen to steer.
-  function touchSteer(e) {
-    held.left = held.right = false;
-    const r = canvas.getBoundingClientRect();
-    for (const t of e.touches) {
-      if (t.clientX - r.left < r.width / 2) held.left = true; else held.right = true;
-    }
-  }
+  // Touch: tap the left third to turn left, the right third to turn right,
+  // the middle to go straight. Like the keys, the heading sticks.
   canvas.addEventListener('touchstart', (e) => {
     if (state === 'title') { startRun(); return; }
-    touchSteer(e);
+    const r = canvas.getBoundingClientRect();
+    const f = (e.touches[0].clientX - r.left) / r.width;
+    heading = f < 1 / 3 ? 'left' : f > 2 / 3 ? 'right' : 'down';
   }, { passive: true });
-  canvas.addEventListener('touchmove', touchSteer, { passive: true });
-  canvas.addEventListener('touchend', touchSteer, { passive: true });
 
   // --------------------------------------------------------------- physics
   function step(dt) {
-    const steering = held.left !== held.right;
-    mode = !steering ? 'down' : held.left ? 'left' : 'right';
+    const steering = heading !== 'down';
+    mode = heading;
 
     if (hitTree(skierX, skierY)) { crash(); return; }
 
@@ -302,7 +296,7 @@
     const rate = target > speed ? ACCEL_RATE : DECEL_RATE;
     speed += (target - speed) * Math.min(1, dt * rate);
 
-    const targetVx = steering ? (held.left ? -LATERAL : LATERAL) : 0;
+    const targetVx = heading === 'left' ? -LATERAL : heading === 'right' ? LATERAL : 0;
     vx += (targetVx - vx) * Math.min(1, dt * 10);
 
     skierY += speed * dt;
