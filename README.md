@@ -7,7 +7,7 @@ Play: (not deployed yet)
 
 ## The run
 
-- **Twenty poles.** The first has no flag: pass it on whichever side you like. Every pole after that has a little flag pointing to the side you pass it on, alternating from your choice, so you weave down the hill. Pass on the wrong side, or skip it, and it costs you **3 seconds**. Clip a pole on the right side and it goes down, but it still counts.
+- **Twenty poles.** Each has a little flag pointing to the side you pass it on, and the sides alternate, so you weave down the hill. The first has no flag: pass it on whichever side you like. Pass on the wrong side, or skip it, and it costs you **3 seconds**. Clip a pole on the right side and it goes down, but it still counts.
 - **Red poles are a gift.** Clear one and **1.5 seconds** come off your time.
 - **Stay on the piste.** The fresh snow either side slows you down, more the further out you go — you can see it getting deeper. Out there are trees and wooden fences, and either one ends your run.
 - **Lowest time wins.**

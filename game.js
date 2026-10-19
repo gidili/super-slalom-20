@@ -31,8 +31,6 @@
   // The gaps shrink down the course, so the end is the hard part.
   const POLE_GAP_FIRST = 95;   // world px between the first two poles
   const POLE_GAP_LAST = 65;    // ...and the last two
-  const FIRST_GAP = 135;       // after the first pole: the second stays off
-                               // screen until you've passed the first
   const POLE_OFFSET = 12;      // how far off the piste centre a pole stands
   const CLIP = 3;              // this close to a pole knocks it over
   const LINE_WIDE = 6;         // the worn line passes this far outside a pole
@@ -103,66 +101,47 @@
     const f2 = 0.017 + rnd() * 0.008, p2 = rnd() * Math.PI * 2;
     const centerAt = y => W / 2 + 18 * Math.sin(y * f1 + p1) + 10 * Math.sin(y * f2 + p2);
 
-    // The first pole stands mid-piste with no flag: pass it on either side,
-    // and that choice sets the alternation (see chooseFirstSide). The rest
-    // are placed once it's made, each passed on its outside, away from the
-    // piste centre, which is what makes you weave. Until then they have no
-    // x; the gap after the first pole keeps the second off screen anyway.
+    // The seed picks the first pole's side; after that they alternate, so
+    // the line is a slalom, not a schuss. Each pole is passed on its
+    // outside, away from the piste centre, which is what makes you weave.
+    // The first pole has no flag and counts on either side, so starting
+    // against the line is fine; the rest of the course doesn't change.
+    const first = rnd() < 0.5 ? -1 : 1;
     const poles = [];
     let y = START_PAD;
     for (let i = 0; i < POLE_COUNT; i++) {
-      if (i === 1) y += FIRST_GAP;
-      else if (i > 1) y += POLE_GAP_FIRST + (POLE_GAP_LAST - POLE_GAP_FIRST) * (i - 2) / (POLE_COUNT - 3);
+      if (i > 0) y += POLE_GAP_FIRST + (POLE_GAP_LAST - POLE_GAP_FIRST) * (i - 1) / (POLE_COUNT - 2);
       y = Math.round(y);
-      const first = i === 0;
-      poles.push({
-        y,
-        x: first ? Math.round(centerAt(y)) : null,
-        reach: POLE_OFFSET + rnd() * 4,   // how far off centre, once placed
-        pass: 0,                          // side to pass on; 0 = either
-        red: redPoles.has(i), result: null,
-        fallen: 0,                        // else the direction it fell
-      });
+      const side = i % 2 === 0 ? first : -first;
+      const x = Math.round(centerAt(y) + side * (POLE_OFFSET + rnd() * 4));
+      // pass: side to pass on, 0 = either. fallen: 0 standing, else the
+      // direction it fell (-1 left, 1 right).
+      poles.push({ y, x, side, pass: i === 0 ? 0 : side, red: redPoles.has(i), result: null, fallen: 0 });
     }
     const finishY = y + FINISH_PAD;
+
+    // The racing line: start at the top of the piste, swing past each pole
+    // just outside it, end mid-piste at the finish. Drawn as a worn track
+    // in the snow.
+    const pts = [{ y: 0, x: centerAt(0) }]
+      .concat(poles.map(p => ({ y: p.y, x: p.x + p.side * LINE_WIDE })))
+      .concat([{ y: finishY, x: centerAt(finishY) }]);
+    const lineAt = (wy) => {
+      if (wy <= 0) return pts[0].x;
+      for (let k = 1; k < pts.length; k++) {
+        if (wy <= pts[k].y) {
+          const a = pts[k - 1], b = pts[k];
+          const t = (1 - Math.cos(Math.PI * (wy - a.y) / (b.y - a.y))) / 2;
+          return a.x + (b.x - a.x) * t;
+        }
+      }
+      return pts[pts.length - 1].x;
+    };
+
     // Mixed into tree placement, so each seed gets its own forest.
     const salt = Math.floor(seed / 4096) % 1000003;
-    course = { seed, centerAt, poles, finishY, salt, pts: null };
-    course.lineAt = wy => lineAt(course, wy);
+    course = { seed, centerAt, lineAt, poles, finishY, salt };
     snowRows.clear();            // cached rows belong to the previous slope
-  }
-
-  // The player passed the first pole on `side`: place and flag the rest,
-  // alternating from there, and lay the racing line through them.
-  function chooseFirstSide(side) {
-    const { poles, centerAt, finishY } = course;
-    for (let i = 1; i < POLE_COUNT; i++) {
-      const p = poles[i];
-      p.pass = i % 2 === 0 ? side : -side;
-      p.x = Math.round(centerAt(p.y) + p.pass * p.reach);
-    }
-    // The racing line: start at the top of the piste, swing past each pole
-    // just outside it on the flag side, end mid-piste at the finish. Drawn
-    // as a worn track in the snow.
-    course.pts = [{ y: 0, x: centerAt(0) }]
-      .concat(poles.map((p, i) => ({ y: p.y, x: p.x + (i ? p.pass : side) * LINE_WIDE })))
-      .concat([{ y: finishY, x: centerAt(finishY) }]);
-    snowRows.clear();            // rows on screen now carry the line
-  }
-
-  // Before the first choice the line only leads toward the first pole.
-  function lineAt(c, wy) {
-    const pts = c.pts;
-    if (!pts) return wy < c.poles[0].y - 16 ? c.centerAt(wy) : null;
-    if (wy <= 0) return pts[0].x;
-    for (let k = 1; k < pts.length; k++) {
-      if (wy <= pts[k].y) {
-        const a = pts[k - 1], b = pts[k];
-        const t = (1 - Math.cos(Math.PI * (wy - a.y) / (b.y - a.y))) / 2;
-        return a.x + (b.x - a.x) * t;
-      }
-    }
-    return pts[pts.length - 1].x;
   }
 
   // ------------------------------------------------------------ supabase io
@@ -572,7 +551,6 @@
     while (nextPole < POLE_COUNT && course.poles[nextPole].y <= skierY) {
       const p = course.poles[nextPole];
       if (Math.abs(skierX - p.x) <= CLIP) p.fallen = skierX < p.x ? 1 : -1;
-      if (nextPole === 0) chooseFirstSide(skierX >= p.x ? 1 : -1);
       resolvePole((skierX - p.x) * p.pass >= 0);
     }
 
@@ -881,7 +859,6 @@
 
     if (course) {
       for (const p of course.poles) {
-        if (p.x === null) continue;      // not placed until the first choice
         const sy = p.y - camY;
         if (sy > -4 && sy < H + 10) drawPole(p, sy);
       }
