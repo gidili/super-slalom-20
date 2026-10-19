@@ -14,14 +14,17 @@
 --      seed is stored with the session, which keeps any submitted run
 --      reproducible if a score ever needs auditing.
 --
--- The score is a TIME in centiseconds and lower is better:
+-- The score is POINTS and higher is better. It comes from the final time
+-- in centiseconds:
 --   final_cs = time_cs + missed * 300 - reds * 150
+--   score    = greatest(0, 10000 - final_cs)
 -- time_cs is in turn checked against the server's own elapsed.
 
 -- ---------------------------------------------------------------- constants
--- Kept in sync by hand with game.js: POLE_COUNT, RED_COUNT, MALUS_CS, BONUS_CS.
--- 20 poles, 4 of them red; a missed pole costs 3.00s; a red pole cleared
--- saves 1.50s.
+-- Kept in sync by hand with game.js: POLE_COUNT, RED_COUNT, MALUS_CS,
+-- BONUS_CS, POINTS_BASE. 20 poles, 4 of them red; a missed pole costs
+-- 3.00s; a red pole cleared saves 1.50s; the score is 10000 less the final
+-- time in centiseconds.
 
 -- ---------------------------------------------------------------- sessions
 
@@ -44,7 +47,7 @@ create index if not exists slalom_sessions_started_at_idx on slalom_sessions (st
 create table if not exists slalom_scores (
   id         uuid primary key default gen_random_uuid(),
   initials   text not null,
-  score      int  not null,          -- final time, centiseconds; LOWER wins
+  score      int  not null,          -- points; HIGHER wins
   payload    jsonb not null,
   created_at timestamptz not null default now()
 );
@@ -57,9 +60,9 @@ create policy slalom_scores_public_read
   to anon, authenticated
   using (true);
 
--- Ascending: fastest time first. The opposite of snake-bit's index.
+-- Highest first, ties to whoever got there first.
 create index if not exists slalom_scores_leaderboard_idx
-  on slalom_scores (score asc, created_at asc);
+  on slalom_scores (score desc, created_at asc);
 
 -- --------------------------------------------------------------- functions
 
@@ -93,6 +96,7 @@ declare
   v_missed   int;
   v_reds     int;
   v_time_cs  int;
+  v_final    int;
   v_expected int;
   v_started  timestamptz;
   v_ended    timestamptz;
@@ -135,9 +139,10 @@ begin
 
   if length(coalesce(v_initials, '')) <> 3 then raise exception '%', v_msg; end if;
 
-  v_expected := v_time_cs + v_missed * 300 - v_reds * 150;
+  v_final := v_time_cs + v_missed * 300 - v_reds * 150;
+  if v_final <= 0 then raise exception '%', v_msg; end if;
+  v_expected := greatest(0, 10000 - v_final);
   if v_score <> v_expected then raise exception '%', v_msg; end if;
-  if v_score <= 0         then raise exception '%', v_msg; end if;
 
   insert into slalom_scores (initials, score, payload)
   values (v_initials, v_score, p_payload)

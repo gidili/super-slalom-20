@@ -25,6 +25,9 @@
   const RED_COUNT = 4;         // every course has exactly this many red poles
   const MALUS_CS = 300;        // missed pole: +3.00s
   const BONUS_CS = 150;        // red pole cleared: -1.50s
+  // The score is points, higher wins: POINTS_BASE less the final time in
+  // centiseconds, never below zero. Also hard-coded in slalom_submit_score.
+  const POINTS_BASE = 10000;
 
   // One pole per turn, real-slalom style: the flag points to the side you
   // pass on, and the sides alternate down the course.
@@ -36,7 +39,10 @@
   const LINE_WIDE = 6;         // the worn line passes this far outside a pole
   const LINE_HW = 3;           // ...and is this wide either side
   const START_PAD = 120;
-  const FINISH_PAD = 90;
+  const FINISH_PAD = 120;      // after the last pole
+  // Near the end the slope stops scrolling with the finish line this far
+  // down the screen, and the skier runs down to it. Past the last pole.
+  const FINISH_ROW = 140;
   const PATH_HW = 40;          // groomed piste, half width
 
   // Off the piste, "depth" runs from 0 at the piste edge to 1 at the screen
@@ -49,6 +55,13 @@
   // Wooden fences lie across the fresh snow, closing off some shortcuts.
   const FENCE_SLOT = 40;       // at most one fence per side per this many rows
   const FENCE_CHANCE = 0.3;
+  const INTRUDE_CHANCE = 1 / 3; // ...of which this many reach into the piste
+  const INTRUDE_MAX = 15;      // ...by up to this much
+  const PISTE_TREE = 0.015;    // chance per cell of a tree on the piste itself
+  // Anything deadly on the piste stays this far from the racing line, and
+  // this far from a pole, so the ideal line is always open.
+  const CLEAR_LINE = 24;
+  const CLEAR_POLE = 9;
   // Tuned for about 3-4 pineapples a run, nearly all close to the piste.
   const PINE_ZONE = 0.4;       // "near the piste": depth below this
   const PINE_NEAR = 1 / 50;
@@ -58,7 +71,9 @@
   const DOWN_SPEED = 72;       // px/s straight down on the piste
   const CARVE_FACTOR = 0.82;   // steering costs a little speed
   const TUCK_BONUS = 0.25;     // extra speed after holding a straight line...
-  const TUCK_RAMP = 0.9;       // ...reached over this many seconds
+  const TUCK_RAMP = 0.9;       // ...reached over this many seconds,
+  const TUCK_EXTRA = 0.2;      // ...then this much more if you keep going
+  const TUCK_EXTRA_RAMP = 1.6; // ...over this many seconds after that
   const ACCEL_RATE = 1.5;      // speeding up is gradual
   const DECEL_RATE = 3;        // slowing down is quicker
   const LATERAL = 56;          // px/s sideways while steering
@@ -173,7 +188,7 @@
   canvas.width = W; canvas.height = H;
   const img = ctx.createImageData(W, H);
 
-  const timeEl = document.getElementById('hud-time');
+  const scoreEl = document.getElementById('hud-score');
   const poleEl = document.getElementById('hud-pole');
   const missEl = document.getElementById('hud-miss');
   const redEl = document.getElementById('hud-red');
@@ -323,6 +338,24 @@
       osc.connect(g); g.connect(master); osc.start(t); osc.stop(t + 0.26);
     }
 
+    // Crossing the line: a quick rising arpeggio, then the chord held.
+    function playFanfare() {
+      if (!ac) return;
+      const t = ac.currentTime;
+      const note = (f, at, len, vol, type) => {
+        const o = ac.createOscillator(), g = ac.createGain();
+        o.type = type; o.frequency.value = f;
+        g.gain.setValueAtTime(vol, at);
+        g.gain.exponentialRampToValueAtTime(0.001, at + len);
+        o.connect(g); g.connect(master); o.start(at); o.stop(at + len + 0.01);
+      };
+      const C = [523.25, 659.25, 783.99, 1046.5];       // C5 E5 G5 C6
+      C.forEach((f, i) => note(f, t + i * 0.09, 0.08, 0.12, 'square'));
+      const held = t + 0.36;
+      C.forEach(f => note(f, held, 0.7, 0.05, 'square'));
+      note(130.81, held, 0.7, 0.14, 'triangle');      // C3 underneath
+    }
+
     function toggleMute() {
       muted = !muted;
       try { localStorage.setItem('slalom_muted', muted ? '1' : '0'); } catch (_) {}
@@ -336,7 +369,7 @@
     return {
       unlock: safe(unlock), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
       stopSwoosh: safe(stopSwoosh), playDash: safe(playDash), playBreak: safe(playBreak),
-      playExplosion: safe(playExplosion), toggleMute: safe(toggleMute),
+      playExplosion: safe(playExplosion), playFanfare: safe(playFanfare), toggleMute: safe(toggleMute),
     };
   })();
 
@@ -374,6 +407,7 @@
     Math.round(((runEnd !== null ? runEnd : performance.now()) - runStart) / 10);
 
   const finalCs = () => runCs() + missed * MALUS_CS - reds * BONUS_CS;
+  const points = () => Math.max(0, POINTS_BASE - finalCs());
 
   const fmt = cs => {
     const neg = cs < 0; cs = Math.abs(cs);
@@ -442,9 +476,26 @@
     state = 'finished';
     mode = 'down';
     SFX.stopSwoosh();
+    SFX.playFanfare();
     runEnd = performance.now();
     closeSession();
-    setTimeout(() => showOverlay(true), 500);
+    // Time to glide to a stop past the line before the card comes up.
+    setTimeout(() => showOverlay(true), 1100);
+  }
+
+  // Past the line: coast to a stop, still on screen.
+  function glide(dt) {
+    const k = Math.exp(-6 * dt);
+    speed *= k; vx *= k;
+    skierY = Math.min(skierY + speed * dt, course.finishY + 12);
+    skierX = Math.max(2, Math.min(W - 3, skierX + vx * dt));
+  }
+
+  // The camera follows the skier until the finish line is FINISH_ROW down
+  // the screen, then holds still and lets the skier run down to it.
+  function cameraTop() {
+    if (!course) return -SKIER_Y;
+    return Math.floor(Math.min(skierY - SKIER_Y, course.finishY - FINISH_ROW));
   }
 
   function resolvePole(through) {
@@ -452,10 +503,10 @@
     p.result = through ? 'pass' : 'miss';
     if (through) {
       passed++;
-      if (p.red) { reds++; flash('RED  -1.50'); }
+      if (p.red) { reds++; flash(`RED  +${BONUS_CS}`); }
     } else {
       missed++;
-      flash('MISS +3.00');
+      flash(`MISS -${MALUS_CS}`);
     }
     nextPole++;
     paintHud();
@@ -527,12 +578,13 @@
     const hit = hitTree(skierX, skierY) || hitFence(skierX, skierY);
     if (hit) { crash(hit); return; }
 
-    // Holding a straight line builds a little speed back after a turn;
-    // any steering cancels it.
+    // Holding a straight line builds speed: quickly at first, then more
+    // the longer you hold it. Any steering cancels it.
     straightFor = steering ? 0 : straightFor + dt;
     const tuck = steering
       ? CARVE_FACTOR
-      : 1 + TUCK_BONUS * Math.min(1, straightFor / TUCK_RAMP);
+      : 1 + TUCK_BONUS * Math.min(1, straightFor / TUCK_RAMP)
+          + TUCK_EXTRA * Math.max(0, Math.min(1, (straightFor - TUCK_RAMP) / TUCK_EXTRA_RAMP));
 
     // Fresh snow: drag grows with depth, the same depth the speckle shows.
     const depth = snowDepth(skierX, course.centerAt(skierY), skierY);
@@ -598,9 +650,13 @@
     const x = i * TREE_CELL + 2 + Math.floor(hash(i * 7 + salt, j * 3 + 1) * (TREE_CELL - 4));
     const y = j * TREE_CELL + 2 + Math.floor(hash(i * 5 + salt, j * 11 + 7) * (TREE_CELL - 4));
     const depth = snowDepth(x, centerAt(y), y);
-    if (depth <= 0) return null;
-    const chance = TREE_EDGE + (TREE_MAX - TREE_EDGE) * depth;
-    if (hash(i * 92821 + salt, j) >= chance) return null;
+    if (depth <= 0) {
+      // The odd tree on the piste itself, never on the racing line.
+      if (hash(i * 92821 + salt, j) >= PISTE_TREE || !lineIsClear(x, y)) return null;
+    } else {
+      const chance = TREE_EDGE + (TREE_MAX - TREE_EDGE) * depth;
+      if (hash(i * 92821 + salt, j) >= chance) return null;
+    }
     // Keep clear of fences, so the two never overlap.
     const side = x < centerAt(y) ? -1 : 1, k = Math.floor(y / FENCE_SLOT);
     for (let kk = k - 1; kk <= k + 1; kk++) {
@@ -613,17 +669,43 @@
     return { i, j, x, y, pine };
   }
 
-  // A fence piece lying across the fresh snow on one side of the piste:
-  // world row y, from x0 to x1. Placed by hash per slot, like the trees.
+  // True if something deadly at (x, y) leaves the racing line and the
+  // poles open. Only a course has a line; the title slope keeps its piste
+  // clear. The margin is generous because the line swings faster than a
+  // skier can steer at speed, so anyone following it runs a little wide.
+  function lineIsClear(x, y) {
+    // Nothing on the piste until past the first pole, which counts on
+    // either side, nor in the run-in after the last, where you run
+    // straight on from wherever that pole left you.
+    if (!course || y < START_PAD + 30 || y > course.poles[POLE_COUNT - 1].y - 10) return false;
+    if (Math.abs(x - course.lineAt(y)) < CLEAR_LINE) return false;
+    for (const p of course.poles) {
+      if (Math.abs(p.y - y) <= 12 && Math.abs(x - p.x) < CLEAR_POLE) return false;
+    }
+    return true;
+  }
+
+  // A fence piece lying across the snow on one side of the piste: world
+  // row y, from x0 to x1. Placed by hash per slot, like the trees. Most
+  // start out in the fresh snow; some reach into the piste, but stop short
+  // of the racing line.
   function fenceAt(k, side, salt, centerAt) {
     if (hash(k * 613 + salt, side + 71) >= FENCE_CHANCE) return null;
     const y = k * FENCE_SLOT + Math.floor(hash(k * 37 + salt, side + 5) * (FENCE_SLOT - 8));
-    const edge = centerAt(y) + side * (PATH_HW + EDGE_WOBBLE);
-    const room = side < 0 ? edge : W - edge;
+    const c = centerAt(y);
     const len = 12 + Math.floor(hash(k * 91 + salt, side + 13) * 18);
-    if (room < len + 8) return null;
-    const start = 4 + Math.floor(hash(k * 53 + salt, side + 29) * (room - len - 4));
-    const a = Math.round(edge + side * start), b = a + side * len;
+    let a;
+    if (course && hash(k * 17 + salt, side + 41) < INTRUDE_CHANCE) {
+      a = Math.round(c + side * (PATH_HW - 4 - hash(k * 23 + salt, side + 3) * (INTRUDE_MAX - 4)));
+      // The line runs inside the piste edge, so backing out reaches clear.
+      while (!lineIsClear(a, y) && Math.abs(a - c) < PATH_HW + EDGE_WOBBLE) a += side;
+    } else {
+      const edge = c + side * (PATH_HW + EDGE_WOBBLE);
+      const room = side < 0 ? edge : W - edge;
+      if (room < len + 8) return null;
+      a = Math.round(edge + side * (4 + Math.floor(hash(k * 53 + salt, side + 29) * (room - len - 4))));
+    }
+    const b = Math.max(0, Math.min(W - 1, a + side * len));
     return { y, x0: Math.min(a, b), x1: Math.max(a, b) };
   }
 
@@ -823,7 +905,7 @@
   }
 
   function render() {
-    const camY = Math.floor((course ? skierY : 0) - SKIER_Y);
+    const camY = cameraTop();
     const centerAt = course ? course.centerAt : titleCenter;
 
     const lineAt = course ? course.lineAt : null;
@@ -875,7 +957,7 @@
       if (state !== 'title') {
         const s = SPRITES[mode] || SPRITES.down;
         // Sprites differ in height; they all stand on the same row.
-        blit(s, Math.round(skierX) - 3, SKIER_Y + 5 - s.length, VIC.black);
+        blit(s, Math.round(skierX) - 3, Math.round(skierY) - camY + 5 - s.length, VIC.black);
       }
       for (const p of particles) {
         const px = Math.round(p.x), py = Math.round(p.y - camY);
@@ -901,7 +983,7 @@
   }
 
   function paintHud() {
-    timeEl.textContent = state === 'title' ? '0.00' : fmt(runCs());
+    scoreEl.textContent = state === 'title' ? POINTS_BASE : points();
     poleEl.textContent = `${Math.min(nextPole || 0, POLE_COUNT)}/${POLE_COUNT}`;
     missEl.textContent = missed || 0;
     redEl.textContent = reds || 0;
@@ -916,9 +998,10 @@
         `<div><span>RUN</span><span>${fmt(runCs())}</span></div>` +
         `<div><span>MISSED ${missed} x 3.00</span><span>+${fmt(missed * MALUS_CS)}</span></div>` +
         `<div><span>RED ${reds} x 1.50</span><span>-${fmt(reds * BONUS_CS)}</span></div>` +
-        `<div class="total"><span>TIME</span><span>${fmt(finalCs())}</span></div>`;
+        `<div><span>TIME</span><span>${fmt(finalCs())}</span></div>` +
+        `<div class="total"><span>SCORE</span><span>${points()}</span></div>`;
     } else {
-      breakdownEl.innerHTML = `<div class="center">INTO THE ${hitWhat}. NO TIME.</div>`;
+      breakdownEl.innerHTML = `<div class="center">INTO THE ${hitWhat}. NO SCORE.</div>`;
     }
     // Only a finished, ranked run can be submitted.
     submitFormEl.hidden = !(finished && sessionId);
@@ -935,15 +1018,15 @@
     const { data, error } = await juicer
       .from('slalom_scores')
       .select('id, initials, score')
-      .order('score', { ascending: true })        // fastest first
+      .order('score', { ascending: false })       // highest first
       .order('created_at', { ascending: true })
       .limit(10);
     if (error) { leaderboardListEl.textContent = 'UNAVAILABLE'; return; }
     leaderboardListEl.innerHTML = '';
-    if (!data.length) { leaderboardListEl.textContent = 'NO TIMES YET'; return; }
+    if (!data.length) { leaderboardListEl.textContent = 'NO SCORES YET'; return; }
     data.forEach((row, i) => {
       const li = document.createElement('li');
-      li.textContent = `${String(i + 1).padStart(2, '0')}  ${row.initials}  ${fmt(row.score).padStart(6, ' ')}`;
+      li.textContent = `${String(i + 1).padStart(2, '0')}  ${row.initials}  ${String(row.score).padStart(5, ' ')}`;
       leaderboardListEl.appendChild(li);
     });
   }
@@ -969,7 +1052,7 @@
       p_session: sessionId,
       p_payload: {
         initials: raw.padEnd(3, '-'),
-        score: finalCs(),
+        score: points(),
         time_cs: runCs(),
         passed, missed, reds,
       },
@@ -1006,6 +1089,7 @@
       while (acc >= STEP && state === 'running') { step(STEP); acc -= STEP; }
     } else {
       acc = 0;
+      if (state === 'finished') glide(Math.min(dt, 0.05));
     }
     if (state === 'running') {
       SFX.updateSwoosh(speed / DOWN_SPEED, snowDepth(skierX, course.centerAt(skierY), skierY), heading !== 'down');
