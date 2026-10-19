@@ -7,8 +7,8 @@ Play: (not deployed yet)
 
 ## The run
 
-- **Twenty gates.** Ski between each pair of blue poles. Miss one and it costs you **3 seconds**.
-- **Red gates are a gift.** Take one and **1.5 seconds** come off your time.
+- **Twenty poles.** Each one has a little flag pointing to the side you pass it on, and the sides alternate, so you weave down the hill. Pass on the wrong side, or skip it, and it costs you **3 seconds**. Clip a pole on the right side and it goes down, but it still counts.
+- **Red poles are a gift.** Clear one and **1.5 seconds** come off your time.
 - **Stay on the piste.** The fresh snow either side slows you down, more the further out you go — you can see it getting deeper. Past it are the trees, and the trees end your run.
 - **Lowest time wins.**
 

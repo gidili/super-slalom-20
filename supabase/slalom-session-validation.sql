@@ -8,8 +8,8 @@
 --
 --   2. The course is SEEDED BY THE SERVER. slalom_start_game() hands back a
 --      seed alongside the session, and the client builds the course from
---      it: shape, and which gates are red. Every course has exactly 20
---      gates and exactly 4 red ones, so the server checks the player's
+--      it: shape, and which poles are red. Every course has exactly 20
+--      poles and exactly 4 red ones, so the server checks the player's
 --      counts against constants rather than rebuilding the course. The
 --      seed is stored with the session, which keeps any submitted run
 --      reproducible if a score ever needs auditing.
@@ -19,8 +19,8 @@
 -- time_cs is in turn checked against the server's own elapsed.
 
 -- ---------------------------------------------------------------- constants
--- Kept in sync by hand with game.js: GATE_COUNT, RED_COUNT, MALUS_CS, BONUS_CS.
--- 20 gates, 4 of them red; a missed gate costs 3.00s; a red gate taken
+-- Kept in sync by hand with game.js: POLE_COUNT, RED_COUNT, MALUS_CS, BONUS_CS.
+-- 20 poles, 4 of them red; a missed pole costs 3.00s; a red pole cleared
 -- saves 1.50s.
 
 -- ---------------------------------------------------------------- sessions
@@ -125,12 +125,12 @@ begin
   -- directions: start/end each cost one network round trip.
   if abs(v_time_cs - v_elapsed_cs) > 400 then raise exception '%', v_msg; end if;
 
-  -- Every gate is either taken or missed, exactly once.
+  -- Every pole is either cleared or missed, exactly once.
   if v_passed < 0 or v_missed < 0       then raise exception '%', v_msg; end if;
   if v_passed + v_missed <> 20          then raise exception '%', v_msg; end if;
 
-  -- Every course has exactly 4 red gates, and a red gate only counts if
-  -- it was actually passed through.
+  -- Every course has exactly 4 red poles, and a red pole only counts if
+  -- it was actually cleared.
   if v_reds < 0 or v_reds > 4 or v_reds > v_passed then raise exception '%', v_msg; end if;
 
   if length(coalesce(v_initials, '')) <> 3 then raise exception '%', v_msg; end if;

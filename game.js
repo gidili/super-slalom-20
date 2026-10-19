@@ -17,16 +17,19 @@
   const css = c => `rgb(${c[0]},${c[1]},${c[2]})`;
 
   // ---------------------------------------------------------------- course
-  // GATE_COUNT, RED_COUNT, MALUS_CS and BONUS_CS are also hard-coded in
+  // POLE_COUNT, RED_COUNT, MALUS_CS and BONUS_CS are also hard-coded in
   // slalom_submit_score, which recomputes the final time and rejects any
   // that disagrees. Change both or neither.
-  const GATE_COUNT = 20;
-  const RED_COUNT = 4;         // every course has exactly this many red gates
-  const MALUS_CS = 300;        // missed gate: +3.00s
-  const BONUS_CS = 150;        // red gate taken: -1.50s
+  const POLE_COUNT = 20;
+  const RED_COUNT = 4;         // every course has exactly this many red poles
+  const MALUS_CS = 300;        // missed pole: +3.00s
+  const BONUS_CS = 150;        // red pole cleared: -1.50s
 
-  const GATE_SPACING = 110;    // world px between gates
-  const GATE_HALF = 10;        // half the gap between a gate's two poles
+  // One pole per turn, real-slalom style: the flag points to the side you
+  // pass on, and the sides alternate down the course.
+  const POLE_SPACING = 110;    // world px between poles
+  const POLE_OFFSET = 12;      // how far off the piste centre a pole stands
+  const CLIP = 3;              // this close to a pole knocks it over
   const START_PAD = 120;
   const FINISH_PAD = 90;
   const PATH_HW = 28;          // groomed piste, half width
@@ -49,7 +52,7 @@
   const DEEP_SNOW_DRAG = 0.65; // speed lost at full depth
 
   // The course is deterministic per seed, but the server never rebuilds it:
-  // it only checks counts, which are fixed (GATE_COUNT, RED_COUNT). So the
+  // it only checks counts, which are fixed (POLE_COUNT, RED_COUNT). So the
   // seed is free to drive shape and red positions in any way, as long as it
   // is deterministic, which keeps a reported run auditable later.
   function mulberry32(a) {
@@ -61,12 +64,12 @@
     };
   }
 
-  // Exactly RED_COUNT red gates per course, so every run has the same bonus
+  // Exactly RED_COUNT red poles per course, so every run has the same bonus
   // available and the leaderboard measures skiing, not seed luck. Drawn
   // from their own PRNG stream, so tuning the course shape never moves them.
-  function pickRedGates(seed) {
+  function pickRedPoles(seed) {
     const rnd = mulberry32((seed % 4294967296) ^ 0x5EED);
-    const idx = Array.from({ length: GATE_COUNT }, (_, i) => i);
+    const idx = Array.from({ length: POLE_COUNT }, (_, i) => i);
     for (let i = idx.length - 1; i > 0; i--) {
       const j = Math.floor(rnd() * (i + 1));
       [idx[i], idx[j]] = [idx[j], idx[i]];
@@ -77,24 +80,28 @@
   let course = null;
 
   function buildCourse(seed) {
-    const redGates = pickRedGates(seed);
+    const redPoles = pickRedPoles(seed);
     const rnd = mulberry32(seed % 4294967296);
     const f1 = 0.006 + rnd() * 0.004, p1 = rnd() * Math.PI * 2;
     const f2 = 0.017 + rnd() * 0.008, p2 = rnd() * Math.PI * 2;
     const centerAt = y => W / 2 + 18 * Math.sin(y * f1 + p1) + 10 * Math.sin(y * f2 + p2);
 
-    const gates = [];
-    for (let i = 0; i < GATE_COUNT; i++) {
-      const y = START_PAD + i * GATE_SPACING;
-      // Alternate sides of the piste so the line is a slalom, not a schuss.
-      const side = i % 2 === 0 ? -1 : 1;
-      const x = Math.round(centerAt(y) + side * (PATH_HW * 0.42 + rnd() * 4));
-      gates.push({ y, x, red: redGates.has(i), result: null });
+    // The seed picks the first pole's side; after that they alternate, so
+    // the line is a slalom, not a schuss. Each pole is passed on its
+    // outside, away from the piste centre, which is what makes you weave.
+    const first = rnd() < 0.5 ? -1 : 1;
+    const poles = [];
+    for (let i = 0; i < POLE_COUNT; i++) {
+      const y = START_PAD + i * POLE_SPACING;
+      const side = i % 2 === 0 ? first : -first;
+      const x = Math.round(centerAt(y) + side * (POLE_OFFSET + rnd() * 4));
+      // fallen: 0 standing, else the direction it fell (-1 left, 1 right).
+      poles.push({ y, x, pass: side, red: redPoles.has(i), result: null, fallen: 0 });
     }
-    const finishY = START_PAD + (GATE_COUNT - 1) * GATE_SPACING + FINISH_PAD;
+    const finishY = START_PAD + (POLE_COUNT - 1) * POLE_SPACING + FINISH_PAD;
     // Mixed into tree placement, so each seed gets its own forest.
     const salt = Math.floor(seed / 4096) % 1000003;
-    course = { seed, centerAt, gates, finishY, salt };
+    course = { seed, centerAt, poles, finishY, salt };
     snowRows.clear();            // cached rows belong to the previous slope
   }
 
@@ -128,7 +135,7 @@
   const img = ctx.createImageData(W, H);
 
   const timeEl = document.getElementById('hud-time');
-  const gateEl = document.getElementById('hud-gate');
+  const poleEl = document.getElementById('hud-pole');
   const missEl = document.getElementById('hud-miss');
   const redEl = document.getElementById('hud-red');
   const msgEl = document.getElementById('message');
@@ -149,7 +156,7 @@
   let state = 'title';
   let skierX, skierY, vx, speed, mode;
   let straightFor = 0;         // seconds since the skier last steered
-  let passed, missed, reds, nextGate;
+  let passed, missed, reds, nextPole;
   let runStart = 0, runEnd = null;
   // Snake-style: the skier holds whichever heading was last set, with no
   // need to keep a key down. One heading per skiing sprite.
@@ -207,7 +214,7 @@
     skierX = course.centerAt(0);
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
-    passed = 0; missed = 0; reds = 0; nextGate = 0;
+    passed = 0; missed = 0; reds = 0; nextPole = 0;
     runEnd = null;
     runStart = performance.now();
     // Physics and clock share an origin; nothing before this moment counts.
@@ -227,8 +234,8 @@
   }
 
   function finish() {
-    // Gates not yet resolved can only be ones skipped right before the line.
-    while (nextGate < GATE_COUNT) resolveGate(false);
+    // Poles not yet resolved can only be ones skipped right before the line.
+    while (nextPole < POLE_COUNT) resolvePole(false);
     state = 'finished';
     mode = 'down';
     runEnd = performance.now();
@@ -236,17 +243,17 @@
     setTimeout(() => showOverlay(true), 500);
   }
 
-  function resolveGate(through) {
-    const g = course.gates[nextGate];
-    g.result = through ? 'pass' : 'miss';
+  function resolvePole(through) {
+    const p = course.poles[nextPole];
+    p.result = through ? 'pass' : 'miss';
     if (through) {
       passed++;
-      if (g.red) { reds++; flash('RED  -1.50'); }
+      if (p.red) { reds++; flash('RED  -1.50'); }
     } else {
       missed++;
       flash('MISS +3.00');
     }
-    nextGate++;
+    nextPole++;
     paintHud();
   }
 
@@ -302,10 +309,12 @@
     skierY += speed * dt;
     skierX = Math.max(2, Math.min(W - 3, skierX + vx * dt));
 
-    // A gate is taken when the skier crosses its line between the poles.
-    while (nextGate < GATE_COUNT && course.gates[nextGate].y <= skierY) {
-      const g = course.gates[nextGate];
-      resolveGate(Math.abs(skierX - g.x) < GATE_HALF);
+    // A pole is cleared when the skier crosses its row on the flag side.
+    // Skis that brush it knock it over, which on the right side is fine.
+    while (nextPole < POLE_COUNT && course.poles[nextPole].y <= skierY) {
+      const p = course.poles[nextPole];
+      if (Math.abs(skierX - p.x) <= CLIP) p.fallen = skierX < p.x ? 1 : -1;
+      resolvePole((skierX - p.x) * p.pass >= 0);
     }
 
     if (skierY >= course.finishY) finish();
@@ -429,17 +438,22 @@
     }
   }
 
-  function drawGate(g, sy) {
-    const ink = g.red ? VIC.red : VIC.blue;
-    for (const side of [-1, 1]) {
-      const px = g.x + side * GATE_HALF;
-      for (let k = 0; k < 9; k++) put(px, sy - 8 + k, ink);
-      // A little triangle flag, pointing into the gate.
-      const dir = -side;
-      put(px + dir, sy - 8, ink); put(px + 2 * dir, sy - 8, ink); put(px + 3 * dir, sy - 8, ink);
-      put(px + dir, sy - 7, ink); put(px + 2 * dir, sy - 7, ink);
-      put(px + dir, sy - 6, ink);
+  function drawPole(p, sy) {
+    const ink = p.red ? VIC.red : VIC.blue;
+    if (p.fallen) {
+      // Knocked flat, lying away from the skis that hit it, flag at the tip.
+      const d = p.fallen;
+      for (let k = 0; k < 9; k++) put(p.x + d * k, sy - (k >> 2), ink);
+      const tx = p.x + d * 8;
+      put(tx, sy - 3, ink); put(tx - d, sy - 3, ink); put(tx - d, sy - 4, ink);
+      return;
     }
+    for (let k = 0; k < 9; k++) put(p.x, sy - 8 + k, ink);
+    // A little triangle flag, pointing to the side you pass on.
+    const d = p.pass;
+    put(p.x + d, sy - 8, ink); put(p.x + 2 * d, sy - 8, ink); put(p.x + 3 * d, sy - 8, ink);
+    put(p.x + d, sy - 7, ink); put(p.x + 2 * d, sy - 7, ink);
+    put(p.x + d, sy - 6, ink);
   }
 
   // A row of slope always looks the same, so each one is computed once, on
@@ -493,9 +507,9 @@
     }
 
     if (course) {
-      for (const g of course.gates) {
-        const sy = g.y - camY;
-        if (sy > -4 && sy < H + 10) drawGate(g, sy);
+      for (const p of course.poles) {
+        const sy = p.y - camY;
+        if (sy > -4 && sy < H + 10) drawPole(p, sy);
       }
       // Finish line: red/black checker across the piste.
       const fy = course.finishY - camY;
@@ -525,7 +539,7 @@
 
   function paintHud() {
     timeEl.textContent = state === 'title' ? '0.00' : fmt(runCs());
-    gateEl.textContent = `${Math.min(nextGate || 0, GATE_COUNT)}/${GATE_COUNT}`;
+    poleEl.textContent = `${Math.min(nextPole || 0, POLE_COUNT)}/${POLE_COUNT}`;
     missEl.textContent = missed || 0;
     redEl.textContent = reds || 0;
   }
