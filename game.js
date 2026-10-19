@@ -733,7 +733,10 @@
     for (let j = j0; j <= j1; j++) {
       for (let i = i0; i <= i1; i++) {
         const tr = treeAt(i, j, salt, centerAt);
-        if (tr && Math.abs(x - tr.x) <= 4 && y >= tr.y - 8 && y <= tr.y + 2) return tr;
+        if (!tr) continue;
+        // A pineapple is two pixels shorter and narrower than a tree.
+        const reach = tr.pine ? 3 : 4, top = tr.pine ? 6 : 8;
+        if (Math.abs(x - tr.x) <= reach && y >= tr.y - top && y <= tr.y + 2) return tr;
       }
     }
     return null;
@@ -790,16 +793,18 @@
     '...O...',
   ];
 
-  // snake-bit's pineapple, cut down to tree size in VIC colours.
+  // snake-bit's pineapple in VIC colours, smaller than a tree.
   const PINEAPPLE = [
-    '.G.G.G.',
-    '..GGG..',
-    '...G...',
-    '.YOYOY.',
-    'YOYOYOY',
-    'OYOYOYO',
-    '.YOYOY.',
+    '.GGG.',
+    '..G..',
+    'YOYOY',
+    'OYOYO',
+    '.YOY.',
   ];
+
+  // The title slope always shows one, in the sparse trees left of the
+  // piste and below the title text. World coordinates, title camera.
+  const TITLE_PINE = { x: 58, y: 130 - SKIER_Y };
 
   // X takes the ink passed in; the other letters are fixed colours.
   const INKS = { O: VIC.orange, G: VIC.green, Y: VIC.yellow };
@@ -920,10 +925,13 @@
       for (let i = 0; i < iMax; i++) {
         const tr = treeAt(i, j, salt, centerAt);
         if (!tr) continue;
+        if (!course && Math.abs(tr.x - TITLE_PINE.x) < 9 && Math.abs(tr.y - TITLE_PINE.y) < 10) continue;
         if (!tr.pine) blit(TREE, tr.x - 3, tr.y - camY - 6, VIC.green);
-        else if (!exploded.has(i + ',' + j)) blit(PINEAPPLE, tr.x - 3, tr.y - camY - 6);
+        else if (!exploded.has(i + ',' + j)) blit(PINEAPPLE, tr.x - 2, tr.y - camY - 4);
       }
     }
+
+    if (!course) blit(PINEAPPLE, TITLE_PINE.x - 2, TITLE_PINE.y - camY - 4);
 
     // Fences: a post every third pixel, a rail between.
     const k0 = Math.floor(camY / FENCE_SLOT) - 1, k1 = Math.floor((camY + H) / FENCE_SLOT) + 1;
