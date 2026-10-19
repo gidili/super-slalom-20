@@ -188,7 +188,6 @@
   let straightFor = 0;         // seconds since the skier last steered
   let passed, missed, reds, nextPole;
   let runStart = 0, runEnd = null;
-  let cause = null;            // what ended a crashed run: 'tree' | 'pine'
   let exploded = new Set();    // pineapples already blown up, by cell
   let particles = [];
   // Turn while a key is held, straighten when it's let go. The newest
@@ -398,7 +397,7 @@
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     held = []; tapLeft = 0;
-    cause = null; exploded = new Set(); particles = [];
+    exploded = new Set(); particles = [];
     passed = 0; missed = 0; reds = 0; nextPole = 0;
     runEnd = null;
     runStart = performance.now();
@@ -415,7 +414,6 @@
     state = 'crashed';
     mode = 'crash';
     runEnd = performance.now();
-    cause = hit.pine ? 'pine' : 'tree';
     SFX.stopSwoosh();
     if (hit.pine) SFX.playExplosion(); else SFX.playBreak();
     if (hit.pine) {
@@ -853,9 +851,7 @@
         `<div><span>RED ${reds} x 1.50</span><span>-${fmt(reds * BONUS_CS)}</span></div>` +
         `<div class="total"><span>TIME</span><span>${fmt(finalCs())}</span></div>`;
     } else {
-      breakdownEl.innerHTML = cause === 'pine'
-        ? '<div class="center">KABOOM. A PINEAPPLE. NO TIME.</div>'
-        : '<div class="center">INTO THE TREES. NO TIME.</div>';
+      breakdownEl.innerHTML = '<div class="center">INTO THE TREES. NO TIME.</div>';
     }
     // Only a finished, ranked run can be submitted.
     submitFormEl.hidden = !(finished && sessionId);
