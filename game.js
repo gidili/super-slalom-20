@@ -28,12 +28,16 @@
 
   // One pole per turn, real-slalom style: the flag points to the side you
   // pass on, and the sides alternate down the course.
-  const POLE_SPACING = 110;    // world px between poles
+  // The gaps shrink down the course, so the end is the hard part.
+  const POLE_GAP_FIRST = 95;   // world px between the first two poles
+  const POLE_GAP_LAST = 65;    // ...and the last two
   const POLE_OFFSET = 12;      // how far off the piste centre a pole stands
   const CLIP = 3;              // this close to a pole knocks it over
+  const LINE_WIDE = 6;         // the worn line passes this far outside a pole
+  const LINE_HW = 3;           // ...and is this wide either side
   const START_PAD = 120;
   const FINISH_PAD = 90;
-  const PATH_HW = 28;          // groomed piste, half width
+  const PATH_HW = 40;          // groomed piste, half width
 
   // Off the piste, "depth" runs from 0 at the piste edge to 1 at the screen
   // edge on that side. It drives the light-blue speckle, the drag, and how
@@ -41,15 +45,15 @@
   const TREE_CELL = 12;        // trees are placed at most one per cell
   const TREE_CLEAR = 0.3;      // no trees at all this close to the piste
   const TREE_MAX = 0.6;        // chance of a tree per cell at the screen edge
-  // A course has about 536 trees, so this is roughly one or two pineapples
+  // A course has about 360 trees, so this is roughly one or two pineapples
   // a run, and no pineapple at all about one run in five.
-  const PINE_CHANCE = 1 / 360;
+  const PINE_CHANCE = 1 / 240;
 
   const SKIER_Y = 48;          // skier's fixed screen row
   const DOWN_SPEED = 72;       // px/s straight down on the piste
   const CARVE_FACTOR = 0.82;   // steering costs a little speed
-  const TUCK_BONUS = 0.12;     // extra speed after holding a straight line...
-  const TUCK_RAMP = 1.2;       // ...reached over this many seconds
+  const TUCK_BONUS = 0.25;     // extra speed after holding a straight line...
+  const TUCK_RAMP = 0.9;       // ...reached over this many seconds
   const ACCEL_RATE = 1.5;      // speeding up is gradual
   const DECEL_RATE = 3;        // slowing down is quicker
   const LATERAL = 56;          // px/s sideways while steering
@@ -96,17 +100,38 @@
     // outside, away from the piste centre, which is what makes you weave.
     const first = rnd() < 0.5 ? -1 : 1;
     const poles = [];
+    let y = START_PAD;
     for (let i = 0; i < POLE_COUNT; i++) {
-      const y = START_PAD + i * POLE_SPACING;
+      if (i > 0) y += POLE_GAP_FIRST + (POLE_GAP_LAST - POLE_GAP_FIRST) * (i - 1) / (POLE_COUNT - 2);
+      y = Math.round(y);
       const side = i % 2 === 0 ? first : -first;
       const x = Math.round(centerAt(y) + side * (POLE_OFFSET + rnd() * 4));
       // fallen: 0 standing, else the direction it fell (-1 left, 1 right).
       poles.push({ y, x, pass: side, red: redPoles.has(i), result: null, fallen: 0 });
     }
-    const finishY = START_PAD + (POLE_COUNT - 1) * POLE_SPACING + FINISH_PAD;
+    const finishY = y + FINISH_PAD;
+
+    // The racing line: start at the top of the piste, swing past each pole
+    // just outside it on the flag side, end mid-piste at the finish. Drawn
+    // as a worn track in the snow.
+    const pts = [{ y: 0, x: centerAt(0) }]
+      .concat(poles.map(p => ({ y: p.y, x: p.x + p.pass * LINE_WIDE })))
+      .concat([{ y: finishY, x: centerAt(finishY) }]);
+    const lineAt = (wy) => {
+      if (wy <= 0) return pts[0].x;
+      for (let k = 1; k < pts.length; k++) {
+        if (wy <= pts[k].y) {
+          const a = pts[k - 1], b = pts[k];
+          const t = (1 - Math.cos(Math.PI * (wy - a.y) / (b.y - a.y))) / 2;
+          return a.x + (b.x - a.x) * t;
+        }
+      }
+      return pts[pts.length - 1].x;
+    };
+
     // Mixed into tree placement, so each seed gets its own forest.
     const salt = Math.floor(seed / 4096) % 1000003;
-    course = { seed, centerAt, poles, finishY, salt };
+    course = { seed, centerAt, lineAt, poles, finishY, salt };
     snowRows.clear();            // cached rows belong to the previous slope
   }
 
@@ -347,6 +372,20 @@
   };
 
   // ---------------------------------------------------------------- flow
+  // After a run, back to an empty slope that waits for Space. The session
+  // still opens on that press, not here: its clock must not include the
+  // time spent waiting.
+  function toTitle() {
+    state = 'title';
+    course = null;
+    particles = [];
+    snowRows.clear();
+    overlayEl.hidden = true;
+    passed = 0; missed = 0; reds = 0; nextPole = 0;
+    msgEl.textContent = 'PRESS SPACE';
+    paintHud();
+  }
+
   async function startRun() {
     if (state === 'starting' || state === 'running') return;
     state = 'starting';
@@ -441,7 +480,8 @@
     else if (e.key === 'm' || e.key === 'M') flash(SFX.toggleMute() ? 'SOUND OFF' : 'SOUND ON');
     else if (GO.has(e.key)) {
       e.preventDefault();
-      if (state === 'title' || (overlayEl.hidden === false && state !== 'running')) startRun();
+      if (state === 'title') startRun();
+      else if (overlayEl.hidden === false && (state === 'crashed' || state === 'finished')) toTitle();
     }
   });
   window.addEventListener('keyup', (e) => release('k' + e.key.toLowerCase()));
@@ -576,14 +616,13 @@
 
   // 1 = ink. Each 7 wide, drawn centred on the skier.
   const SPRITES = {
+    // Running straight: tucked, poles trailing back uphill.
     down: [
-      '...X...',
+      'X.....X',
+      '.X.X.X.',
       '..XXX..',
-      '...X...',
-      '.XXXXX.',
-      'X.XXX.X',
-      '..X.X..',
-      '..X.X..',
+      '..XXX..',
+      '.X.X.X.',
       '..X.X..',
       '..X.X..',
     ],
@@ -609,13 +648,14 @@
   };
   SPRITES.left = SPRITES.right.map(r => r.split('').reverse().join(''));
 
+  // The VIC-20 has no dark green, so the needles are dithered with black.
   const TREE = [
     '...X...',
-    '..XXX..',
-    '.XXXXX.',
-    '..XXX..',
-    '.XXXXX.',
-    'XXXXXXX',
+    '..XKX..',
+    '.XKXKX.',
+    '..XKX..',
+    '.XKXKX.',
+    'XKXKXKX',
     '...O...',
   ];
 
@@ -631,7 +671,7 @@
   ];
 
   // X takes the ink passed in; the other letters are fixed colours.
-  const INKS = { O: VIC.orange, G: VIC.green, Y: VIC.yellow };
+  const INKS = { O: VIC.orange, G: VIC.green, Y: VIC.yellow, K: VIC.black };
 
   function blit(rows, x0, y0, ink) {
     for (let r = 0; r < rows.length; r++) {
@@ -700,20 +740,25 @@
   const snowRows = new Map();
   const titleCenter = () => W / 2;
 
-  function snowRow(wy, centerAt) {
+  function snowRow(wy, centerAt, lineAt) {
     let row = snowRows.get(wy);
     if (row) return row;
     row = new Uint8ClampedArray(W * 4);
     const c = centerAt(wy);
+    const line = lineAt ? lineAt(wy) : null;
     for (let sx = 0; sx < W; sx++) {
       let col = VIC.white;
       const depth = snowDepth(sx, c);
-      if (depth > 0) {
-        // Light blue speckle: rises gently with depth, pushed around by
-        // drift noise that fades out as depth reaches 1, so the margin
-        // still ends solid blue.
+      // The worn line: packed snow along the racing line, speckled cyan
+      // (the VIC-20 has no grey), densest in the middle of the track.
+      const off = line === null ? Infinity : Math.abs(sx - line);
+      if (off <= LINE_HW && hash(sx + 977, wy + 31) < (off <= 1 ? 0.5 : 0.25)) col = VIC.cyan;
+      else if (depth > 0) {
+        // Light blue speckle: sparse near the piste and rising steeply
+        // toward the margin, pushed around by drift noise that fades out
+        // as depth reaches 1, so the margin still ends solid blue.
         const drift = (noise2(sx / 13, wy / 13) - 0.5) * 0.7 * (1 - depth);
-        const density = Math.max(0, Math.min(1, depth ** 1.25 + drift));
+        const density = Math.max(0, Math.min(1, depth ** 1.8 + drift));
         if (hash(sx, wy) < density) col = VIC.lightBlue;
       }
       const i = sx * 4;
@@ -730,7 +775,8 @@
     const camY = Math.floor((course ? skierY : 0) - SKIER_Y);
     const centerAt = course ? course.centerAt : titleCenter;
 
-    for (let sy = 0; sy < H; sy++) img.data.set(snowRow(camY + sy, centerAt), sy * W * 4);
+    const lineAt = course ? course.lineAt : null;
+    for (let sy = 0; sy < H; sy++) img.data.set(snowRow(camY + sy, centerAt, lineAt), sy * W * 4);
 
     // Trees, scattered off the piste and thickening toward the edges.
     const salt = course ? course.salt : 0;
@@ -763,7 +809,8 @@
       }
       if (state !== 'title') {
         const s = SPRITES[mode] || SPRITES.down;
-        blit(s, Math.round(skierX) - 3, SKIER_Y - 4, VIC.black);
+        // Sprites differ in height; they all stand on the same row.
+        blit(s, Math.round(skierX) - 3, SKIER_Y + 5 - s.length, VIC.black);
       }
       for (const p of particles) {
         const px = Math.round(p.x), py = Math.round(p.y - camY);
@@ -876,7 +923,7 @@
   });
 
   skipBtnEl.addEventListener('click', () => { submitFormEl.hidden = true; });
-  againBtnEl.addEventListener('click', startRun);
+  againBtnEl.addEventListener('click', toTitle);
 
   // ----------------------------------------------------------------- loop
   // Physics runs on WALL time, in fixed substeps, never capped. The run
