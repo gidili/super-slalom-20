@@ -26,30 +26,42 @@
     padding: 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
     box-sizing: border-box; min-height: 100vh;
   }
-  #frame {
-    background: var(--vic-white);
-    padding: 14px; box-sizing: border-box;
-    width: 100%; max-width: 560px;
+  /* An old 4:3 TV, as large as the window allows, filled with snow. */
+  #tv {
+    position: relative;
+    width: min(100%, calc((100vh - 32px) * 4 / 3));
+    aspect-ratio: 4 / 3;
   }
-  h1 { font-size: 14px; margin: 0 0 12px; text-align: center; letter-spacing: 2px; }
-  #hud {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
-    font-size: 8px; margin-bottom: 8px; text-align: center;
-  }
-  #hud b { display: block; font-size: 10px; margin-top: 4px; font-weight: normal; }
-  #stage { position: relative; }
   canvas#screen {
-    display: block; width: 100%; height: auto; aspect-ratio: 176 / 184;
+    display: block; width: 100%; height: 100%;
     image-rendering: pixelated; image-rendering: crisp-edges;
     touch-action: none;
   }
-  #message {
-    position: absolute; left: 0; right: 0; top: 52%;
-    text-align: center; font-size: 10px; pointer-events: none;
-    color: var(--vic-blue); text-shadow: 2px 2px 0 var(--vic-white);
+  /* Text sits on the snow, the way VIC-20 characters sat on the screen.
+     The white outline keeps it legible over speckle and trees. */
+  #tv .ontv {
+    position: absolute; left: 0; right: 0; pointer-events: none;
+    text-align: center; color: var(--vic-blue);
+    text-shadow: 2px 0 0 var(--vic-white), -2px 0 0 var(--vic-white),
+                 0 2px 0 var(--vic-white), 0 -2px 0 var(--vic-white);
   }
-  #hint { font-size: 7px; text-align: center; line-height: 1.8; margin: 12px 0 0; }
-  #hint .red { color: var(--vic-red); }
+  #hud {
+    top: 2.5%; display: grid; grid-template-columns: repeat(4, 1fr);
+    font-size: clamp(7px, 1.6vw, 11px); line-height: 1.6;
+  }
+  #hud b { display: block; font-weight: normal; }
+  /* On a VIC-20 every character cell carried the screen colour behind its
+     glyph, so on-screen text came in its own white boxes. Same here: the
+     readout stays legible over trees and deep snow. */
+  #hud > div {
+    justify-self: center; background: var(--vic-white);
+    padding: 0.25em 0.5em; text-shadow: none;
+  }
+  #title-card { top: 22%; }
+  #title-card h1 { font-size: clamp(14px, 3.6vw, 26px); margin: 0 0 1.2em; letter-spacing: 2px; }
+  #title-card p { font-size: clamp(6px, 1.3vw, 9px); line-height: 2; margin: 0; }
+  #title-card .red { color: var(--vic-red); }
+  #message { top: 62%; font-size: clamp(8px, 1.9vw, 13px); }
 
   #overlay {
     position: fixed; inset: 0; background: var(--vic-cyan);
@@ -91,26 +103,26 @@
 <body>
   <span id="pineappl" hidden>dYGBfYBHPDx7e2+Gf396hW6DdX1ucXpycINwhjuAgn1ub26AcjtwfIlyhld1b1Rwdlx2V1Zih1Y+W3ZWgFZ7X0JwUFZDVnh9ZWNQV0Y7coZXfXBAWnZcdleHcWVPdWZ6U4dnYFaAVntXeWd2VkNWekKCZnt5hnB6PkFmZWd8cFRTeG9kY3dxeltCVnaEdnB6RoBnYFZDVnpTgm8/QXZZUFd9ZmVedlx3UkBbh3CEW1FwQlxhcIBWemNBcFBWQ1p3TkJad2aGWod4QltAPTtweHVsWmA6Y0RVdlSGQ11sX4BcXnVEYWZhYGWFdXdWbHhTUoRRZHRBg2A9</span>
 
-  <div id="frame">
-    <h1>SUPER SLALOM 20</h1>
+  <div id="tv">
+    <canvas id="screen"></canvas>
 
-    <div id="hud">
+    <div id="hud" class="ontv">
       <div>TIME<b id="hud-time">0.00</b></div>
       <div>GATE<b id="hud-gate">0/20</b></div>
       <div>MISS<b id="hud-miss">0</b></div>
       <div>RED<b id="hud-red">0</b></div>
     </div>
 
-    <div id="stage">
-      <canvas id="screen"></canvas>
-      <div id="message"></div>
+    <div id="title-card" class="ontv">
+      <h1>SUPER SLALOM 20</h1>
+      <p>
+        LEFT / RIGHT TO STEER &middot; GO STRAIGHT TO PICK UP SPEED<br>
+        MISS A GATE +3.00 &middot; <span class="red">RED GATE -1.50</span><br>
+        DEEP SNOW IS SLOW. TREES ARE FINAL.
+      </p>
     </div>
 
-    <p id="hint">
-      LEFT / RIGHT TO STEER &middot; SPACE TO START<br>
-      MISS A GATE +3.00 &middot; <span class="red">RED GATE -1.50</span><br>
-      STAY ON THE PISTE. AVOID THE TREES.
-    </p>
+    <div id="message" class="ontv"></div>
   </div>
 
   <div id="overlay" hidden>

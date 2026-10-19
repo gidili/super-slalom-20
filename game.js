@@ -2,8 +2,10 @@
   'use strict';
 
   // ------------------------------------------------------------- the screen
-  // VIC-20: 22 x 23 characters of 8 x 8 pixels.
-  const W = 176, H = 184;
+  // An old 4:3 TV, filled with snow edge to edge: 28 x 21 characters of
+  // 8 x 8 pixels. Wider than the VIC-20's stock 22 columns, to leave room
+  // off the piste for shortcuts.
+  const W = 224, H = 168;
 
   // The VIC-20's palette. Nothing outside this list is ever drawn.
   const VIC = {
@@ -28,14 +30,23 @@
   const START_PAD = 120;
   const FINISH_PAD = 90;
   const PATH_HW = 28;          // groomed piste, half width
-  const SNOW_BAND = 22;        // fresh snow between piste and tree line
-  const TREE_STEP = 9;
+
+  // Off the piste, "depth" runs from 0 at the piste edge to 1 at the screen
+  // edge on that side. It drives the light-blue speckle, the drag, and how
+  // likely a tree is, so what you see is what slows you.
+  const TREE_CELL = 12;        // trees are placed at most one per cell
+  const TREE_CLEAR = 0.3;      // no trees at all this close to the piste
+  const TREE_MAX = 0.6;        // chance of a tree per cell at the screen edge
 
   const SKIER_Y = 48;          // skier's fixed screen row
   const DOWN_SPEED = 72;       // px/s straight down on the piste
   const CARVE_FACTOR = 0.82;   // steering costs a little speed
+  const TUCK_BONUS = 0.12;     // extra speed after holding a straight line...
+  const TUCK_RAMP = 1.2;       // ...reached over this many seconds
+  const ACCEL_RATE = 1.5;      // speeding up is gradual
+  const DECEL_RATE = 3;        // slowing down is quicker
   const LATERAL = 56;          // px/s sideways while steering
-  const DEEP_SNOW_DRAG = 0.65; // speed lost at the very edge of the band
+  const DEEP_SNOW_DRAG = 0.65; // speed lost at full depth
 
   // The course is deterministic per seed, but the server never rebuilds it:
   // it only checks counts, which are fixed (GATE_COUNT, RED_COUNT). So the
@@ -81,7 +92,10 @@
       gates.push({ y, x, red: redGates.has(i), result: null });
     }
     const finishY = START_PAD + (GATE_COUNT - 1) * GATE_SPACING + FINISH_PAD;
-    course = { seed, centerAt, gates, finishY };
+    // Mixed into tree placement, so each seed gets its own forest.
+    const salt = Math.floor(seed / 4096) % 1000003;
+    course = { seed, centerAt, gates, finishY, salt };
+    snowRows.clear();            // cached rows belong to the previous slope
   }
 
   // ------------------------------------------------------------ supabase io
@@ -128,11 +142,13 @@
   const submitStatusEl = document.getElementById('submit-status');
   const leaderboardListEl = document.getElementById('leaderboard-list');
   const againBtnEl = document.getElementById('again-btn');
+  const titleCardEl = document.getElementById('title-card');
 
   // ------------------------------------------------------------ run state
   // 'title' -> 'starting' -> 'running' -> 'crashed' | 'finished'
   let state = 'title';
   let skierX, skierY, vx, speed, mode;
+  let straightFor = 0;         // seconds since the skier last steered
   let passed, missed, reds, nextGate;
   let runStart = 0, runEnd = null;
   const held = { left: false, right: false };
@@ -182,12 +198,13 @@
     if (state === 'starting' || state === 'running') return;
     state = 'starting';
     overlayEl.hidden = true;
+    titleCardEl.hidden = true;
     flash('GET READY');
     const seed = await openSession();
     buildCourse(seed);
     skierX = course.centerAt(0);
     skierY = 0;
-    vx = 0; speed = 0; mode = 'down';
+    vx = 0; speed = 0; mode = 'down'; straightFor = 0;
     passed = 0; missed = 0; reds = 0; nextGate = 0;
     runEnd = null;
     runStart = performance.now();
@@ -270,13 +287,20 @@
     const steering = held.left !== held.right;
     mode = !steering ? 'down' : held.left ? 'left' : 'right';
 
-    const d = Math.abs(skierX - course.centerAt(skierY));
-    if (d > PATH_HW + SNOW_BAND) { crash(); return; }   // into the trees
+    if (hitTree(skierX, skierY)) { crash(); return; }
 
-    // Fresh snow: drag grows with distance from the piste.
-    const t = d <= PATH_HW ? 0 : (d - PATH_HW) / SNOW_BAND;
-    const target = DOWN_SPEED * (steering ? CARVE_FACTOR : 1) * (1 - DEEP_SNOW_DRAG * t);
-    speed += (target - speed) * Math.min(1, dt * 3);
+    // Holding a straight line builds a little speed back after a turn;
+    // any steering cancels it.
+    straightFor = steering ? 0 : straightFor + dt;
+    const tuck = steering
+      ? CARVE_FACTOR
+      : 1 + TUCK_BONUS * Math.min(1, straightFor / TUCK_RAMP);
+
+    // Fresh snow: drag grows with depth, the same depth the speckle shows.
+    const depth = snowDepth(skierX, course.centerAt(skierY));
+    const target = DOWN_SPEED * tuck * (1 - DEEP_SNOW_DRAG * depth);
+    const rate = target > speed ? ACCEL_RATE : DECEL_RATE;
+    speed += (target - speed) * Math.min(1, dt * rate);
 
     const targetVx = steering ? (held.left ? -LATERAL : LATERAL) : 0;
     vx += (targetVx - vx) * Math.min(1, dt * 10);
@@ -300,6 +324,54 @@
     let h = (x * 374761393 + y * 668265263) | 0;
     h = Math.imul(h ^ (h >>> 13), 1274126177);
     return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+
+  // 0 on the piste, rising to 1 at the screen edge on whichever side x is.
+  // Normalising to the edge means the far margin is always full depth, no
+  // matter where the piste has wandered.
+  function snowDepth(x, center) {
+    const d = Math.abs(x - center);
+    if (d <= PATH_HW) return 0;
+    const span = (x < center ? center : W - center) - PATH_HW;
+    return Math.min(1, (d - PATH_HW) / Math.max(1, span));
+  }
+
+  // Smooth value noise, about one bump per `scale` pixels. Breaks the snow
+  // into drifts instead of a clean gradient.
+  function noise2(x, y) {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const fx = x - xi, fy = y - yi;
+    const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+    const a = hash(xi + 1013, yi - 777), b = hash(xi + 1014, yi - 777);
+    const c = hash(xi + 1013, yi - 776), d = hash(xi + 1014, yi - 776);
+    return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+  }
+
+  // At most one tree per TREE_CELL square, placed by hash so it's stable
+  // as the slope scrolls. Rendering and collision both ask this, so a tree
+  // you can see is exactly a tree you can hit.
+  function treeAt(i, j, salt, centerAt) {
+    const x = i * TREE_CELL + 2 + Math.floor(hash(i * 7 + salt, j * 3 + 1) * (TREE_CELL - 4));
+    const y = j * TREE_CELL + 2 + Math.floor(hash(i * 5 + salt, j * 11 + 7) * (TREE_CELL - 4));
+    const depth = snowDepth(x, centerAt(y));
+    if (depth < TREE_CLEAR) return null;
+    const chance = TREE_MAX * ((depth - TREE_CLEAR) / (1 - TREE_CLEAR)) ** 1.5;
+    return hash(i * 92821 + salt, j) < chance ? { x, y } : null;
+  }
+
+  // Skier rows span y-4..y+4, a tree's y-6..y. A pixel or so of mercy on
+  // each edge, so a brush past the canopy doesn't end the run.
+  function hitTree(x, y) {
+    const { salt, centerAt } = course;
+    const i0 = Math.floor((x - 8) / TREE_CELL), i1 = Math.floor((x + 8) / TREE_CELL);
+    const j0 = Math.floor((y - 8) / TREE_CELL), j1 = Math.floor((y + 12) / TREE_CELL);
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const tr = treeAt(i, j, salt, centerAt);
+        if (tr && Math.abs(x - tr.x) <= 4 && y >= tr.y - 8 && y <= tr.y + 2) return true;
+      }
+    }
+    return false;
   }
 
   function put(x, y, c) {
@@ -376,37 +448,53 @@
     }
   }
 
+  // A row of slope always looks the same, so each one is computed once, on
+  // the frame it scrolls into view, and copied after that. Most frames only
+  // build a row or two; the noise is the expensive part.
+  const snowRows = new Map();
+  const titleCenter = () => W / 2;
+
+  function snowRow(wy, centerAt) {
+    let row = snowRows.get(wy);
+    if (row) return row;
+    row = new Uint8ClampedArray(W * 4);
+    const c = centerAt(wy);
+    for (let sx = 0; sx < W; sx++) {
+      let col = VIC.white;
+      const depth = snowDepth(sx, c);
+      if (depth > 0) {
+        // Light blue speckle: rises gently with depth, pushed around by
+        // drift noise that fades out as depth reaches 1, so the margin
+        // still ends solid blue.
+        const drift = (noise2(sx / 13, wy / 13) - 0.5) * 0.7 * (1 - depth);
+        const density = Math.max(0, Math.min(1, depth ** 1.25 + drift));
+        if (hash(sx, wy) < density) col = VIC.lightBlue;
+      }
+      const i = sx * 4;
+      row[i] = col[0]; row[i + 1] = col[1]; row[i + 2] = col[2]; row[i + 3] = 255;
+    }
+    snowRows.set(wy, row);
+    if (snowRows.size > H * 3) {
+      for (const k of snowRows.keys()) if (Math.abs(k - wy) > H * 2) snowRows.delete(k);
+    }
+    return row;
+  }
+
   function render() {
     const camY = Math.floor((course ? skierY : 0) - SKIER_Y);
-    const centerAt = course ? course.centerAt : () => W / 2;
+    const centerAt = course ? course.centerAt : titleCenter;
 
-    for (let sy = 0; sy < H; sy++) {
-      const wy = camY + sy;
-      const c = centerAt(wy);
-      for (let sx = 0; sx < W; sx++) {
-        const d = Math.abs(sx - c);
-        let col = VIC.white;
-        if (d > PATH_HW) {
-          // Light blue speckle, denser the further from the piste.
-          const t = Math.min(1, (d - PATH_HW) / SNOW_BAND);
-          if (hash(sx, wy) < 0.08 + 0.42 * t) col = VIC.lightBlue;
-        }
-        put(sx, sy, col);
-      }
-    }
+    for (let sy = 0; sy < H; sy++) img.data.set(snowRow(camY + sy, centerAt), sy * W * 4);
 
-    // Tree line, both sides, on a world-anchored grid.
-    const firstRow = Math.floor(camY / TREE_STEP) * TREE_STEP;
-    for (let wy = firstRow; wy < camY + H + TREE_STEP; wy += TREE_STEP) {
-      const c = centerAt(wy);
-      const edge = PATH_HW + SNOW_BAND;
-      for (const side of [-1, 1]) {
-        for (let k = 0; k < 8; k++) {
-          const jitter = Math.floor(hash(k * 31 + side, wy) * 4);
-          const x = Math.round(c + side * (edge + 3 + k * 8 + jitter));
-          if (x < -4 || x > W + 4) break;
-          blit(TREE, x - 3, wy - camY - 6, VIC.green);
-        }
+    // Trees, scattered off the piste and thickening toward the edges.
+    const salt = course ? course.salt : 0;
+    const j0 = Math.floor(camY / TREE_CELL) - 1;
+    const j1 = Math.floor((camY + H) / TREE_CELL) + 1;
+    const iMax = Math.ceil(W / TREE_CELL);
+    for (let j = j0; j <= j1; j++) {
+      for (let i = 0; i < iMax; i++) {
+        const tr = treeAt(i, j, salt, centerAt);
+        if (tr) blit(TREE, tr.x - 3, tr.y - camY - 6, VIC.green);
       }
     }
 
