@@ -1,2 +1,17 @@
 # super-slalom-20
 A super slalom ski game inspired by an old VIC-20 game
+
+Downhill slalom, in the spirit of the VIC-20: 22 columns, 23 rows, sixteen colours, and a skier made of about thirty pixels.
+
+Play: (not deployed yet)
+
+## The run
+
+- **Twenty gates.** Ski between each pair of blue poles. Miss one and it costs you **3 seconds**.
+- **Red gates are a gift.** Take one and **1.5 seconds** come off your time.
+- **Stay on the piste.** The fresh snow either side slows you down, more the further out you go — you can see it getting deeper. Past it are the trees, and the trees end your run.
+- **Lowest time wins.**
+
+## Controls
+
+Left and right arrows (or A / D, or keypad 4 / 6) to steer. Let go to ski straight, which is fastest. Space to start. On mobile, hold the left or right half of the screen.

@@ -1,0 +1,11 @@
+{
+  "name": "super-slalom-20",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "build": "mkdir -p dist && javascript-obfuscator game.js --output dist/game.js && cp index.html dist/index.html"
+  },
+  "devDependencies": {
+    "javascript-obfuscator": "^4.1.1"
+  }
+}

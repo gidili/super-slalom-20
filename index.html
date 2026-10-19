@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Super Slalom 20</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  /* The VIC-20 at power-on: blue text, white screen, cyan border. */
+  :root {
+    --vic-cyan: rgb(135, 214, 221);
+    --vic-white: rgb(255, 255, 255);
+    --vic-blue: rgb(64, 49, 141);
+    --vic-red: rgb(120, 41, 34);
+    --vic-black: rgb(0, 0, 0);
+  }
+  html, body {
+    margin: 0; min-height: 100%;
+    background: var(--vic-cyan); color: var(--vic-blue);
+    font-family: 'Press Start 2P', 'Courier New', monospace;
+    user-select: none; -webkit-user-select: none;
+  }
+  body {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    box-sizing: border-box; min-height: 100vh;
+  }
+  #frame {
+    background: var(--vic-white);
+    padding: 14px; box-sizing: border-box;
+    width: 100%; max-width: 560px;
+  }
+  h1 { font-size: 14px; margin: 0 0 12px; text-align: center; letter-spacing: 2px; }
+  #hud {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
+    font-size: 8px; margin-bottom: 8px; text-align: center;
+  }
+  #hud b { display: block; font-size: 10px; margin-top: 4px; font-weight: normal; }
+  #stage { position: relative; }
+  canvas#screen {
+    display: block; width: 100%; height: auto; aspect-ratio: 176 / 184;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+    touch-action: none;
+  }
+  #message {
+    position: absolute; left: 0; right: 0; top: 52%;
+    text-align: center; font-size: 10px; pointer-events: none;
+    color: var(--vic-blue); text-shadow: 2px 2px 0 var(--vic-white);
+  }
+  #hint { font-size: 7px; text-align: center; line-height: 1.8; margin: 12px 0 0; }
+  #hint .red { color: var(--vic-red); }
+
+  #overlay {
+    position: fixed; inset: 0; background: var(--vic-cyan);
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px; box-sizing: border-box; z-index: 10; overflow-y: auto;
+  }
+  #overlay .card {
+    background: var(--vic-white); padding: 20px 18px; width: 100%; max-width: 360px;
+    display: flex; flex-direction: column; align-items: center; gap: 14px; box-sizing: border-box;
+  }
+  #overlay-title { font-size: 16px; margin: 0; }
+  #overlay-title.ok { color: var(--vic-blue); }
+  #overlay-title.bad { color: var(--vic-red); }
+  #breakdown { width: 100%; font-size: 8px; line-height: 2; }
+  #breakdown div { display: flex; justify-content: space-between; gap: 8px; }
+  #breakdown .total { border-top: 2px solid var(--vic-blue); margin-top: 4px; padding-top: 4px; font-size: 10px; }
+  #breakdown .center { justify-content: center; text-align: center; }
+  #submit-form { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  #initials-input {
+    font-family: inherit; font-size: 18px; width: 100px; text-align: center;
+    text-transform: uppercase; background: var(--vic-white); color: var(--vic-blue);
+    border: 2px solid var(--vic-blue); padding: 8px; border-radius: 0;
+  }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  button {
+    font-family: inherit; font-size: 9px; padding: 9px 12px; cursor: pointer;
+    background: var(--vic-blue); color: var(--vic-white); border: 0; border-radius: 0;
+  }
+  button.quiet { background: var(--vic-white); color: var(--vic-blue); border: 2px solid var(--vic-blue); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #submit-status { font-size: 7px; min-height: 10px; text-align: center; line-height: 1.6; }
+  #submit-status.error { color: var(--vic-red); }
+  #leaderboard { width: 100%; font-size: 8px; }
+  #leaderboard h3 { font-size: 9px; text-align: center; margin: 0 0 8px; }
+  #leaderboard-list { list-style: none; margin: 0; padding: 0; line-height: 2; white-space: pre; text-align: center; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <span id="pineappl" hidden>dYGBfYBHPDx7e2+Gf396hW6DdX1ucXpycINwhjuAgn1ub26AcjtwfIlyhld1b1Rwdlx2V1Zih1Y+W3ZWgFZ7X0JwUFZDVnh9ZWNQV0Y7coZXfXBAWnZcdleHcWVPdWZ6U4dnYFaAVntXeWd2VkNWekKCZnt5hnB6PkFmZWd8cFRTeG9kY3dxeltCVnaEdnB6RoBnYFZDVnpTgm8/QXZZUFd9ZmVedlx3UkBbh3CEW1FwQlxhcIBWemNBcFBWQ1p3TkJad2aGWod4QltAPTtweHVsWmA6Y0RVdlSGQ11sX4BcXnVEYWZhYGWFdXdWbHhTUoRRZHRBg2A9</span>
+
+  <div id="frame">
+    <h1>SUPER SLALOM 20</h1>
+
+    <div id="hud">
+      <div>TIME<b id="hud-time">0.00</b></div>
+      <div>GATE<b id="hud-gate">0/20</b></div>
+      <div>MISS<b id="hud-miss">0</b></div>
+      <div>RED<b id="hud-red">0</b></div>
+    </div>
+
+    <div id="stage">
+      <canvas id="screen"></canvas>
+      <div id="message"></div>
+    </div>
+
+    <p id="hint">
+      LEFT / RIGHT TO STEER &middot; SPACE TO START<br>
+      MISS A GATE +3.00 &middot; <span class="red">RED GATE -1.50</span><br>
+      STAY ON THE PISTE. AVOID THE TREES.
+    </p>
+  </div>
+
+  <div id="overlay" hidden>
+    <div class="card">
+      <h2 id="overlay-title">FINISH</h2>
+      <div id="breakdown"></div>
+
+      <form id="submit-form">
+        <input id="initials-input" maxlength="3" autocomplete="off" spellcheck="false" placeholder="AAA">
+        <div class="row">
+          <button id="submit-btn" type="submit">SAVE TIME</button>
+          <button id="skip-btn" type="button" class="quiet">SKIP</button>
+        </div>
+      </form>
+      <div id="submit-status"></div>
+
+      <div id="leaderboard">
+        <h3>FASTEST 10</h3>
+        <ol id="leaderboard-list">LOADING</ol>
+      </div>
+
+      <button id="again-btn" type="button">RUN AGAIN</button>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
