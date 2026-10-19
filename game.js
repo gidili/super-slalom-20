@@ -43,11 +43,15 @@
   // edge on that side. It drives the light-blue speckle, the drag, and how
   // likely a tree is, so what you see is what slows you.
   const TREE_CELL = 12;        // trees are placed at most one per cell
-  const TREE_CLEAR = 0.3;      // no trees at all this close to the piste
-  const TREE_MAX = 0.6;        // chance of a tree per cell at the screen edge
-  // A course has about 360 trees, so this is roughly one or two pineapples
+  const TREE_CLEAR = 0.06;     // no trees at all this close to the piste
+  const TREE_MAX = 0.75;       // chance of a tree per cell at the screen edge
+  const EDGE_WOBBLE = 14;      // the piste edge wanders by up to this much
+  // Wooden fences lie across the fresh snow, closing off some shortcuts.
+  const FENCE_SLOT = 40;       // at most one fence per side per this many rows
+  const FENCE_CHANCE = 0.3;
+  // A course has about 690 trees, so this is roughly one or two pineapples
   // a run, and no pineapple at all about one run in five.
-  const PINE_CHANCE = 1 / 240;
+  const PINE_CHANCE = 1 / 460;
 
   const SKIER_Y = 48;          // skier's fixed screen row
   const DOWN_SPEED = 72;       // px/s straight down on the piste
@@ -188,7 +192,7 @@
   let straightFor = 0;         // seconds since the skier last steered
   let passed, missed, reds, nextPole;
   let runStart = 0, runEnd = null;
-  let hitPine = false;         // the run ended in a pineapple, not a tree
+  let hitWhat = 'TREES';       // what ended a crashed run, for the card
   let exploded = new Set();    // pineapples already blown up, by cell
   let particles = [];
   // Turn while a key is held, straighten when it's let go. The newest
@@ -398,7 +402,7 @@
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     held = []; tapLeft = 0;
-    hitPine = false; exploded = new Set(); particles = [];
+    hitWhat = 'TREES'; exploded = new Set(); particles = [];
     passed = 0; missed = 0; reds = 0; nextPole = 0;
     runEnd = null;
     runStart = performance.now();
@@ -415,7 +419,7 @@
     state = 'crashed';
     mode = 'crash';
     runEnd = performance.now();
-    hitPine = hit.pine;
+    hitWhat = hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
     SFX.stopSwoosh();
     if (hit.pine) SFX.playExplosion(); else SFX.playBreak();
     if (hit.pine) {
@@ -515,7 +519,7 @@
     const steering = heading !== 'down';
     mode = heading;
 
-    const hit = hitTree(skierX, skierY);
+    const hit = hitTree(skierX, skierY) || hitFence(skierX, skierY);
     if (hit) { crash(hit); return; }
 
     // Holding a straight line builds a little speed back after a turn;
@@ -526,7 +530,7 @@
       : 1 + TUCK_BONUS * Math.min(1, straightFor / TUCK_RAMP);
 
     // Fresh snow: drag grows with depth, the same depth the speckle shows.
-    const depth = snowDepth(skierX, course.centerAt(skierY));
+    const depth = snowDepth(skierX, course.centerAt(skierY), skierY);
     const target = DOWN_SPEED * tuck * (1 - DEEP_SNOW_DRAG * depth);
     const rate = target > speed ? ACCEL_RATE : DECEL_RATE;
     speed += (target - speed) * Math.min(1, dt * rate);
@@ -559,12 +563,15 @@
 
   // 0 on the piste, rising to 1 at the screen edge on whichever side x is.
   // Normalising to the edge means the far margin is always full depth, no
-  // matter where the piste has wandered.
-  function snowDepth(x, center) {
+  // matter where the piste has wandered. Each edge wobbles with its own
+  // noise, so the piste isn't a clean lane.
+  function snowDepth(x, center, y) {
+    const left = x < center;
+    const hw = PATH_HW + (noise2(y / 22, left ? 3.5 : 9.5) - 0.5) * EDGE_WOBBLE;
     const d = Math.abs(x - center);
-    if (d <= PATH_HW) return 0;
-    const span = (x < center ? center : W - center) - PATH_HW;
-    return Math.min(1, (d - PATH_HW) / Math.max(1, span));
+    if (d <= hw) return 0;
+    const span = (left ? center : W - center) - hw;
+    return Math.min(1, (d - hw) / Math.max(1, span));
   }
 
   // Smooth value noise, about one bump per `scale` pixels. Breaks the snow
@@ -585,11 +592,45 @@
   function treeAt(i, j, salt, centerAt) {
     const x = i * TREE_CELL + 2 + Math.floor(hash(i * 7 + salt, j * 3 + 1) * (TREE_CELL - 4));
     const y = j * TREE_CELL + 2 + Math.floor(hash(i * 5 + salt, j * 11 + 7) * (TREE_CELL - 4));
-    const depth = snowDepth(x, centerAt(y));
+    const depth = snowDepth(x, centerAt(y), y);
     if (depth < TREE_CLEAR) return null;
-    const chance = TREE_MAX * ((depth - TREE_CLEAR) / (1 - TREE_CLEAR)) ** 1.5;
+    const chance = TREE_MAX * (depth - TREE_CLEAR) / (1 - TREE_CLEAR);
     if (hash(i * 92821 + salt, j) >= chance) return null;
+    // Keep clear of fences, so the two never overlap.
+    const side = x < centerAt(y) ? -1 : 1, k = Math.floor(y / FENCE_SLOT);
+    for (let kk = k - 1; kk <= k + 1; kk++) {
+      const f = fenceAt(kk, side, salt, centerAt);
+      if (f && Math.abs(y - f.y) <= 8 && x >= f.x0 - 4 && x <= f.x1 + 4) return null;
+    }
     return { i, j, x, y, pine: hash(i * 48271 + salt, j * 13 + 5) < PINE_CHANCE };
+  }
+
+  // A fence piece lying across the fresh snow on one side of the piste:
+  // world row y, from x0 to x1. Placed by hash per slot, like the trees.
+  function fenceAt(k, side, salt, centerAt) {
+    if (hash(k * 613 + salt, side + 71) >= FENCE_CHANCE) return null;
+    const y = k * FENCE_SLOT + Math.floor(hash(k * 37 + salt, side + 5) * (FENCE_SLOT - 8));
+    const edge = centerAt(y) + side * (PATH_HW + EDGE_WOBBLE / 2);
+    const room = side < 0 ? edge : W - edge;
+    const len = 12 + Math.floor(hash(k * 91 + salt, side + 13) * 18);
+    if (room < len + 8) return null;
+    const start = 4 + Math.floor(hash(k * 53 + salt, side + 29) * (room - len - 4));
+    const a = Math.round(edge + side * start), b = a + side * len;
+    return { y, x0: Math.min(a, b), x1: Math.max(a, b) };
+  }
+
+  // A fence occupies rows y-2..y; the skier is fenced in when any of the
+  // skier's rows meet it, give or take a pixel.
+  function hitFence(x, y) {
+    const { salt, centerAt } = course;
+    const k0 = Math.floor((y - 10) / FENCE_SLOT), k1 = Math.floor((y + 10) / FENCE_SLOT);
+    for (let k = k0; k <= k1; k++) {
+      for (const side of [-1, 1]) {
+        const f = fenceAt(k, side, salt, centerAt);
+        if (f && y >= f.y - 5 && y <= f.y + 1 && x >= f.x0 - 2 && x <= f.x1 + 2) return { fence: true };
+      }
+    }
+    return null;
   }
 
   // Skier rows span y-4..y+4, a tree's y-6..y. A pixel or so of mercy on
@@ -648,14 +689,13 @@
   };
   SPRITES.left = SPRITES.right.map(r => r.split('').reverse().join(''));
 
-  // The VIC-20 has no dark green, so the needles are dithered with black.
   const TREE = [
     '...X...',
-    '..XKX..',
-    '.XKXKX.',
-    '..XKX..',
-    '.XKXKX.',
-    'XKXKXKX',
+    '..XXX..',
+    '..XXX..',
+    '.XXXXX.',
+    '.XXXXX.',
+    'XXXXXXX',
     '...O...',
   ];
 
@@ -671,7 +711,7 @@
   ];
 
   // X takes the ink passed in; the other letters are fixed colours.
-  const INKS = { O: VIC.orange, G: VIC.green, Y: VIC.yellow, K: VIC.black };
+  const INKS = { O: VIC.orange, G: VIC.green, Y: VIC.yellow };
 
   function blit(rows, x0, y0, ink) {
     for (let r = 0; r < rows.length; r++) {
@@ -748,18 +788,20 @@
     const line = lineAt ? lineAt(wy) : null;
     for (let sx = 0; sx < W; sx++) {
       let col = VIC.white;
-      const depth = snowDepth(sx, c);
+      const depth = snowDepth(sx, c, wy);
       // The worn line: packed snow along the racing line, speckled cyan
       // (the VIC-20 has no grey), densest in the middle of the track.
       const off = line === null ? Infinity : Math.abs(sx - line);
       if (off <= LINE_HW && hash(sx + 977, wy + 31) < (off <= 1 ? 0.5 : 0.25)) col = VIC.cyan;
       else if (depth > 0) {
-        // Light blue speckle: sparse near the piste and rising steeply
-        // toward the margin, pushed around by drift noise that fades out
-        // as depth reaches 1, so the margin still ends solid blue.
-        const drift = (noise2(sx / 13, wy / 13) - 0.5) * 0.7 * (1 - depth);
-        const density = Math.max(0, Math.min(1, depth ** 1.8 + drift));
+        // Light blue speckle: light over most of the fresh snow, pushed
+        // around by drift noise, and solid only in a thin strip at the
+        // margin.
+        const drift = (noise2(sx / 13, wy / 13) - 0.5) * 0.5 * (1 - depth);
+        const density = depth > 0.92 ? 1 : Math.max(0, 0.7 * depth ** 2 + drift);
         if (hash(sx, wy) < density) col = VIC.lightBlue;
+      } else if (hash(sx + 4441, wy + 17) < 0.02) {
+        col = VIC.lightBlue;   // a stray speck, so the piste isn't spotless
       }
       const i = sx * 4;
       row[i] = col[0]; row[i + 1] = col[1]; row[i + 2] = col[2]; row[i + 3] = 255;
@@ -789,6 +831,20 @@
         if (!tr) continue;
         if (!tr.pine) blit(TREE, tr.x - 3, tr.y - camY - 6, VIC.green);
         else if (!exploded.has(i + ',' + j)) blit(PINEAPPLE, tr.x - 3, tr.y - camY - 6);
+      }
+    }
+
+    // Fences: a post every third pixel, a rail between.
+    const k0 = Math.floor(camY / FENCE_SLOT) - 1, k1 = Math.floor((camY + H) / FENCE_SLOT) + 1;
+    for (let k = k0; k <= k1; k++) {
+      for (const side of [-1, 1]) {
+        const f = fenceAt(k, side, salt, centerAt);
+        if (!f) continue;
+        const sy = f.y - camY;
+        for (let x = f.x0; x <= f.x1; x++) {
+          put(x, sy - 1, VIC.orange);
+          if ((x - f.x0) % 3 === 0) { put(x, sy - 2, VIC.orange); put(x, sy, VIC.orange); }
+        }
       }
     }
 
@@ -853,7 +909,7 @@
         `<div><span>RED ${reds} x 1.50</span><span>-${fmt(reds * BONUS_CS)}</span></div>` +
         `<div class="total"><span>TIME</span><span>${fmt(finalCs())}</span></div>`;
     } else {
-      breakdownEl.innerHTML = `<div class="center">INTO THE ${hitPine ? 'PINEAPPLE' : 'TREES'}. NO TIME.</div>`;
+      breakdownEl.innerHTML = `<div class="center">INTO THE ${hitWhat}. NO TIME.</div>`;
     }
     // Only a finished, ranked run can be submitted.
     submitFormEl.hidden = !(finished && sessionId);
@@ -943,7 +999,7 @@
       acc = 0;
     }
     if (state === 'running') {
-      SFX.updateSwoosh(speed / DOWN_SPEED, snowDepth(skierX, course.centerAt(skierY)), heading !== 'down');
+      SFX.updateSwoosh(speed / DOWN_SPEED, snowDepth(skierX, course.centerAt(skierY), skierY), heading !== 'down');
     }
     if (particles.length) updateParticles(Math.min(dt, 0.05));
     if (state === 'running' || state === 'crashed' || state === 'finished') paintHud();
