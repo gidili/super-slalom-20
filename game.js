@@ -31,6 +31,8 @@
   // The gaps shrink down the course, so the end is the hard part.
   const POLE_GAP_FIRST = 95;   // world px between the first two poles
   const POLE_GAP_LAST = 65;    // ...and the last two
+  const FIRST_GAP = 135;       // after the first pole: the second stays off
+                               // screen until you've passed the first
   const POLE_OFFSET = 12;      // how far off the piste centre a pole stands
   const CLIP = 3;              // this close to a pole knocks it over
   const LINE_WIDE = 6;         // the worn line passes this far outside a pole
@@ -43,15 +45,16 @@
   // edge on that side. It drives the light-blue speckle, the drag, and how
   // likely a tree is, so what you see is what slows you.
   const TREE_CELL = 12;        // trees are placed at most one per cell
-  const TREE_CLEAR = 0.06;     // no trees at all this close to the piste
-  const TREE_MAX = 0.75;       // chance of a tree per cell at the screen edge
-  const EDGE_WOBBLE = 14;      // the piste edge wanders by up to this much
+  const TREE_EDGE = 0.06;      // chance of a tree per cell right at the piste
+  const TREE_MAX = 0.75;       // ...rising to this at the screen edge
+  const EDGE_WOBBLE = 14;      // the piste edge bulges out by up to this much
   // Wooden fences lie across the fresh snow, closing off some shortcuts.
   const FENCE_SLOT = 40;       // at most one fence per side per this many rows
   const FENCE_CHANCE = 0.3;
-  // A course has about 690 trees, so this is roughly one or two pineapples
-  // a run, and no pineapple at all about one run in five.
-  const PINE_CHANCE = 1 / 460;
+  // Tuned for about 3-4 pineapples a run, nearly all close to the piste.
+  const PINE_ZONE = 0.4;       // "near the piste": depth below this
+  const PINE_NEAR = 1 / 50;
+  const PINE_FAR = 1 / 1000;
 
   const SKIER_Y = 48;          // skier's fixed screen row
   const DOWN_SPEED = 72;       // px/s straight down on the piste
@@ -80,9 +83,10 @@
   // Exactly RED_COUNT red poles per course, so every run has the same bonus
   // available and the leaderboard measures skiing, not seed luck. Drawn
   // from their own PRNG stream, so tuning the course shape never moves them.
+  // Never the first pole: it can't be missed, so red there would be free.
   function pickRedPoles(seed) {
     const rnd = mulberry32((seed % 4294967296) ^ 0x5EED);
-    const idx = Array.from({ length: POLE_COUNT }, (_, i) => i);
+    const idx = Array.from({ length: POLE_COUNT - 1 }, (_, i) => i + 1);
     for (let i = idx.length - 1; i > 0; i--) {
       const j = Math.floor(rnd() * (i + 1));
       [idx[i], idx[j]] = [idx[j], idx[i]];
@@ -99,44 +103,66 @@
     const f2 = 0.017 + rnd() * 0.008, p2 = rnd() * Math.PI * 2;
     const centerAt = y => W / 2 + 18 * Math.sin(y * f1 + p1) + 10 * Math.sin(y * f2 + p2);
 
-    // The seed picks the first pole's side; after that they alternate, so
-    // the line is a slalom, not a schuss. Each pole is passed on its
-    // outside, away from the piste centre, which is what makes you weave.
-    const first = rnd() < 0.5 ? -1 : 1;
+    // The first pole stands mid-piste with no flag: pass it on either side,
+    // and that choice sets the alternation (see chooseFirstSide). The rest
+    // are placed once it's made, each passed on its outside, away from the
+    // piste centre, which is what makes you weave. Until then they have no
+    // x; the gap after the first pole keeps the second off screen anyway.
     const poles = [];
     let y = START_PAD;
     for (let i = 0; i < POLE_COUNT; i++) {
-      if (i > 0) y += POLE_GAP_FIRST + (POLE_GAP_LAST - POLE_GAP_FIRST) * (i - 1) / (POLE_COUNT - 2);
+      if (i === 1) y += FIRST_GAP;
+      else if (i > 1) y += POLE_GAP_FIRST + (POLE_GAP_LAST - POLE_GAP_FIRST) * (i - 2) / (POLE_COUNT - 3);
       y = Math.round(y);
-      const side = i % 2 === 0 ? first : -first;
-      const x = Math.round(centerAt(y) + side * (POLE_OFFSET + rnd() * 4));
-      // fallen: 0 standing, else the direction it fell (-1 left, 1 right).
-      poles.push({ y, x, pass: side, red: redPoles.has(i), result: null, fallen: 0 });
+      const first = i === 0;
+      poles.push({
+        y,
+        x: first ? Math.round(centerAt(y)) : null,
+        reach: POLE_OFFSET + rnd() * 4,   // how far off centre, once placed
+        pass: 0,                          // side to pass on; 0 = either
+        red: redPoles.has(i), result: null,
+        fallen: 0,                        // else the direction it fell
+      });
     }
     const finishY = y + FINISH_PAD;
+    // Mixed into tree placement, so each seed gets its own forest.
+    const salt = Math.floor(seed / 4096) % 1000003;
+    course = { seed, centerAt, poles, finishY, salt, pts: null };
+    course.lineAt = wy => lineAt(course, wy);
+    snowRows.clear();            // cached rows belong to the previous slope
+  }
 
+  // The player passed the first pole on `side`: place and flag the rest,
+  // alternating from there, and lay the racing line through them.
+  function chooseFirstSide(side) {
+    const { poles, centerAt, finishY } = course;
+    for (let i = 1; i < POLE_COUNT; i++) {
+      const p = poles[i];
+      p.pass = i % 2 === 0 ? side : -side;
+      p.x = Math.round(centerAt(p.y) + p.pass * p.reach);
+    }
     // The racing line: start at the top of the piste, swing past each pole
     // just outside it on the flag side, end mid-piste at the finish. Drawn
     // as a worn track in the snow.
-    const pts = [{ y: 0, x: centerAt(0) }]
-      .concat(poles.map(p => ({ y: p.y, x: p.x + p.pass * LINE_WIDE })))
+    course.pts = [{ y: 0, x: centerAt(0) }]
+      .concat(poles.map((p, i) => ({ y: p.y, x: p.x + (i ? p.pass : side) * LINE_WIDE })))
       .concat([{ y: finishY, x: centerAt(finishY) }]);
-    const lineAt = (wy) => {
-      if (wy <= 0) return pts[0].x;
-      for (let k = 1; k < pts.length; k++) {
-        if (wy <= pts[k].y) {
-          const a = pts[k - 1], b = pts[k];
-          const t = (1 - Math.cos(Math.PI * (wy - a.y) / (b.y - a.y))) / 2;
-          return a.x + (b.x - a.x) * t;
-        }
-      }
-      return pts[pts.length - 1].x;
-    };
+    snowRows.clear();            // rows on screen now carry the line
+  }
 
-    // Mixed into tree placement, so each seed gets its own forest.
-    const salt = Math.floor(seed / 4096) % 1000003;
-    course = { seed, centerAt, lineAt, poles, finishY, salt };
-    snowRows.clear();            // cached rows belong to the previous slope
+  // Before the first choice the line only leads toward the first pole.
+  function lineAt(c, wy) {
+    const pts = c.pts;
+    if (!pts) return wy < c.poles[0].y - 16 ? c.centerAt(wy) : null;
+    if (wy <= 0) return pts[0].x;
+    for (let k = 1; k < pts.length; k++) {
+      if (wy <= pts[k].y) {
+        const a = pts[k - 1], b = pts[k];
+        const t = (1 - Math.cos(Math.PI * (wy - a.y) / (b.y - a.y))) / 2;
+        return a.x + (b.x - a.x) * t;
+      }
+    }
+    return pts[pts.length - 1].x;
   }
 
   // ------------------------------------------------------------ supabase io
@@ -546,6 +572,7 @@
     while (nextPole < POLE_COUNT && course.poles[nextPole].y <= skierY) {
       const p = course.poles[nextPole];
       if (Math.abs(skierX - p.x) <= CLIP) p.fallen = skierX < p.x ? 1 : -1;
+      if (nextPole === 0) chooseFirstSide(skierX >= p.x ? 1 : -1);
       resolvePole((skierX - p.x) * p.pass >= 0);
     }
 
@@ -567,7 +594,7 @@
   // noise, so the piste isn't a clean lane.
   function snowDepth(x, center, y) {
     const left = x < center;
-    const hw = PATH_HW + (noise2(y / 22, left ? 3.5 : 9.5) - 0.5) * EDGE_WOBBLE;
+    const hw = PATH_HW + noise2(y / 22, left ? 3.5 : 9.5) * EDGE_WOBBLE;
     const d = Math.abs(x - center);
     if (d <= hw) return 0;
     const span = (left ? center : W - center) - hw;
@@ -593,8 +620,8 @@
     const x = i * TREE_CELL + 2 + Math.floor(hash(i * 7 + salt, j * 3 + 1) * (TREE_CELL - 4));
     const y = j * TREE_CELL + 2 + Math.floor(hash(i * 5 + salt, j * 11 + 7) * (TREE_CELL - 4));
     const depth = snowDepth(x, centerAt(y), y);
-    if (depth < TREE_CLEAR) return null;
-    const chance = TREE_MAX * (depth - TREE_CLEAR) / (1 - TREE_CLEAR);
+    if (depth <= 0) return null;
+    const chance = TREE_EDGE + (TREE_MAX - TREE_EDGE) * depth;
     if (hash(i * 92821 + salt, j) >= chance) return null;
     // Keep clear of fences, so the two never overlap.
     const side = x < centerAt(y) ? -1 : 1, k = Math.floor(y / FENCE_SLOT);
@@ -602,7 +629,10 @@
       const f = fenceAt(kk, side, salt, centerAt);
       if (f && Math.abs(y - f.y) <= 8 && x >= f.x0 - 4 && x <= f.x1 + 4) return null;
     }
-    return { i, j, x, y, pine: hash(i * 48271 + salt, j * 13 + 5) < PINE_CHANCE };
+    // Pineapples mostly turn up in the sparse trees near the piste, where
+    // they can be seen, rarely in the thick of the forest.
+    const pine = hash(i * 48271 + salt, j * 13 + 5) < (depth < PINE_ZONE ? PINE_NEAR : PINE_FAR);
+    return { i, j, x, y, pine };
   }
 
   // A fence piece lying across the fresh snow on one side of the piste:
@@ -610,7 +640,7 @@
   function fenceAt(k, side, salt, centerAt) {
     if (hash(k * 613 + salt, side + 71) >= FENCE_CHANCE) return null;
     const y = k * FENCE_SLOT + Math.floor(hash(k * 37 + salt, side + 5) * (FENCE_SLOT - 8));
-    const edge = centerAt(y) + side * (PATH_HW + EDGE_WOBBLE / 2);
+    const edge = centerAt(y) + side * (PATH_HW + EDGE_WOBBLE);
     const room = side < 0 ? edge : W - edge;
     const len = 12 + Math.floor(hash(k * 91 + salt, side + 13) * 18);
     if (room < len + 8) return null;
@@ -667,7 +697,8 @@
       '..X.X..',
       '..X.X..',
     ],
-    right: [
+    // Turning: skis point the way the skier is heading.
+    left: [
       '...X...',
       '..XXX..',
       '...X...',
@@ -687,7 +718,7 @@
       '...X...',
     ],
   };
-  SPRITES.left = SPRITES.right.map(r => r.split('').reverse().join(''));
+  SPRITES.right = SPRITES.left.map(r => r.split('').reverse().join(''));
 
   const TREE = [
     '...X...',
@@ -800,7 +831,7 @@
         const drift = (noise2(sx / 13, wy / 13) - 0.5) * 0.5 * (1 - depth);
         const density = depth > 0.92 ? 1 : Math.max(0, 0.7 * depth ** 2 + drift);
         if (hash(sx, wy) < density) col = VIC.lightBlue;
-      } else if (hash(sx + 4441, wy + 17) < 0.02) {
+      } else if (hash(sx + 4441, wy + 17) < 0.005) {
         col = VIC.lightBlue;   // a stray speck, so the piste isn't spotless
       }
       const i = sx * 4;
@@ -850,6 +881,7 @@
 
     if (course) {
       for (const p of course.poles) {
+        if (p.x === null) continue;      // not placed until the first choice
         const sy = p.y - camY;
         if (sy > -4 && sy < H + 10) drawPole(p, sy);
       }
