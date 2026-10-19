@@ -13,6 +13,7 @@
     red: [120, 41, 34],        cyan: [135, 214, 221],
     blue: [64, 49, 141],       green: [85, 160, 73],
     orange: [170, 116, 73],    lightBlue: [128, 128, 255],
+    yellow: [191, 206, 114],
   };
   const css = c => `rgb(${c[0]},${c[1]},${c[2]})`;
 
@@ -40,6 +41,9 @@
   const TREE_CELL = 12;        // trees are placed at most one per cell
   const TREE_CLEAR = 0.3;      // no trees at all this close to the piste
   const TREE_MAX = 0.6;        // chance of a tree per cell at the screen edge
+  // A course has about 536 trees, so this is roughly one or two pineapples
+  // a run, and no pineapple at all about one run in five.
+  const PINE_CHANCE = 1 / 360;
 
   const SKIER_Y = 48;          // skier's fixed screen row
   const DOWN_SPEED = 72;       // px/s straight down on the piste
@@ -159,6 +163,9 @@
   let straightFor = 0;         // seconds since the skier last steered
   let passed, missed, reds, nextPole;
   let runStart = 0, runEnd = null;
+  let cause = null;            // what ended a crashed run: 'tree' | 'pine'
+  let exploded = new Set();    // pineapples already blown up, by cell
+  let particles = [];
   // Turn while a key is held, straighten when it's let go. The newest
   // held key wins, and a tap still commits a short turn so it isn't lost.
   let heading = 'down';        // 'left' | 'down' | 'right'
@@ -218,6 +225,7 @@
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     held = []; tapLeft = 0;
+    cause = null; exploded = new Set(); particles = [];
     passed = 0; missed = 0; reds = 0; nextPole = 0;
     runEnd = null;
     runStart = performance.now();
@@ -229,12 +237,18 @@
     paintHud();
   }
 
-  function crash() {
+  function crash(hit) {
     state = 'crashed';
     mode = 'crash';
     runEnd = performance.now();
+    cause = hit.pine ? 'pine' : 'tree';
+    if (hit.pine) {
+      exploded.add(hit.i + ',' + hit.j);
+      spawnExplosion(hit.x, hit.y - 3);
+    }
     closeSession();
-    setTimeout(() => showOverlay(false), 900);
+    // Long enough to watch the pieces land.
+    setTimeout(() => showOverlay(false), hit.pine ? 1400 : 900);
   }
 
   function finish() {
@@ -314,7 +328,8 @@
     const steering = heading !== 'down';
     mode = heading;
 
-    if (hitTree(skierX, skierY)) { crash(); return; }
+    const hit = hitTree(skierX, skierY);
+    if (hit) { crash(hit); return; }
 
     // Holding a straight line builds a little speed back after a turn;
     // any steering cancels it.
@@ -378,18 +393,21 @@
 
   // At most one tree per TREE_CELL square, placed by hash so it's stable
   // as the slope scrolls. Rendering and collision both ask this, so a tree
-  // you can see is exactly a tree you can hit.
+  // you can see is exactly a tree you can hit. Now and then the tree is a
+  // pineapple, which is just as solid and a lot louder.
   function treeAt(i, j, salt, centerAt) {
     const x = i * TREE_CELL + 2 + Math.floor(hash(i * 7 + salt, j * 3 + 1) * (TREE_CELL - 4));
     const y = j * TREE_CELL + 2 + Math.floor(hash(i * 5 + salt, j * 11 + 7) * (TREE_CELL - 4));
     const depth = snowDepth(x, centerAt(y));
     if (depth < TREE_CLEAR) return null;
     const chance = TREE_MAX * ((depth - TREE_CLEAR) / (1 - TREE_CLEAR)) ** 1.5;
-    return hash(i * 92821 + salt, j) < chance ? { x, y } : null;
+    if (hash(i * 92821 + salt, j) >= chance) return null;
+    return { i, j, x, y, pine: hash(i * 48271 + salt, j * 13 + 5) < PINE_CHANCE };
   }
 
   // Skier rows span y-4..y+4, a tree's y-6..y. A pixel or so of mercy on
-  // each edge, so a brush past the canopy doesn't end the run.
+  // each edge, so a brush past the canopy doesn't end the run. Returns
+  // what was hit, or null.
   function hitTree(x, y) {
     const { salt, centerAt } = course;
     const i0 = Math.floor((x - 8) / TREE_CELL), i1 = Math.floor((x + 8) / TREE_CELL);
@@ -397,10 +415,10 @@
     for (let j = j0; j <= j1; j++) {
       for (let i = i0; i <= i1; i++) {
         const tr = treeAt(i, j, salt, centerAt);
-        if (tr && Math.abs(x - tr.x) <= 4 && y >= tr.y - 8 && y <= tr.y + 2) return true;
+        if (tr && Math.abs(x - tr.x) <= 4 && y >= tr.y - 8 && y <= tr.y + 2) return tr;
       }
     }
-    return false;
+    return null;
   }
 
   function put(x, y, c) {
@@ -454,14 +472,61 @@
     '...O...',
   ];
 
+  // snake-bit's pineapple, cut down to tree size in VIC colours.
+  const PINEAPPLE = [
+    '.G.G.G.',
+    '..GGG..',
+    '...G...',
+    '.YOYOY.',
+    'YOYOYOY',
+    'OYOYOYO',
+    '.YOYOY.',
+  ];
+
+  // X takes the ink passed in; the other letters are fixed colours.
+  const INKS = { O: VIC.orange, G: VIC.green, Y: VIC.yellow };
+
   function blit(rows, x0, y0, ink) {
     for (let r = 0; r < rows.length; r++) {
       for (let c = 0; c < rows[r].length; c++) {
         const ch = rows[r][c];
         if (ch === 'X') put(x0 + c, y0 + r, ink);
-        else if (ch === 'O') put(x0 + c, y0 + r, VIC.orange);
+        else if (INKS[ch]) put(x0 + c, y0 + r, INKS[ch]);
       }
     }
+  }
+
+  // ------------------------------------------------------------ explosion
+  // Like snake-bit's: a burst of pieces flung out and pulled down, here
+  // scaled to a 224-pixel screen and kept to the VIC palette. Positions
+  // are world coordinates, so the pieces stay where the pineapple was.
+  const PIECE_COLORS = [VIC.yellow, VIC.yellow, VIC.orange, VIC.green, VIC.red];
+
+  function spawnExplosion(x, y) {
+    // A white flash first, so it reads as a bang over the speckle...
+    particles.push({ x, y, vx: 0, vy: 0, life: 0.12, flash: true });
+    // ...then chunks: single pixels vanish into the snow at this size.
+    for (let k = 0; k < 40; k++) {
+      const a = Math.random() * Math.PI * 2;
+      const v = 30 + Math.random() * 50;
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * v,
+        vy: Math.sin(a) * v - 40,
+        life: 0.6 + Math.random() * 0.5,
+        size: Math.random() < 0.35 ? 3 : 2,
+        color: PIECE_COLORS[Math.floor(Math.random() * PIECE_COLORS.length)],
+      });
+    }
+  }
+
+  function updateParticles(dt) {
+    for (const p of particles) {
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vy += 160 * dt;
+      p.life -= dt;
+    }
+    particles = particles.filter(p => p.life > 0);
   }
 
   function drawPole(p, sy) {
@@ -528,7 +593,9 @@
     for (let j = j0; j <= j1; j++) {
       for (let i = 0; i < iMax; i++) {
         const tr = treeAt(i, j, salt, centerAt);
-        if (tr) blit(TREE, tr.x - 3, tr.y - camY - 6, VIC.green);
+        if (!tr) continue;
+        if (!tr.pine) blit(TREE, tr.x - 3, tr.y - camY - 6, VIC.green);
+        else if (!exploded.has(i + ',' + j)) blit(PINEAPPLE, tr.x - 3, tr.y - camY - 6);
       }
     }
 
@@ -550,6 +617,17 @@
       if (state !== 'title') {
         const s = SPRITES[mode] || SPRITES.down;
         blit(s, Math.round(skierX) - 3, SKIER_Y - 4, VIC.black);
+      }
+      for (const p of particles) {
+        const px = Math.round(p.x), py = Math.round(p.y - camY);
+        if (p.flash) {
+          for (let dy = -6; dy <= 6; dy++)
+            for (let dx = -6; dx <= 6; dx++)
+              if (dx * dx + dy * dy <= 36) put(px + dx, py + dy, dx * dx + dy * dy <= 12 ? VIC.yellow : VIC.white);
+          continue;
+        }
+        for (let dy = 0; dy < p.size; dy++)
+          for (let dx = 0; dx < p.size; dx++) put(px + dx, py + dy, p.color);
       }
     }
 
@@ -581,7 +659,9 @@
         `<div><span>RED ${reds} x 1.50</span><span>-${fmt(reds * BONUS_CS)}</span></div>` +
         `<div class="total"><span>TIME</span><span>${fmt(finalCs())}</span></div>`;
     } else {
-      breakdownEl.innerHTML = '<div class="center">INTO THE TREES. NO TIME.</div>';
+      breakdownEl.innerHTML = cause === 'pine'
+        ? '<div class="center">KABOOM. A PINEAPPLE. NO TIME.</div>'
+        : '<div class="center">INTO THE TREES. NO TIME.</div>';
     }
     // Only a finished, ranked run can be submitted.
     submitFormEl.hidden = !(finished && sessionId);
@@ -670,6 +750,7 @@
     } else {
       acc = 0;
     }
+    if (particles.length) updateParticles(Math.min(dt, 0.05));
     if (state === 'running' || state === 'crashed' || state === 'finished') paintHud();
     if (now > flashUntil && state !== 'title') msgEl.textContent = '';
     render();
