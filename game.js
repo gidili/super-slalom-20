@@ -172,6 +172,140 @@
   let held = [];               // [{ id, dir }], newest last
   let tapDir = 'down', tapLeft = 0;
 
+  // ----------------------------------------------------------------- sound
+  // Built like snake-bit's: one AudioContext created on the first key or
+  // tap (browsers refuse audio before that), everything through a master
+  // gain so M can mute it all. All noise, no music: the slope hisses under
+  // the skis, turns snap, and the ends of runs are wood or pineapple.
+  const SFX = (() => {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    let ac = null, master = null, noise = null, swoosh = null;
+    let muted = false;
+    try { muted = localStorage.getItem('slalom_muted') === '1'; } catch (_) {}
+    const VOLUME = 0.45;
+
+    function unlock() {
+      if (!AC) return;
+      if (!ac) {
+        ac = new AC();
+        master = ac.createGain();
+        master.gain.value = muted ? 0 : VOLUME;
+        master.connect(ac.destination);
+        // Two seconds of white noise, shared by every sound below.
+        noise = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate);
+        const d = noise.getChannelData(0);
+        for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      }
+      if (ac.state === 'suspended') ac.resume().catch(() => {});
+    }
+
+    function noiseThrough(type, freq, q, at) {
+      const src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+      src.buffer = noise;
+      src.loopStart = 0; src.loopEnd = noise.duration;
+      // Start somewhere random in the buffer so repeats don't sound identical.
+      const offset = Math.random() * (noise.duration - 0.5);
+      f.type = type; f.frequency.value = freq; f.Q.value = q;
+      src.connect(f); f.connect(g); g.connect(master);
+      src.start(at, offset);
+      return { src, f, g };
+    }
+
+    // The skis on the snow: looping noise whose loudness and brightness
+    // follow speed; deep snow muffles it.
+    function startSwoosh() {
+      if (!ac) return;
+      stopSwoosh();
+      swoosh = noiseThrough('bandpass', 800, 0.6, ac.currentTime);
+      swoosh.src.loop = true;
+      swoosh.g.gain.value = 0;
+    }
+    function updateSwoosh(speedNorm, depth, steering) {
+      if (!swoosh) return;
+      const t = ac.currentTime;
+      const v = Math.max(0, Math.min(1.2, speedNorm));
+      swoosh.g.gain.setTargetAtTime(0.04 + 0.12 * v + (steering ? 0.04 : 0), t, 0.06);
+      swoosh.f.frequency.setTargetAtTime(500 + 2600 * v * (1 - 0.65 * depth), t, 0.06);
+    }
+    function stopSwoosh() {
+      if (!swoosh) return;
+      const t = ac.currentTime, sw = swoosh;
+      sw.g.gain.setTargetAtTime(0, t, 0.05);
+      sw.src.stop(t + 0.3);
+      swoosh = null;
+    }
+
+    // A change of direction: a short dash of noise sweeping down.
+    function playDash(strength) {
+      if (!ac) return;
+      const t = ac.currentTime;
+      const { src, f, g } = noiseThrough('bandpass', 4500, 1.2, t);
+      f.frequency.setValueAtTime(4500, t);
+      f.frequency.exponentialRampToValueAtTime(900, t + 0.12);
+      g.gain.setValueAtTime(0.28 * strength, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+      src.stop(t + 0.15);
+    }
+
+    // Into a tree: boxes breaking. A low thud, then a handful of dry
+    // cracks tumbling after it, each with a little wooden knock.
+    function playBreak() {
+      if (!ac) return;
+      const t = ac.currentTime;
+      const thud = ac.createOscillator(), tg = ac.createGain();
+      thud.type = 'sine';
+      thud.frequency.setValueAtTime(140, t);
+      thud.frequency.exponentialRampToValueAtTime(45, t + 0.18);
+      tg.gain.setValueAtTime(0.4, t);
+      tg.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+      thud.connect(tg); tg.connect(master); thud.start(t); thud.stop(t + 0.21);
+      [0, 0.035, 0.08, 0.13, 0.2, 0.29].forEach((dt, k) => {
+        const at = t + dt + Math.random() * 0.015;
+        const len = 0.04 + Math.random() * 0.03;
+        const { src, g } = noiseThrough('bandpass', 1200 + Math.random() * 2000, 3, at);
+        g.gain.setValueAtTime(0.3 * (1 - k * 0.1), at);
+        g.gain.exponentialRampToValueAtTime(0.001, at + len);
+        src.stop(at + len + 0.01);
+        const knock = ac.createOscillator(), kg = ac.createGain();
+        knock.type = 'square';
+        knock.frequency.value = 200 + Math.random() * 200;
+        kg.gain.setValueAtTime(0.06, at);
+        kg.gain.exponentialRampToValueAtTime(0.001, at + 0.03);
+        knock.connect(kg); kg.connect(master); knock.start(at); knock.stop(at + 0.04);
+      });
+    }
+
+    // snake-bit's pineapple explosion, unchanged: noise burst + pitch drop.
+    function playExplosion() {
+      if (!ac) return;
+      const t = ac.currentTime;
+      const { src, g: ng } = noiseThrough('allpass', 1000, 1, t);
+      ng.gain.setValueAtTime(0.35, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+      src.stop(t + 0.31);
+      const osc = ac.createOscillator(), g = ac.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(300, t); osc.frequency.exponentialRampToValueAtTime(40, t + 0.25);
+      g.gain.setValueAtTime(0.18, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+      osc.connect(g); g.connect(master); osc.start(t); osc.stop(t + 0.26);
+    }
+
+    function toggleMute() {
+      muted = !muted;
+      try { localStorage.setItem('slalom_muted', muted ? '1' : '0'); } catch (_) {}
+      if (master) master.gain.value = muted ? 0 : VOLUME;
+      return muted;
+    }
+
+    // Sound is called from inside the physics step; a browser audio fault
+    // must never be able to stop a run, so every entry point swallows it.
+    const safe = f => (...a) => { try { return f(...a); } catch (_) { return undefined; } };
+    return {
+      unlock: safe(unlock), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
+      stopSwoosh: safe(stopSwoosh), playDash: safe(playDash), playBreak: safe(playBreak),
+      playExplosion: safe(playExplosion), toggleMute: safe(toggleMute),
+    };
+  })();
+
   // --------------------------------------------------------- session edges
   // Unlike snake-bit, the session opens when the run starts, not on page
   // load: the course needs the server's seed before it exists. A side
@@ -233,6 +367,7 @@
     last = runStart;
     acc = 0;
     state = 'running';
+    SFX.startSwoosh();
     flash(sessionId ? 'GO' : 'GO  (UNRANKED)');
     paintHud();
   }
@@ -242,6 +377,8 @@
     mode = 'crash';
     runEnd = performance.now();
     cause = hit.pine ? 'pine' : 'tree';
+    SFX.stopSwoosh();
+    if (hit.pine) SFX.playExplosion(); else SFX.playBreak();
     if (hit.pine) {
       exploded.add(hit.i + ',' + hit.j);
       spawnExplosion(hit.x, hit.y - 3);
@@ -256,6 +393,7 @@
     while (nextPole < POLE_COUNT) resolvePole(false);
     state = 'finished';
     mode = 'down';
+    SFX.stopSwoosh();
     runEnd = performance.now();
     closeSession();
     setTimeout(() => showOverlay(true), 500);
@@ -289,13 +427,18 @@
   function release(id) { held = held.filter(h => h.id !== id); }
   function straighten() { held = []; tapLeft = 0; }
 
+  // Any first key, tap or click lets the page make sound.
+  window.addEventListener('pointerdown', SFX.unlock);
+
   window.addEventListener('keydown', (e) => {
+    SFX.unlock();
     if (document.activeElement === initialsInputEl) return;
     const id = 'k' + e.key.toLowerCase();
     if (LEFT.has(e.key) || RIGHT.has(e.key)) {
       e.preventDefault();
       if (!e.repeat) press(id, LEFT.has(e.key) ? 'left' : 'right');
     } else if (STRAIGHT.has(e.key)) { straighten(); e.preventDefault(); }
+    else if (e.key === 'm' || e.key === 'M') flash(SFX.toggleMute() ? 'SOUND OFF' : 'SOUND ON');
     else if (GO.has(e.key)) {
       e.preventDefault();
       if (state === 'title' || (overlayEl.hidden === false && state !== 'running')) startRun();
@@ -308,6 +451,7 @@
   // Touch: hold the left third to turn left, the right third to turn
   // right; the middle straightens. Lifting the finger straightens too.
   canvas.addEventListener('touchstart', (e) => {
+    SFX.unlock();
     if (state === 'title') { startRun(); return; }
     const r = canvas.getBoundingClientRect();
     for (const t of e.changedTouches) {
@@ -324,7 +468,10 @@
   // --------------------------------------------------------------- physics
   function step(dt) {
     tapLeft = Math.max(0, tapLeft - dt);
+    const was = heading;
     heading = held.length ? held[held.length - 1].dir : tapLeft > 0 ? tapDir : 'down';
+    // Every change of direction snaps; straightening up a little softer.
+    if (heading !== was) SFX.playDash(heading === 'down' ? 0.5 : 1);
     const steering = heading !== 'down';
     mode = heading;
 
@@ -749,6 +896,9 @@
       while (acc >= STEP && state === 'running') { step(STEP); acc -= STEP; }
     } else {
       acc = 0;
+    }
+    if (state === 'running') {
+      SFX.updateSwoosh(speed / DOWN_SPEED, snowDepth(skierX, course.centerAt(skierY)), heading !== 'down');
     }
     if (particles.length) updateParticles(Math.min(dt, 0.05));
     if (state === 'running' || state === 'crashed' || state === 'finished') paintHud();

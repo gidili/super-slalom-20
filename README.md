@@ -19,4 +19,4 @@ Play: (not deployed yet)
 - A quick tap gives a short turn, for small corrections
 - **S** or **↓** straightens right away
 
-Keypad 4 / 6 / 2 work too. Space to start. On mobile, hold the left third of the screen to turn left, the right third to turn right; tap the middle to straighten.
+Keypad 4 / 6 / 2 work too. Space to start, **M** to mute. On mobile, hold the left third of the screen to turn left, the right third to turn right; tap the middle to straighten.
