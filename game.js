@@ -50,6 +50,7 @@
   const DECEL_RATE = 3;        // slowing down is quicker
   const LATERAL = 56;          // px/s sideways while steering
   const DEEP_SNOW_DRAG = 0.65; // speed lost at full depth
+  const MIN_TURN = 0.1;        // a tap turns for at least this long (s)
 
   // The course is deterministic per seed, but the server never rebuilds it:
   // it only checks counts, which are fixed (POLE_COUNT, RED_COUNT). So the
@@ -158,9 +159,11 @@
   let straightFor = 0;         // seconds since the skier last steered
   let passed, missed, reds, nextPole;
   let runStart = 0, runEnd = null;
-  // Snake-style: the skier holds whichever heading was last set, with no
-  // need to keep a key down. One heading per skiing sprite.
+  // Turn while a key is held, straighten when it's let go. The newest
+  // held key wins, and a tap still commits a short turn so it isn't lost.
   let heading = 'down';        // 'left' | 'down' | 'right'
+  let held = [];               // [{ id, dir }], newest last
+  let tapDir = 'down', tapLeft = 0;
 
   // --------------------------------------------------------- session edges
   // Unlike snake-bit, the session opens when the run starts, not on page
@@ -214,6 +217,7 @@
     skierX = course.centerAt(0);
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
+    held = []; tapLeft = 0;
     passed = 0; missed = 0; reds = 0; nextPole = 0;
     runEnd = null;
     runStart = performance.now();
@@ -263,28 +267,50 @@
   const STRAIGHT = new Set(['ArrowDown', 's', 'S', '2']);
   const GO = new Set([' ', 'Enter']);
 
+  function press(id, dir) {
+    held = held.filter(h => h.id !== id);
+    held.push({ id, dir });
+    tapDir = dir; tapLeft = MIN_TURN;
+  }
+  function release(id) { held = held.filter(h => h.id !== id); }
+  function straighten() { held = []; tapLeft = 0; }
+
   window.addEventListener('keydown', (e) => {
     if (document.activeElement === initialsInputEl) return;
-    if (LEFT.has(e.key)) { heading = 'left'; e.preventDefault(); }
-    else if (RIGHT.has(e.key)) { heading = 'right'; e.preventDefault(); }
-    else if (STRAIGHT.has(e.key)) { heading = 'down'; e.preventDefault(); }
+    const id = 'k' + e.key.toLowerCase();
+    if (LEFT.has(e.key) || RIGHT.has(e.key)) {
+      e.preventDefault();
+      if (!e.repeat) press(id, LEFT.has(e.key) ? 'left' : 'right');
+    } else if (STRAIGHT.has(e.key)) { straighten(); e.preventDefault(); }
     else if (GO.has(e.key)) {
       e.preventDefault();
       if (state === 'title' || (overlayEl.hidden === false && state !== 'running')) startRun();
     }
   });
+  window.addEventListener('keyup', (e) => release('k' + e.key.toLowerCase()));
+  // A key let go while the window is unfocused never sends keyup.
+  window.addEventListener('blur', straighten);
 
-  // Touch: tap the left third to turn left, the right third to turn right,
-  // the middle to go straight. Like the keys, the heading sticks.
+  // Touch: hold the left third to turn left, the right third to turn
+  // right; the middle straightens. Lifting the finger straightens too.
   canvas.addEventListener('touchstart', (e) => {
     if (state === 'title') { startRun(); return; }
     const r = canvas.getBoundingClientRect();
-    const f = (e.touches[0].clientX - r.left) / r.width;
-    heading = f < 1 / 3 ? 'left' : f > 2 / 3 ? 'right' : 'down';
+    for (const t of e.changedTouches) {
+      const f = (t.clientX - r.left) / r.width;
+      if (f < 1 / 3) press('t' + t.identifier, 'left');
+      else if (f > 2 / 3) press('t' + t.identifier, 'right');
+      else straighten();
+    }
   }, { passive: true });
+  const lift = (e) => { for (const t of e.changedTouches) release('t' + t.identifier); };
+  canvas.addEventListener('touchend', lift, { passive: true });
+  canvas.addEventListener('touchcancel', lift, { passive: true });
 
   // --------------------------------------------------------------- physics
   function step(dt) {
+    tapLeft = Math.max(0, tapLeft - dt);
+    heading = held.length ? held[held.length - 1].dir : tapLeft > 0 ? tapDir : 'down';
     const steering = heading !== 'down';
     mode = heading;
 

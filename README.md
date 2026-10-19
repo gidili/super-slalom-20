@@ -14,10 +14,9 @@ Play: (not deployed yet)
 
 ## Controls
 
-Like snake, the skier keeps going whichever way you last pointed them:
+- Hold **A** or **←** to turn left, **D** or **→** to turn right
+- Let go and the skier straightens up; the longer you hold a straight line the faster you go
+- A quick tap gives a short turn, for small corrections
+- **S** or **↓** straightens right away
 
-- **A** or **←** turns left
-- **D** or **→** turns right
-- **S** or **↓** goes straight, and the longer you hold a straight line the faster you go
-
-Keypad 4 / 6 / 2 work too. Space to start. On mobile, tap the left third of the screen to turn left, the right third to turn right, the middle to go straight.
+Keypad 4 / 6 / 2 work too. Space to start. On mobile, hold the left third of the screen to turn left, the right third to turn right; tap the middle to straighten.
