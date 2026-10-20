@@ -249,9 +249,8 @@
   const img = ctx.createImageData(W, H);
 
   const scoreEl = document.getElementById('hud-score');
-  const poleEl = document.getElementById('hud-pole');
   const missEl = document.getElementById('hud-miss');
-  const redEl = document.getElementById('hud-red');
+  const bestEl = document.getElementById('hud-best');
   const msgEl = document.getElementById('message');
   const overlayEl = document.getElementById('overlay');
   const overlayTitleEl = document.getElementById('overlay-title');
@@ -1321,11 +1320,19 @@
     flashUntil = performance.now() + 1100;
   }
 
+  let best = 0;
+  try { best = parseInt(localStorage.getItem('slalom_best') || '0', 10) || 0; } catch (_) {}
+
   function paintHud() {
-    scoreEl.textContent = state === 'title' ? 0 : earned() + shownBonus;
-    poleEl.textContent = `${Math.min(nextPole || 0, POLE_COUNT)}/${POLE_COUNT}`;
+    const score = state === 'title' ? 0 : earned() + shownBonus;
+    scoreEl.textContent = score;
     missEl.textContent = missed || 0;
-    redEl.textContent = reds || 0;
+    // Like snake-bit, BEST climbs live once this run passes it.
+    if (score > best) {
+      best = score;
+      try { localStorage.setItem('slalom_best', best); } catch (_) {}
+    }
+    bestEl.textContent = best;
   }
 
   // -------------------------------------------------------------- overlay
