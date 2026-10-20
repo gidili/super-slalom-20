@@ -78,7 +78,9 @@
   const FINISH_PAD = 120;      // after the last pole
   // Near the end the slope stops scrolling with the finish line this far
   // down the screen, and the skier runs down to it. Past the last pole.
-  const FINISH_ROW = 140;
+  // 28 rows up from the bottom on the TV; on a phone, just above the arrow
+  // buttons so they never cover the line.
+  const FINISH_ROW = H - (NARROW ? 50 : 28);
   const PATH_HW = 40;          // groomed piste, half width
 
   // Off the piste, "depth" runs from 0 at the piste edge to 1 at the screen
