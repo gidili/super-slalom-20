@@ -4,8 +4,15 @@
   // ------------------------------------------------------------- the screen
   // An old 4:3 TV, filled with snow edge to edge: 28 x 21 characters of
   // 8 x 8 pixels. Wider than the VIC-20's stock 22 columns, to leave room
-  // off the piste for shortcuts.
-  const W = 224, H = 168;
+  // off the piste for shortcuts. W is also the width of the mountain itself.
+  const W = 224;
+  // A phone held upright (snake-bit's test, made once at load) gets the
+  // same mountain through a narrower window, 18 characters wide, as tall as
+  // the screen allows. The window slides sideways to follow the piste, so
+  // the course, and the score, are the same as on the TV.
+  const NARROW = window.innerWidth / window.innerHeight < 0.85;
+  const VW = NARROW ? 144 : W;
+  const H = NARROW ? Math.round(VW * window.innerHeight / window.innerWidth) : 168;
 
   // The VIC-20's palette. Nothing outside this list is ever drawn.
   const VIC = {
@@ -248,8 +255,9 @@
   // ------------------------------------------------------------------- dom
   const canvas = document.getElementById('screen');
   const ctx = canvas.getContext('2d');
-  canvas.width = W; canvas.height = H;
-  const img = ctx.createImageData(W, H);
+  canvas.width = VW; canvas.height = H;
+  const img = ctx.createImageData(VW, H);
+  document.body.classList.toggle('narrow', NARROW);
 
   const scoreEl = document.getElementById('hud-score');
   const missEl = document.getElementById('hud-miss');
@@ -607,7 +615,7 @@
     shownBonus = 0;
     bonusEl.hidden = true;
     passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
-    msgEl.textContent = 'PRESS SPACE';
+    msgEl.textContent = NARROW ? 'TAP TO START' : 'PRESS SPACE';
     paintHud();
   }
 
@@ -776,7 +784,7 @@
         SFX.playStar(k.starsShown);
         if (k.starsShown === 3) {
           SFX.playJingle();
-          spawnSparkles(W / 2, cameraTop() + STAR_ROW);
+          spawnSparkles(camX + VW / 2, cameraTop() + STAR_ROW);
         }
       }
       // The card once the last star has had its moment.
@@ -815,6 +823,19 @@
   function cameraTop() {
     if (!course) return -SKIER_Y;
     return Math.floor(Math.min(skierY - SKIER_Y, course.finishY - FINISH_ROW));
+  }
+
+  // The narrow window's left edge, in world x: centred on the piste a
+  // little below the skier, where the eye is, but never letting the skier
+  // near the side, and never past the mountain's edges.
+  const SIDE_ROOM = 16;
+  function cameraLeft(camY) {
+    if (!NARROW) return 0;
+    const centerAt = course ? course.centerAt : titleCenter;
+    const ahead = camY + SKIER_Y;
+    let x = (centerAt(ahead) + centerAt(ahead + 80)) / 2 - VW / 2;
+    if (state !== 'title') x = Math.max(skierX + SIDE_ROOM - VW, Math.min(skierX - SIDE_ROOM, x));
+    return Math.round(Math.max(0, Math.min(W - VW, x)));
   }
 
   function resolvePole(through, clipped) {
@@ -867,35 +888,43 @@
     } else if (STRAIGHT.has(e.key)) { straighten(); e.preventDefault(); }
     else if (e.key === 'm' || e.key === 'M') flash(SFX.toggleMute() ? 'SOUND OFF' : 'SOUND ON');
     else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); restart(); }
-    else if (GO.has(e.key)) {
-      e.preventDefault();
-      if (state === 'title') startRun();
-      else if (state === 'running' || state === 'paused') togglePause();
-      else if (tally) endTally();
-      else if (overlayEl.hidden === false && (state === 'crashed' || state === 'finished')) toTitle();
-    }
+    else if (GO.has(e.key)) { e.preventDefault(); spaceAction(); }
   });
+
+  // Space, or a tap on the screen: start, pause and resume, skip the tally.
+  function spaceAction() {
+    if (state === 'title') startRun();
+    else if (state === 'running' || state === 'paused') togglePause();
+    else if (tally) endTally();
+    else if (overlayEl.hidden === false && (state === 'crashed' || state === 'finished')) toTitle();
+  }
   window.addEventListener('keyup', (e) => release(SHIFTS[e.code] ? 'k' + e.code : 'k' + e.key.toLowerCase()));
   // A key let go while the window is unfocused never sends keyup.
   window.addEventListener('blur', straighten);
 
-  // Touch: hold the left third to turn left, the right third to turn
-  // right; the middle straightens. Lifting the finger straightens too.
-  canvas.addEventListener('touchstart', (e) => {
+  // Touch: a tap on the screen is Space. Steering is the two arrow
+  // buttons in the bottom corners, held like the keys: the pointer is
+  // captured, so a thumb sliding off the button keeps turning until lifted.
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse') return;
     SFX.unlock();
-    if (state === 'title') { startRun(); return; }
-    if (state === 'paused') return;
-    const r = canvas.getBoundingClientRect();
-    for (const t of e.changedTouches) {
-      const f = (t.clientX - r.left) / r.width;
-      if (f < 1 / 3) press('t' + t.identifier, 'left');
-      else if (f > 2 / 3) press('t' + t.identifier, 'right');
-      else straighten();
-    }
-  }, { passive: true });
-  const lift = (e) => { for (const t of e.changedTouches) release('t' + t.identifier); };
-  canvas.addEventListener('touchend', lift, { passive: true });
-  canvas.addEventListener('touchcancel', lift, { passive: true });
+    spaceAction();
+  });
+  document.querySelectorAll('.arrow-btn').forEach((btn) => {
+    const dir = btn.dataset.dir;
+    const id = 'b' + dir;
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      SFX.unlock();
+      try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+      press(id, dir);
+    });
+    const up = () => release(id);
+    btn.addEventListener('pointerup', up);
+    btn.addEventListener('pointercancel', up);
+    btn.addEventListener('lostpointercapture', up);
+    btn.addEventListener('contextmenu', (e) => e.preventDefault());
+  });
 
   // --------------------------------------------------------------- physics
   function step(dt) {
@@ -1094,9 +1123,12 @@
     return null;
   }
 
+  // Everything is drawn in world x; the window starts at camX.
+  let camX = 0;
   function put(x, y, c) {
-    if (x < 0 || x >= W || y < 0 || y >= H) return;
-    const i = (y * W + x) * 4;
+    x -= camX;
+    if (x < 0 || x >= VW || y < 0 || y >= H) return;
+    const i = (y * VW + x) * 4;
     img.data[i] = c[0]; img.data[i + 1] = c[1]; img.data[i + 2] = c[2]; img.data[i + 3] = 255;
   }
 
@@ -1162,6 +1194,25 @@
 
   // X takes the ink passed in; the other letters are fixed colours.
   const INKS = { O: VIC.orange, G: VIC.green, Y: VIC.yellow };
+
+  // The on-screen arrows, in the same blocky pixels as everything else.
+  const ARROW = [
+    '...X...',
+    '..XX...',
+    '.XXXXXX',
+    'XXXXXXX',
+    '.XXXXXX',
+    '..XX...',
+    '...X...',
+  ];
+  document.querySelectorAll('.arrow-btn canvas').forEach((c) => {
+    const actx = c.getContext('2d');
+    const flip = c.parentElement.dataset.dir === 'right';
+    actx.fillStyle = css(VIC.blue);
+    ARROW.forEach((row, y) => [...row].forEach((ch, x) => {
+      if (ch === 'X') actx.fillRect(flip ? 6 - x : x, y, 1, 1);
+    }));
+  });
 
   // The title reads SUPER SLALOM VS <pineapple>, and the score card
   // carries one too; both drawn from the sprite.
@@ -1292,10 +1343,13 @@
 
   function render() {
     const camY = cameraTop();
+    camX = cameraLeft(camY);
     const centerAt = course ? course.centerAt : titleCenter;
 
     const lineAt = course ? course.lineAt : null;
-    for (let sy = 0; sy < H; sy++) img.data.set(snowRow(camY + sy, centerAt, lineAt), sy * W * 4);
+    for (let sy = 0; sy < H; sy++) {
+      img.data.set(snowRow(camY + sy, centerAt, lineAt).subarray(camX * 4, (camX + VW) * 4), sy * VW * 4);
+    }
 
     // Trees, scattered off the piste and thickening toward the edges.
     const salt = course ? course.salt : 0;
@@ -1383,7 +1437,7 @@
   const STAR_ROW = 76;         // screen row of the stars' centres
   function drawStars(n) {
     for (let k = 0; k < 3; k++) {
-      const x0 = W / 2 - 4 + (k - 1) * 16, y0 = STAR_ROW - 4;
+      const x0 = camX + VW / 2 - 4 + (k - 1) * 16, y0 = STAR_ROW - 4;
       if (k < n) {
         for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) blit(STAR, x0 + dx, y0 + dy, VIC.orange);
         blit(STAR, x0, y0, VIC.yellow);
@@ -1569,7 +1623,7 @@
     requestAnimationFrame(frame);
   }
 
-  msgEl.textContent = 'PRESS SPACE';
+  msgEl.textContent = NARROW ? 'TAP TO START' : 'PRESS SPACE';
   prepareRun();
   paintHud();
   fetchLeaderboard();
