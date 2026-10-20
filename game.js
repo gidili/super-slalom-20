@@ -257,6 +257,10 @@
   const msgEl = document.getElementById('message');
   const overlayEl = document.getElementById('overlay');
   const overlayTitleEl = document.getElementById('overlay-title');
+  const overlayWordEl = document.getElementById('overlay-word');
+  const finalScoreEl = document.getElementById('final-score-val');
+  const finalStarsEl = document.getElementById('final-stars');
+  const leaderboardEl = document.getElementById('leaderboard');
   const breakdownEl = document.getElementById('breakdown');
   const submitFormEl = document.getElementById('submit-form');
   const initialsInputEl = document.getElementById('initials-input');
@@ -596,7 +600,7 @@
     state = 'title';
     prepareRun();
     particles = [];
-    overlayEl.hidden = true;
+    hideOverlay();
     titleCardEl.hidden = false;
     countdownEl.hidden = true;
     tally = null;
@@ -615,7 +619,7 @@
     if (state !== 'title') return;
     state = 'starting';
     runId++;
-    overlayEl.hidden = true;
+    hideOverlay();
     titleCardEl.hidden = true;
     flash('GET READY');
     await prepared;
@@ -1159,16 +1163,16 @@
   // X takes the ink passed in; the other letters are fixed colours.
   const INKS = { O: VIC.orange, G: VIC.green, Y: VIC.yellow };
 
-  // The title reads SUPER SLALOM VS <pineapple>, drawn from the sprite.
-  (() => {
-    const c = document.getElementById('title-pineapple');
+  // The title reads SUPER SLALOM VS <pineapple>, and the score card
+  // carries one too; both drawn from the sprite.
+  document.querySelectorAll('canvas.pine-icon').forEach((c) => {
     const tctx = c.getContext('2d');
     PINEAPPLE.forEach((row, y) => [...row].forEach((ch, x) => {
       if (!INKS[ch]) return;
       tctx.fillStyle = css(INKS[ch]);
       tctx.fillRect(x, y, 1, 1);
     }));
-  })();
+  });
 
   function blit(rows, x0, y0, ink) {
     for (let r = 0; r < rows.length; r++) {
@@ -1388,7 +1392,24 @@
       }
     }
   }
-  const starText = n => '<span class="gold">' + '\u2605'.repeat(n) + '</span>' + '\u2606'.repeat(3 - n);
+  // The same stars on the score card, on a canvas of their own.
+  function paintCardStars(n) {
+    const sctx = finalStarsEl.getContext('2d');
+    sctx.clearRect(0, 0, finalStarsEl.width, finalStarsEl.height);
+    const stamp = (x0, y0, ink) => {
+      sctx.fillStyle = css(ink);
+      STAR.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === 'X') sctx.fillRect(x0 + x, y0 + y, 1, 1); }));
+    };
+    for (let k = 0; k < 3; k++) {
+      const x0 = 1 + k * 14, y0 = 1;
+      if (k < n) {
+        for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) stamp(x0 + dx, y0 + dy, VIC.orange);
+        stamp(x0, y0, VIC.yellow);
+      } else {
+        stamp(x0, y0, VIC.lightBlue);
+      }
+    }
+  }
 
   // ------------------------------------------------------------------ hud
   let flashUntil = 0;
@@ -1413,53 +1434,67 @@
   }
 
   // -------------------------------------------------------------- overlay
+  // Two steps, like snake-bit: the run's breakdown and the initials first,
+  // then, once saved or skipped, the top 10 with the new entry flashing.
+  let lastSubmittedId = null;
+
   function showOverlay(finished) {
-    overlayTitleEl.textContent = finished ? 'FINISH' : 'WIPEOUT';
-    overlayTitleEl.className = finished ? 'ok' : 'bad';
-    const poles =
-      `<div><span>POLES ${passed} x ${POLE_POINTS}</span><span>${passed * POLE_POINTS}</span></div>` +
-      `<div><span>RED ${reds} x ${RED_POINTS}</span><span>${reds * RED_POINTS}</span></div>` +
-      (clips ? `<div><span>CLIPPED ${clips} x ${CLIP_POINTS}</span><span>${clips * CLIP_POINTS}</span></div>` : '');
-    breakdownEl.innerHTML = finished
-      ? poles +
-        `<div><span>FINISH</span><span>+${FINISH_POINTS}</span></div>` +
-        `<div><span>TIME</span><span>${fmt(runCs())}</span></div>` +
-        (missed > MISS_LIMIT
-          ? `<div><span>MISSED ${missed}: NO TIME BONUS</span><span>+0</span></div>`
-          : (missed ? `<div><span>MISSED ${missed} x ${fmt(MISS_CS)}</span><span>+${fmt(missed * MISS_CS)}</span></div>` : '') +
-            `<div><span>BONUS ON ${fmt(bonusCs())}</span><span>+${timeBonus()}</span></div>`) +
-        `<div class="total"><span>SCORE</span><span>${points()}</span></div>` +
-        `<div class="center stars">${starText(stars())}</div>`
-      : `<div class="center">INTO THE ${hitWhat}</div>` + poles +
-        `<div><span>NO TIME BONUS</span><span></span></div>` +
-        `<div class="total"><span>SCORE</span><span>${points()}</span></div>`;
-    // Any ranked run with something to show can go on the board, crashes
-    // included.
-    submitFormEl.hidden = !(sessionId && points() > 0);
-    submitStatusEl.textContent = sessionId ? '' : 'UNRANKED RUN';
+    overlayWordEl.textContent = finished ? 'GAME OVER' : 'WIPEOUT';
+    overlayTitleEl.className = 'bad';
+    finalScoreEl.textContent = points();
+    finalStarsEl.hidden = !finished;
+    if (finished) paintCardStars(stars());
+    // What happened on the run, never how it was scored: the arithmetic
+    // stays in the server's check, not on screen as a recipe.
+    breakdownEl.textContent = finished ? `TIME ${fmt(runCs())}` : `INTO THE ${hitWhat}`;
+    breakdownEl.hidden = false;
+    lastSubmittedId = null;
     submitStatusEl.classList.remove('error');
+    // Any ranked run with something to show can go on the board, crashes
+    // included. Anything else goes straight to the board.
+    const canSave = !!(sessionId && points() > 0);
+    submitFormEl.hidden = !canSave;
+    leaderboardEl.hidden = canSave;
+    submitStatusEl.textContent = sessionId ? '' : 'UNRANKED RUN';
     try { initialsInputEl.value = localStorage.getItem('slalom_initials') || ''; } catch (_) {}
     overlayEl.hidden = false;
-    if (!submitFormEl.hidden) initialsInputEl.focus();
+    requestAnimationFrame(() => overlayEl.classList.add('visible'));
+    if (canSave) setTimeout(() => { if (!overlayEl.hidden) initialsInputEl.focus(); }, 450);
+    else fetchLeaderboard();
+  }
+
+  function hideOverlay() {
+    if (document.activeElement === initialsInputEl) initialsInputEl.blur();
+    overlayEl.classList.remove('visible');
+    overlayEl.hidden = true;
+  }
+
+  // Step two: the run folds down to its score and the board takes over.
+  function showLeaderboard() {
+    if (document.activeElement === initialsInputEl) initialsInputEl.blur();
+    submitFormEl.hidden = true;
+    breakdownEl.hidden = true;
+    leaderboardEl.hidden = false;
     fetchLeaderboard();
   }
 
+  const placeholder = (text) => `<li class="note">${text}</li>`;
+
   async function fetchLeaderboard() {
-    if (!juicer) { leaderboardListEl.textContent = 'OFFLINE'; return; }
+    if (!juicer) { leaderboardListEl.innerHTML = placeholder('OFFLINE'); return; }
+    if (!leaderboardListEl.children.length) leaderboardListEl.innerHTML = placeholder('LOADING...');
     const { data, error } = await juicer
       .from('slalom_scores')
       .select('id, initials, score')
       .order('score', { ascending: false })       // highest first
       .order('created_at', { ascending: true })
       .limit(10);
-    if (error) { leaderboardListEl.textContent = 'UNAVAILABLE'; return; }
-    leaderboardListEl.innerHTML = '';
-    if (!data.length) { leaderboardListEl.textContent = 'NO SCORES YET'; return; }
-    data.forEach((row, i) => {
-      const li = document.createElement('li');
-      li.textContent = `${String(i + 1).padStart(2, '0')}  ${row.initials}  ${String(row.score).padStart(5, ' ')}`;
-      leaderboardListEl.appendChild(li);
-    });
+    if (error) { leaderboardListEl.innerHTML = placeholder('UNAVAILABLE'); return; }
+    if (!data.length) { leaderboardListEl.innerHTML = placeholder('NO SCORES YET'); return; }
+    leaderboardListEl.innerHTML = data.map((row, i) => {
+      const mine = row.id === lastSubmittedId ? ' class="mine"' : '';
+      return `<li${mine}><span class="rank">${i + 1}.</span><span class="ini">${row.initials}</span><span class="sc">${row.score}</span></li>`;
+    }).join('');
   }
 
   submitFormEl.addEventListener('submit', async (e) => {
@@ -1479,7 +1514,7 @@
     // ended_at, so wait for it rather than racing it.
     if (endPromise) await endPromise;
 
-    const { error } = await juicer.rpc('slalom_submit_score', {
+    const { data, error } = await juicer.rpc('slalom_submit_score', {
       p_session: sessionId,
       p_payload: {
         initials: raw.padEnd(3, '-'),
@@ -1495,13 +1530,13 @@
       submitStatusEl.classList.add('error');
       return;
     }
-    submitStatusEl.textContent = 'SAVED';
-    submitFormEl.hidden = true;
-    fetchLeaderboard();
+    submitStatusEl.textContent = '';
+    lastSubmittedId = data || null;
+    showLeaderboard();
   });
 
-  skipBtnEl.addEventListener('click', () => { submitFormEl.hidden = true; });
-  againBtnEl.addEventListener('click', toTitle);
+  skipBtnEl.addEventListener('click', showLeaderboard);
+  againBtnEl.addEventListener('click', restart);
 
   // ----------------------------------------------------------------- loop
   // Physics runs on WALL time, in fixed substeps, never capped. The run
