@@ -764,7 +764,7 @@
 
   // ----------------------------------------------------------------- input
   const LEFT = new Set(['ArrowLeft', 'a', 'A', '4']);
-  const RIGHT = new Set(['ArrowRight', 'd', 'D', '6']);
+  const RIGHT = new Set(['ArrowRight', 'd', 'D', 'l', 'L', '6']);
   const STRAIGHT = new Set(['ArrowDown', 's', 'S', '2']);
   const GO = new Set([' ', 'Enter']);
 
