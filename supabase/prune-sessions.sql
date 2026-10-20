@@ -1,9 +1,10 @@
 -- Keeps slalom_sessions from growing without bound.
 --
--- A session opens when a run starts. Most never produce a score: every
--- crash leaves one ended but unused (a crash has no time to submit), and a
--- tab closed mid-run leaves one never ended at all. Neither can ever be
--- redeemed. Harmless individually, unbounded in aggregate.
+-- A session opens whenever the title screen shows. Most never produce a
+-- score: a title nobody starts leaves one never begun, every crash leaves
+-- one ended but unused (a crash has no time to submit), and a tab closed
+-- mid-run leaves one never ended at all. None can ever be redeemed.
+-- Harmless individually, unbounded in aggregate.
 --
 -- Seven days, not one: the filter also catches finished-but-unsubmitted
 -- runs, and a player who finishes and submits later still needs their

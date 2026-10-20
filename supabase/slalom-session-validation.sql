@@ -1,37 +1,54 @@
 -- super-slalom-20 score pipeline.
 --
 -- Same architecture as snake-bit: the server stamps both edges of a run on
--- its own clock, and a session spends on use. Two things differ:
+-- its own clock, and a session spends on use. Three things differ:
 --
 --   1. Names are prefixed `slalom_`, because all three games share one
 --      Supabase project and snake-bit owns the unprefixed names.
 --
 --   2. The course is SEEDED BY THE SERVER. slalom_start_game() hands back a
 --      seed alongside the session, and the client builds the course from
---      it: shape, and which poles are red. Every course has exactly 20
+--      it: shape, and which poles are red. Every course has exactly 25
 --      poles and exactly 4 red ones, so the server checks the player's
 --      counts against constants rather than rebuilding the course. The
 --      seed is stored with the session, which keeps any submitted run
 --      reproducible if a score ever needs auditing.
 --
--- The score is POINTS and higher is better. It comes from the final time
--- in centiseconds:
---   final_cs = time_cs + missed * 300 - reds * 150
---   score    = greatest(0, 10000 - final_cs)
+--   3. LOWER time is better, so the server's check is a FLOOR as well as a
+--      ceiling (snake-bit only needs the ceiling). The session opens with
+--      the title screen, which shows the course, so the clock starts only
+--      at slalom_go(); pauses are stamped by the server and taken off its
+--      clock. Waiting on the title or sitting paused never counts.
+--
+-- The score is POINTS and higher is better. Poles earn points; a finished
+-- run also earns 50 for the line and a bonus for its time under par, each
+-- missed pole adding 0.60s to that time:
+--   score = passed * 10 + reds * 25 + clips * 10
+--         + (finished: 50 + greatest(0, (3040 - (time_cs + missed * 60)) * 5))
+-- A clip is a pole cleared close enough to knock it flat.
+-- The payload says whether the run finished. A finish must account for
+-- every pole; a crash scores its poles alone, so claiming one only costs
+-- points.
 -- time_cs is in turn checked against the server's own elapsed.
 
 -- ---------------------------------------------------------------- constants
--- Kept in sync by hand with game.js: POLE_COUNT, RED_COUNT, MALUS_CS,
--- BONUS_CS, POINTS_BASE. 20 poles, 4 of them red; a missed pole costs
--- 3.00s; a red pole cleared saves 1.50s; the score is 10000 less the final
--- time in centiseconds.
+-- Kept in sync by hand with game.js: POLE_COUNT, RED_COUNT, POLE_POINTS,
+-- RED_POINTS, FINISH_POINTS, PAR_CS, BONUS_PER_CS, MISS_CS. 25 poles, 4 of
+-- them red; 10 points a pole cleared, 25 more if it's red, 10 more if it
+-- was clipped (CLIP_POINTS); 50 for
+-- finishing; 5 points for every hundredth of a second under 30.40s, with
+-- 0.60s added per missed pole.
 
 -- ---------------------------------------------------------------- sessions
 
 create table if not exists slalom_sessions (
   id         uuid primary key default gen_random_uuid(),
   seed       bigint not null,
-  started_at timestamptz not null default now(),
+  started_at timestamptz not null default now(),  -- issued (title screen)
+  go_at      timestamptz,                          -- the run's clock starts
+  paused_at  timestamptz,                          -- set while paused
+  paused_cs  numeric not null default 0,           -- total time paused
+  pauses     int not null default 0,
   ended_at   timestamptz,
   used_at    timestamptz
 );
@@ -78,11 +95,40 @@ begin
   return jsonb_build_object('session', v_id, 'seed', v_seed);
 end $$;
 
+-- Space on the title. First call wins, so a retry can't move the start.
+create or replace function slalom_go(p_session uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  update slalom_sessions set go_at = now()
+   where id = p_session and go_at is null and ended_at is null;
+end $$;
+
+-- Space mid-run, either way. Ignored out of order (not running, already
+-- paused / not paused, already ended).
+create or replace function slalom_pause(p_session uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  update slalom_sessions set paused_at = now()
+   where id = p_session and go_at is not null and ended_at is null and paused_at is null;
+end $$;
+
+create or replace function slalom_resume(p_session uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  update slalom_sessions
+     set paused_cs = paused_cs + extract(epoch from (now() - paused_at)) * 100,
+         paused_at = null,
+         pauses    = pauses + 1
+   where id = p_session and ended_at is null and paused_at is not null;
+end $$;
+
+-- Crash or finish. First call wins. A run ended while paused ends where
+-- the pause began.
 create or replace function slalom_end_game(p_session uuid) returns void
 language plpgsql security definer set search_path = public as $$
 begin
-  update slalom_sessions set ended_at = now()
-   where id = p_session and ended_at is null;
+  update slalom_sessions set ended_at = coalesce(paused_at, now()), paused_at = null
+   where id = p_session and go_at is not null and ended_at is null;
 end $$;
 
 create or replace function slalom_submit_score(p_session uuid, p_payload jsonb)
@@ -95,10 +141,13 @@ declare
   v_passed   int;
   v_missed   int;
   v_reds     int;
+  v_clips    int;
   v_time_cs  int;
-  v_final    int;
+  v_finished boolean;
   v_expected int;
   v_started  timestamptz;
+  v_paused_cs numeric;
+  v_pauses   int;
   v_ended    timestamptz;
   v_used     timestamptz;
   v_elapsed_cs numeric;
@@ -109,39 +158,51 @@ begin
   v_passed   := (p_payload->>'passed')::int;
   v_missed   := (p_payload->>'missed')::int;
   v_reds     := (p_payload->>'reds')::int;
+  v_clips    := coalesce((p_payload->>'clips')::int, 0);
   v_time_cs  := (p_payload->>'time_cs')::int;
+  v_finished := coalesce((p_payload->>'finished')::boolean, false);
 
-  select started_at, ended_at, used_at
-    into v_started, v_ended, v_used
+  select go_at, paused_cs, pauses, ended_at, used_at
+    into v_started, v_paused_cs, v_pauses, v_ended, v_used
     from slalom_sessions
    where id = p_session
      for update;
 
   if not found           then raise exception '%', v_msg; end if;
+  if v_started is null   then raise exception '%', v_msg; end if;
   if v_ended is null     then raise exception '%', v_msg; end if;
   if v_used  is not null then raise exception '%', v_msg; end if;
 
+  -- Go to end, paused time and all, is capped at an hour; the run itself
+  -- is that less the pauses.
   v_elapsed_cs := extract(epoch from (v_ended - v_started)) * 100;
-
   if v_elapsed_cs > 360000 then raise exception '%', v_msg; end if;  -- 1 hour
+  v_elapsed_cs := v_elapsed_cs - v_paused_cs;
 
-  -- The run time must agree with the server's clock. Generous in both
-  -- directions: start/end each cost one network round trip.
-  if abs(v_time_cs - v_elapsed_cs) > 400 then raise exception '%', v_msg; end if;
+  -- The run time must agree with the server's clock, in both directions:
+  -- claiming less is the cheat here. Go and end each cost a network round
+  -- trip, and so does each pause and resume, so the slack grows with them.
+  if abs(v_time_cs - v_elapsed_cs) > 400 + 100 * v_pauses then raise exception '%', v_msg; end if;
 
-  -- Every pole is either cleared or missed, exactly once.
+  -- Every pole is cleared or missed at most once; all 25 on a finish.
   if v_passed < 0 or v_missed < 0       then raise exception '%', v_msg; end if;
-  if v_passed + v_missed <> 20          then raise exception '%', v_msg; end if;
+  if v_passed + v_missed > 25           then raise exception '%', v_msg; end if;
+  if v_finished and v_passed + v_missed <> 25 then raise exception '%', v_msg; end if;
 
   -- Every course has exactly 4 red poles, and a red pole only counts if
   -- it was actually cleared.
   if v_reds < 0 or v_reds > 4 or v_reds > v_passed then raise exception '%', v_msg; end if;
 
+  -- Only a pole that was cleared can have been clipped.
+  if v_clips < 0 or v_clips > v_passed then raise exception '%', v_msg; end if;
+
   if length(coalesce(v_initials, '')) <> 3 then raise exception '%', v_msg; end if;
 
-  v_final := v_time_cs + v_missed * 300 - v_reds * 150;
-  if v_final <= 0 then raise exception '%', v_msg; end if;
-  v_expected := greatest(0, 10000 - v_final);
+  if v_time_cs <= 0 then raise exception '%', v_msg; end if;
+  v_expected := v_passed * 10 + v_reds * 25 + v_clips * 10;
+  if v_finished then
+    v_expected := v_expected + 50 + greatest(0, (3040 - (v_time_cs + v_missed * 60)) * 5);
+  end if;
   if v_score <> v_expected then raise exception '%', v_msg; end if;
 
   insert into slalom_scores (initials, score, payload)
@@ -154,5 +215,8 @@ begin
 end $$;
 
 grant execute on function slalom_start_game()               to anon, authenticated;
+grant execute on function slalom_go(uuid)                   to anon, authenticated;
+grant execute on function slalom_pause(uuid)                to anon, authenticated;
+grant execute on function slalom_resume(uuid)               to anon, authenticated;
 grant execute on function slalom_end_game(uuid)             to anon, authenticated;
 grant execute on function slalom_submit_score(uuid, jsonb)  to anon, authenticated;

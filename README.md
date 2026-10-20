@@ -1,4 +1,4 @@
-# super-slalom-20
+# Super Slalom vs Pineapple
 A super slalom ski game inspired by an old VIC-20 game
 
 Downhill slalom, in the spirit of the VIC-20: 22 columns, 23 rows, sixteen colours, and a skier made of about thirty pixels.

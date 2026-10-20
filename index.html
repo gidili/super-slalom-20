@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Super Slalom 20</title>
+<title>Super Slalom vs Pineapple</title>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -59,9 +59,16 @@
   }
   #title-card { top: 22%; }
   #title-card h1 { font-size: clamp(14px, 3.6vw, 26px); margin: 0 0 1.2em; letter-spacing: 2px; }
+  /* The game's own pineapple sprite, scaled up in whole VIC pixels. */
+  #title-card h1 canvas {
+    height: 1.4em; width: 1em; vertical-align: middle;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+  }
   #title-card p { font-size: clamp(6px, 1.3vw, 9px); line-height: 2; margin: 0; }
-  #title-card .red { color: var(--vic-red); }
   #message { top: 62%; font-size: clamp(8px, 1.9vw, 13px); }
+  #bonus { top: 20%; }
+  #bonus-time { font-size: clamp(8px, 1.9vw, 13px); margin-bottom: 0.8em; }
+  #bonus-points { font-size: clamp(14px, 3.6vw, 26px); }
 
   #overlay {
     position: fixed; inset: 0; background: var(--vic-cyan);
@@ -79,6 +86,8 @@
   #breakdown div { display: flex; justify-content: space-between; gap: 8px; }
   #breakdown .total { border-top: 2px solid var(--vic-blue); margin-top: 4px; padding-top: 4px; font-size: 10px; }
   #breakdown .center { justify-content: center; text-align: center; }
+  #breakdown .stars { font-family: sans-serif; font-size: 22px; color: var(--vic-blue); margin-top: 6px; }
+  #breakdown .stars .gold { color: rgb(170, 116, 73); }
   #submit-form { display: flex; flex-direction: column; align-items: center; gap: 10px; }
   #initials-input {
     font-family: inherit; font-size: 18px; width: 100px; text-align: center;
@@ -107,25 +116,30 @@
     <canvas id="screen"></canvas>
 
     <div id="hud" class="ontv">
-      <div>SCORE<b id="hud-score">10000</b></div>
-      <div>POLE<b id="hud-pole">0/20</b></div>
+      <div>SCORE<b id="hud-score">0</b></div>
+      <div>POLE<b id="hud-pole">0/25</b></div>
       <div>MISS<b id="hud-miss">0</b></div>
       <div>RED<b id="hud-red">0</b></div>
     </div>
 
     <div id="title-card" class="ontv">
-      <h1>SUPER SLALOM 20</h1>
+      <h1>SUPER SLALOM VS <canvas id="title-pineapple" width="5" height="7" aria-label="PINEAPPLE"></canvas></h1>
       <p>
+        TEST YOUR SLALOM SKILLS:<br>
+        25 POLES, ONE MOUNTAIN, NO SECOND CHANCES.<br>
+        GOOD LUCK. YOU WILL NEED IT.<br>
+        <br>
         HOLD A OR D (OR THE ARROWS) TO TURN<br>
-        LET GO AND YOU RUN STRAIGHT, PICKING UP SPEED<br>
-        FIRST POLE: EITHER SIDE. THEN THE FLAG SIDE<br>
-        MISS ONE -300 &middot; <span class="red">RED POLE +150</span><br>
-        DEEP SNOW IS SLOW. TREES ARE FINAL.<br>
-        M MUTES
+        SPACE PAUSES &middot; M MUTES
       </p>
     </div>
 
     <div id="message" class="ontv"></div>
+
+    <div id="bonus" class="ontv" hidden>
+      <div id="bonus-time"></div>
+      <div id="bonus-points"></div>
+    </div>
   </div>
 
   <div id="overlay" hidden>
@@ -136,7 +150,7 @@
       <form id="submit-form">
         <input id="initials-input" maxlength="3" autocomplete="off" spellcheck="false" placeholder="AAA">
         <div class="row">
-          <button id="submit-btn" type="submit">SAVE TIME</button>
+          <button id="submit-btn" type="submit">SAVE SCORE</button>
           <button id="skip-btn" type="button" class="quiet">SKIP</button>
         </div>
       </form>

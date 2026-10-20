@@ -18,16 +18,34 @@
   const css = c => `rgb(${c[0]},${c[1]},${c[2]})`;
 
   // ---------------------------------------------------------------- course
-  // POLE_COUNT, RED_COUNT, MALUS_CS and BONUS_CS are also hard-coded in
-  // slalom_submit_score, which recomputes the final time and rejects any
-  // that disagrees. Change both or neither.
-  const POLE_COUNT = 20;
+  // POLE_COUNT, RED_COUNT and the scoring below are also hard-coded in
+  // slalom_submit_score, which recomputes the score and rejects any that
+  // disagrees. Change both or neither.
+  const POLE_COUNT = 25;
   const RED_COUNT = 4;         // every course has exactly this many red poles
-  const MALUS_CS = 300;        // missed pole: +3.00s
-  const BONUS_CS = 150;        // red pole cleared: -1.50s
-  // The score is points, higher wins: POINTS_BASE less the final time in
-  // centiseconds, never below zero. Also hard-coded in slalom_submit_score.
-  const POINTS_BASE = 10000;
+  // The score only goes up: points for each pole cleared, more for a red
+  // one, then at the finish a bonus for crossing the line and one for every
+  // hundredth of a second under par. A crash keeps its pole points but
+  // gets neither bonus, so finishing always beats a crash on the same poles.
+  // Tuned with an autopilot: a clean 29.3s makes about 1000, and 2000 takes
+  // a clean 27.3s, which is autopilot territory.
+  const POLE_POINTS = 10;
+  const RED_POINTS = 25;       // on top of the pole's own
+  const FINISH_POINTS = 50;
+  const PAR_CS = 3040;         // no time bonus at or over 30.40s
+  const BONUS_PER_CS = 5;
+  // A missed pole adds to the time the bonus is worked out on. Skipping a
+  // pole saves 0.45s on average (autopilot, normal poles; 0.24s in quick
+  // sections), so on average it doesn't pay, though a well-chosen one can.
+  const MISS_CS = 60;
+  // Brushing a pole on the flag side, close enough to knock it flat.
+  const CLIP_POINTS = 10;
+  // Stars, for a finished run only (a crash gets none). One for finishing;
+  // two for a few misses at most and the bonus time under par; three for
+  // no misses and a tight run. Display only; the server never needs them,
+  // though they can be worked out from any saved payload.
+  const STAR2_MISSES = 2;
+  const STAR3_CS = 2930;       // run time for three stars
 
   // One pole per turn, real-slalom style: the flag points to the side you
   // pass on, and the sides alternate down the course.
@@ -35,6 +53,14 @@
   const POLE_GAP_FIRST = 95;   // world px between the first two poles
   const POLE_GAP_LAST = 65;    // ...and the last two
   const POLE_OFFSET = 12;      // how far off the piste centre a pole stands
+  // Quick sections: runs of poles packed close together, set nearer the
+  // centre so a fast left-right-left can still make them. The seed places
+  // them, never among the first few poles.
+  const QUICK_SECTIONS = 2;
+  const QUICK_POLES = 5;       // poles in each
+  const QUICK_GAP = 40;
+  const QUICK_OFFSET = 5;
+  const QUICK_FIRST = 4;       // the earliest pole a section can start on
   const CLIP = 3;              // this close to a pole knocks it over
   const LINE_WIDE = 6;         // the worn line passes this far outside a pole
   const LINE_HW = 3;           // ...and is this wide either side
@@ -62,16 +88,16 @@
   // this far from a pole, so the ideal line is always open.
   const CLEAR_LINE = 24;
   const CLEAR_POLE = 9;
-  // Pineapples turn up anywhere, piste included, about 7 a run. Dodging
+  // Pineapples turn up anywhere, piste included, about 12 a run. Dodging
   // them is the point, so only the poles are kept clear.
-  const PINE_CHANCE = 1 / 300; // chance per tree cell
+  const PINE_CHANCE = 1 / 240; // chance per tree cell
 
   const SKIER_Y = 48;          // skier's fixed screen row
   const DOWN_SPEED = 72;       // px/s straight down on the piste
   const CARVE_FACTOR = 0.82;   // steering costs a little speed
-  const TUCK_BONUS = 0.25;     // extra speed after holding a straight line...
+  const TUCK_BONUS = 0.3;      // extra speed after holding a straight line...
   const TUCK_RAMP = 0.9;       // ...reached over this many seconds,
-  const TUCK_EXTRA = 0.2;      // ...then this much more if you keep going
+  const TUCK_EXTRA = 0.3;      // ...then this much more if you keep going
   const TUCK_EXTRA_RAMP = 1.6; // ...over this many seconds after that
   const ACCEL_RATE = 1.5;      // speeding up is gradual
   const DECEL_RATE = 3;        // slowing down is quicker
@@ -106,6 +132,25 @@
     return new Set(idx.slice(0, RED_COUNT));
   }
 
+  // The poles in quick sections, by index. Sections never touch: at least
+  // two ordinary gaps between them, and one before the finish.
+  function pickQuickPoles(seed) {
+    const rnd = mulberry32((seed % 4294967296) ^ 0x0B1C);
+    const last = POLE_COUNT - 1 - QUICK_POLES;    // latest start
+    for (;;) {
+      const starts = [];
+      for (let k = 0; k < QUICK_SECTIONS; k++) {
+        starts.push(QUICK_FIRST + Math.floor(rnd() * (last - QUICK_FIRST + 1)));
+      }
+      starts.sort((a, b) => a - b);
+      if (starts.every((s, k) => k === 0 || s - starts[k - 1] >= QUICK_POLES + 2)) {
+        const set = new Set();
+        for (const s of starts) for (let i = 0; i < QUICK_POLES; i++) set.add(s + i);
+        return set;
+      }
+    }
+  }
+
   let course = null;
 
   function buildCourse(seed) {
@@ -121,13 +166,19 @@
     // The first pole has no flag and counts on either side, so starting
     // against the line is fine; the rest of the course doesn't change.
     const first = rnd() < 0.5 ? -1 : 1;
+    const quick = pickQuickPoles(seed);
     const poles = [];
     let y = START_PAD;
     for (let i = 0; i < POLE_COUNT; i++) {
-      if (i > 0) y += POLE_GAP_FIRST + (POLE_GAP_LAST - POLE_GAP_FIRST) * (i - 1) / (POLE_COUNT - 2);
+      if (i > 0) {
+        y += quick.has(i) && quick.has(i - 1)
+          ? QUICK_GAP
+          : POLE_GAP_FIRST + (POLE_GAP_LAST - POLE_GAP_FIRST) * (i - 1) / (POLE_COUNT - 2);
+      }
       y = Math.round(y);
       const side = i % 2 === 0 ? first : -first;
-      const x = Math.round(centerAt(y) + side * (POLE_OFFSET + rnd() * 4));
+      const off = quick.has(i) ? QUICK_OFFSET + rnd() * 2 : POLE_OFFSET + rnd() * 4;
+      const x = Math.round(centerAt(y) + side * off);
       // pass: side to pass on, 0 = either. fallen: 0 standing, else the
       // direction it fell (-1 left, 1 right).
       poles.push({ y, x, side, pass: i === 0 ? 0 : side, red: redPoles.has(i), result: null, fallen: 0 });
@@ -154,7 +205,17 @@
 
     // Mixed into tree placement, so each seed gets its own forest.
     const salt = Math.floor(seed / 4096) % 1000003;
-    course = { seed, centerAt, lineAt, poles, finishY, salt };
+
+    // The pineapple on the title screen, which is the top of this course:
+    // anywhere across it, piste included, below the title text and short of
+    // the first pole. Its own PRNG stream, like the red poles.
+    const prnd = mulberry32((seed % 4294967296) ^ 0x9A1E);
+    const titlePine = {
+      i: 't', j: 't', pine: true,
+      x: 4 + Math.floor(prnd() * (W - 8)),
+      y: 64 + Math.floor(prnd() * 40),
+    };
+    course = { seed, centerAt, lineAt, poles, finishY, salt, titlePine };
     snowRows.clear();            // cached rows belong to the previous slope
   }
 
@@ -203,13 +264,17 @@
   const leaderboardListEl = document.getElementById('leaderboard-list');
   const againBtnEl = document.getElementById('again-btn');
   const titleCardEl = document.getElementById('title-card');
+  const bonusEl = document.getElementById('bonus');
+  const bonusTimeEl = document.getElementById('bonus-time');
+  const bonusPointsEl = document.getElementById('bonus-points');
 
   // ------------------------------------------------------------ run state
-  // 'title' -> 'starting' -> 'running' -> 'crashed' | 'finished'
+  // 'title' -> 'starting' -> 'running' <-> 'paused'
+  //                       'running' -> 'crashed' | 'finished'
   let state = 'title';
   let skierX, skierY, vx, speed, mode;
   let straightFor = 0;         // seconds since the skier last steered
-  let passed, missed, reds, nextPole;
+  let passed, missed, reds, clips, nextPole;
   let runStart = 0, runEnd = null;
   let hitWhat = 'TREES';       // what ended a crashed run, for the card
   let exploded = new Set();    // pineapples already blown up, by cell
@@ -260,7 +325,9 @@
     }
 
     // The skis on the snow: looping noise whose loudness and brightness
-    // follow speed; deep snow muffles it.
+    // follow speed; deep snow muffles it. Loudest running straight at full
+    // tuck; carving across the slope it eases down to half, which also
+    // leaves room for the coin on a clip.
     function startSwoosh() {
       if (!ac) return;
       stopSwoosh();
@@ -271,9 +338,9 @@
     function updateSwoosh(speedNorm, depth, steering) {
       if (!swoosh) return;
       const t = ac.currentTime;
-      const v = Math.max(0, Math.min(1.2, speedNorm));
-      swoosh.g.gain.setTargetAtTime(0.04 + 0.12 * v + (steering ? 0.04 : 0), t, 0.06);
-      swoosh.f.frequency.setTargetAtTime(500 + 2600 * v * (1 - 0.65 * depth), t, 0.06);
+      const v = Math.max(0, Math.min(1.6, speedNorm));
+      swoosh.g.gain.setTargetAtTime((0.03 + 0.12 * v) * (steering ? 0.5 : 1), t, 0.1);
+      swoosh.f.frequency.setTargetAtTime(500 + 2600 * Math.min(1.2, v) * (1 - 0.65 * depth), t, 0.06);
     }
     function stopSwoosh() {
       if (!swoosh) return;
@@ -355,6 +422,69 @@
       note(130.81, held, 0.7, 0.14, 'triangle');      // C3 underneath
     }
 
+    const note = (f, at, len, vol, type) => {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = type; o.frequency.value = f;
+      g.gain.setValueAtTime(vol, at);
+      g.gain.exponentialRampToValueAtTime(0.001, at + len);
+      o.connect(g); g.connect(master); o.start(at); o.stop(at + len + 0.01);
+    };
+
+    // A clip: snake-bit's coin, itself the Super Mario Bros. one, a square
+    // wave with a hard step from B5 up to E6.
+    function playCoin() {
+      if (!ac) return;
+      const t = ac.currentTime;
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'square';
+      o.frequency.setValueAtTime(988, t);
+      o.frequency.setValueAtTime(1319, t + 0.065);
+      g.gain.setValueAtTime(0.15, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+      o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.19);
+    }
+
+    // The bonus counting up: a blip per step, climbing as it goes.
+    function playTick(progress) {
+      if (!ac) return;
+      note(500 + 1100 * progress, ac.currentTime, 0.035, 0.07, 'square');
+    }
+    // The count lands.
+    function playDing() {
+      if (!ac) return;
+      const t = ac.currentTime;
+      note(1567.98, t, 0.6, 0.1, 'triangle');          // G6
+      note(2093.0, t + 0.06, 0.7, 0.07, 'triangle');   // C7
+    }
+    // Too slow for any bonus: a deflated two-note bwomp.
+    function playNoBonus() {
+      if (!ac) return;
+      const t = ac.currentTime;
+      note(196, t, 0.18, 0.12, 'square');
+      note(147, t + 0.2, 0.35, 0.12, 'square');
+    }
+    // Each star a step higher, with a little shimmer of noise.
+    function playStar(n) {
+      if (!ac) return;
+      const t = ac.currentTime, f = [1318.5, 1567.98, 2093.0][n - 1] || 2093.0;
+      note(f, t, 0.09, 0.1, 'square');
+      note(f * 1.5, t + 0.07, 0.25, 0.07, 'square');
+      const { src, g } = noiseThrough('highpass', 6000, 0.7, t);
+      g.gain.setValueAtTime(0.08, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+      src.stop(t + 0.26);
+    }
+    // Three stars: a bouncy run up and down and up, then a big chord.
+    function playJingle() {
+      if (!ac) return;
+      const t = ac.currentTime + 0.3;
+      const run = [523.25, 659.25, 783.99, 1046.5, 783.99, 1046.5, 1318.5, 1567.98];
+      run.forEach((f, i) => note(f, t + i * 0.08, 0.07, 0.1, 'square'));
+      const end = t + run.length * 0.08;
+      [1046.5, 1318.5, 1567.98, 2093.0].forEach(f => note(f, end, 0.9, 0.05, 'square'));
+      note(261.63, end, 0.9, 0.14, 'triangle');
+      [0, 0.12, 0.24, 0.36].forEach(d => note(3135.96, end + d, 0.05, 0.04, 'square'));
+    }
+
     function toggleMute() {
       muted = !muted;
       try { localStorage.setItem('slalom_muted', muted ? '1' : '0'); } catch (_) {}
@@ -369,18 +499,24 @@
       unlock: safe(unlock), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
       stopSwoosh: safe(stopSwoosh), playDash: safe(playDash), playBreak: safe(playBreak),
       playExplosion: safe(playExplosion), playFanfare: safe(playFanfare), toggleMute: safe(toggleMute),
+      playCoin: safe(playCoin), playTick: safe(playTick), playDing: safe(playDing), playNoBonus: safe(playNoBonus),
+      playStar: safe(playStar), playJingle: safe(playJingle),
     };
   })();
 
   // --------------------------------------------------------- session edges
-  // Unlike snake-bit, the session opens when the run starts, not on page
-  // load: the course needs the server's seed before it exists. A side
-  // effect is that idle page loads no longer leave orphan sessions.
-  let sessionId = null, endPromise = null;
+  // The title screen already shows the real course, so the session opens
+  // with the title: that's when the server hands out the seed. Its clock
+  // only starts on Space (slalom_go), and it stamps pauses itself, so the
+  // time spent waiting or paused never counts. Every edge goes through one
+  // chain, so they reach the server in order.
+  let sessionId = null, endPromise = null, edges = Promise.resolve();
+  let prepared = Promise.resolve();   // settles once the next course is built
 
   async function openSession() {
     sessionId = null;
     endPromise = null;
+    edges = Promise.resolve();
     if (juicer) {
       try {
         const { data, error } = await juicer.rpc('slalom_start_game');
@@ -393,20 +529,37 @@
     return Math.floor(Math.random() * 2 ** 40);
   }
 
-  function closeSession() {
-    if (!juicer || !sessionId) return;
+  // A failed edge just leaves the run unranked: the server turns the score
+  // down at submit.
+  function tellServer(fn) {
+    if (!juicer || !sessionId) return edges;
     const id = sessionId;
-    endPromise = juicer.rpc('slalom_end_game', { p_session: id })
-      .then(() => {}, () => {});
+    edges = edges.then(() => juicer.rpc(fn, { p_session: id })).then(() => {}, () => {});
+    return edges;
+  }
+
+  function closeSession() {
+    endPromise = tellServer('slalom_end_game');
   }
 
   // Frozen at the end of the run. In snake-bit this once ran until submit,
   // so the reported time silently absorbed initials-typing time.
   const runCs = () =>
-    Math.round(((runEnd !== null ? runEnd : performance.now()) - runStart) / 10);
+    Math.round(((runEnd !== null ? runEnd : performance.now()) - runStart - pausedMs) / 10);
 
-  const finalCs = () => runCs() + missed * MALUS_CS - reds * BONUS_CS;
-  const points = () => Math.max(0, POINTS_BASE - finalCs());
+  // Everything but the time bonus, which counts up separately at the end.
+  const earned = () =>
+    passed * POLE_POINTS + reds * RED_POINTS + clips * CLIP_POINTS +
+    (state === 'finished' ? FINISH_POINTS : 0);
+  const bonusCs = () => runCs() + missed * MISS_CS;
+  const timeBonus = () => Math.max(0, (PAR_CS - bonusCs()) * BONUS_PER_CS);
+  const points = () => earned() + (state === 'finished' ? timeBonus() : 0);
+  function stars() {
+    if (state !== 'finished') return 0;
+    if (missed === 0 && runCs() <= STAR3_CS) return 3;
+    if (missed <= STAR2_MISSES && bonusCs() < PAR_CS) return 2;
+    return 1;
+  }
 
   const fmt = cs => {
     const neg = cs < 0; cs = Math.abs(cs);
@@ -414,36 +567,50 @@
   };
 
   // ---------------------------------------------------------------- flow
-  // After a run, back to an empty slope that waits for Space. The session
-  // still opens on that press, not here: its clock must not include the
-  // time spent waiting.
+  // The title screen is the top of the next course, built from the seed as
+  // soon as the server sends it. Until then, a stand-in slope.
+  function prepareRun() {
+    course = null;
+    snowRows.clear();
+    prepared = openSession().then(seed => {
+      buildCourse(seed);
+      skierX = course.centerAt(0);
+      skierY = 0;
+    });
+  }
+
+  // After a run, back to the title and the instructions, on a new course.
   function toTitle() {
     state = 'title';
-    course = null;
-    placeTitlePine();
+    prepareRun();
     particles = [];
-    snowRows.clear();
     overlayEl.hidden = true;
-    passed = 0; missed = 0; reds = 0; nextPole = 0;
+    titleCardEl.hidden = false;
+    tally = null;
+    shownBonus = 0;
+    bonusEl.hidden = true;
+    passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
     msgEl.textContent = 'PRESS SPACE';
     paintHud();
   }
 
   async function startRun() {
-    if (state === 'starting' || state === 'running') return;
+    if (state !== 'title') return;
     state = 'starting';
     overlayEl.hidden = true;
     titleCardEl.hidden = true;
     flash('GET READY');
-    const seed = await openSession();
-    buildCourse(seed);
+    await prepared;
     skierX = course.centerAt(0);
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     held = []; tapLeft = 0;
     hitWhat = 'TREES'; exploded = new Set(); particles = [];
-    passed = 0; missed = 0; reds = 0; nextPole = 0;
+    passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
+    shownBonus = 0;
     runEnd = null;
+    pausedMs = 0;
+    tellServer('slalom_go');
     runStart = performance.now();
     // Physics and clock share an origin; nothing before this moment counts.
     last = runStart;
@@ -452,6 +619,25 @@
     SFX.startSwoosh();
     flash(sessionId ? 'GO' : 'GO  (UNRANKED)');
     paintHud();
+  }
+
+  // Space mid-run: the run freezes where it is, PAUSED over it.
+  let pausedMs = 0, pausedAt = 0;
+  function togglePause() {
+    if (state === 'running') {
+      state = 'paused';
+      pausedAt = performance.now();
+      straighten();
+      SFX.stopSwoosh();
+      tellServer('slalom_pause');
+      msgEl.textContent = 'PAUSED';
+    } else if (state === 'paused') {
+      state = 'running';
+      pausedMs += performance.now() - pausedAt;
+      tellServer('slalom_resume');
+      SFX.startSwoosh();
+      msgEl.textContent = '';
+    }
   }
 
   function crash(hit) {
@@ -463,7 +649,7 @@
     if (hit.pine) SFX.playExplosion(); else SFX.playBreak();
     if (hit.pine) {
       exploded.add(hit.i + ',' + hit.j);
-      spawnExplosion(hit.x, hit.y - 3);
+      spawnExplosion(hit.x, hit.y - 4);
     }
     closeSession();
     // Long enough to watch the pieces land.
@@ -477,10 +663,71 @@
     mode = 'down';
     SFX.stopSwoosh();
     SFX.playFanfare();
+    flash(`FINISH +${FINISH_POINTS}`);
     runEnd = performance.now();
     closeSession();
-    // Time to glide to a stop past the line before the card comes up.
-    setTimeout(() => showOverlay(true), 1100);
+    // Time to glide to a stop past the line before the bonus counts up.
+    setTimeout(startTally, 1100);
+  }
+
+  // ------------------------------------------------------------- the tally
+  // At the finish the time bonus counts up in big digits on the slope, a
+  // tick per step rising in pitch, the bigger the bonus the longer it runs.
+  // A ding, then the stars one by one; three of them get a jingle and
+  // sparkles. Space skips to the card.
+  let tally = null;
+  let shownBonus = 0;          // how much of the bonus the HUD has taken in
+  const TALLY_STAR_GAP = 0.45; // seconds between stars
+
+  function startTally() {
+    if (state !== 'finished' || tally) return;
+    const bonus = timeBonus();
+    tally = {
+      bonus, shown: 0, stars: stars(), starsShown: 0,
+      t: 0, lastTick: -1, dinged: false,
+      count: bonus ? 0.6 + 1.6 * Math.min(1, bonus / 1500) : 0.4,
+    };
+    bonusTimeEl.textContent = `TIME ${fmt(bonusCs())}`;
+    bonusPointsEl.textContent = 'BONUS +0';
+    bonusEl.hidden = false;
+  }
+
+  function updateTally(dt) {
+    const k = tally;
+    k.t += dt;
+    if (k.t < k.count) {
+      const f = k.t / k.count;
+      k.shown = Math.round(k.bonus * (1 - (1 - f) * (1 - f)));   // eases in
+      const step = Math.floor(k.t / 0.045);
+      if (k.bonus && step !== k.lastTick) { k.lastTick = step; SFX.playTick(f); }
+    } else if (!k.dinged) {
+      k.shown = k.bonus;
+      k.dinged = true;
+      if (k.bonus) SFX.playDing(); else SFX.playNoBonus();
+    } else {
+      const due = Math.min(k.stars, Math.floor((k.t - k.count) / TALLY_STAR_GAP));
+      while (k.starsShown < due) {
+        k.starsShown++;
+        SFX.playStar(k.starsShown);
+        if (k.starsShown === 3) {
+          SFX.playJingle();
+          spawnSparkles(W / 2, cameraTop() + STAR_ROW);
+        }
+      }
+      // The card once the last star has had its moment.
+      const hold = k.stars === 3 ? 2.2 : 1.2;
+      if (k.t >= k.count + k.stars * TALLY_STAR_GAP + hold) endTally();
+    }
+    shownBonus = k.shown;
+    bonusPointsEl.textContent = `BONUS +${k.shown}`;
+  }
+
+  function endTally() {
+    if (!tally) return;
+    shownBonus = tally.bonus;
+    tally = null;
+    bonusEl.hidden = true;
+    showOverlay(true);
   }
 
   // Past the line: coast to a stop, still on screen.
@@ -498,15 +745,18 @@
     return Math.floor(Math.min(skierY - SKIER_Y, course.finishY - FINISH_ROW));
   }
 
-  function resolvePole(through) {
+  function resolvePole(through, clipped) {
     const p = course.poles[nextPole];
     p.result = through ? 'pass' : 'miss';
     if (through) {
       passed++;
-      if (p.red) { reds++; flash(`RED  +${BONUS_CS}`); }
+      const said = [];
+      if (p.red) { reds++; said.push(`RED +${POLE_POINTS + RED_POINTS}`); }
+      if (clipped) { clips++; said.push(`CLIP +${CLIP_POINTS}`); SFX.playCoin(); }
+      if (said.length) flash(said.join('  '));
     } else {
       missed++;
-      flash(`MISS -${MALUS_CS}`);
+      flash(`MISS +${fmt(MISS_CS)}`);
     }
     nextPole++;
     paintHud();
@@ -541,6 +791,8 @@
     else if (GO.has(e.key)) {
       e.preventDefault();
       if (state === 'title') startRun();
+      else if (state === 'running' || state === 'paused') togglePause();
+      else if (tally) endTally();
       else if (overlayEl.hidden === false && (state === 'crashed' || state === 'finished')) toTitle();
     }
   });
@@ -553,6 +805,7 @@
   canvas.addEventListener('touchstart', (e) => {
     SFX.unlock();
     if (state === 'title') { startRun(); return; }
+    if (state === 'paused') return;
     const r = canvas.getBoundingClientRect();
     for (const t of e.changedTouches) {
       const f = (t.clientX - r.left) / r.width;
@@ -570,8 +823,11 @@
     tapLeft = Math.max(0, tapLeft - dt);
     const was = heading;
     heading = held.length ? held[held.length - 1].dir : tapLeft > 0 ? tapDir : 'down';
-    // Every change of direction snaps; straightening up a little softer.
-    if (heading !== was) SFX.playDash(heading === 'down' ? 0.5 : 1);
+    // Every change of direction snaps; straightening up a little softer,
+    // and the faster you're going the sharper the snap.
+    if (heading !== was) {
+      SFX.playDash((heading === 'down' ? 0.5 : 1) * Math.min(1.4, 0.3 + 0.7 * speed / DOWN_SPEED));
+    }
     const steering = heading !== 'down';
     mode = heading;
 
@@ -599,11 +855,13 @@
     skierX = Math.max(2, Math.min(W - 3, skierX + vx * dt));
 
     // A pole is cleared when the skier crosses its row on the flag side.
-    // Skis that brush it knock it over, which on the right side is fine.
+    // Skis that brush it knock it over, which on the flag side is a clip
+    // and earns a little extra.
     while (nextPole < POLE_COUNT && course.poles[nextPole].y <= skierY) {
       const p = course.poles[nextPole];
-      if (Math.abs(skierX - p.x) <= CLIP) p.fallen = skierX < p.x ? 1 : -1;
-      resolvePole((skierX - p.x) * p.pass >= 0);
+      const brushed = Math.abs(skierX - p.x) <= CLIP;
+      if (brushed) p.fallen = skierX < p.x ? 1 : -1;
+      resolvePole((skierX - p.x) * p.pass >= 0, brushed);
     }
 
     if (skierY >= course.finishY) finish();
@@ -649,6 +907,7 @@
   function treeAt(i, j, salt, centerAt) {
     const x = i * TREE_CELL + 2 + Math.floor(hash(i * 7 + salt, j * 3 + 1) * (TREE_CELL - 4));
     const y = j * TREE_CELL + 2 + Math.floor(hash(i * 5 + salt, j * 11 + 7) * (TREE_CELL - 4));
+    if (course && Math.abs(x - course.titlePine.x) < 10 && Math.abs(y - course.titlePine.y) < 12) return null;
     const depth = snowDepth(x, centerAt(y), y);
     const pine = hash(i * 48271 + salt, j * 13 + 5) < PINE_CHANCE && pineIsFair(x, y);
     if (pine) {
@@ -664,7 +923,7 @@
     const side = x < centerAt(y) ? -1 : 1, k = Math.floor(y / FENCE_SLOT);
     for (let kk = k - 1; kk <= k + 1; kk++) {
       const f = fenceAt(kk, side, salt, centerAt);
-      if (f && Math.abs(y - f.y) <= 8 && x >= f.x0 - 4 && x <= f.x1 + 4) return null;
+      if (f && Math.abs(y - f.y) <= 10 && x >= f.x0 - 5 && x <= f.x1 + 5) return null;
     }
     return { i, j, x, y, pine };
   }
@@ -735,7 +994,7 @@
     return null;
   }
 
-  // Skier rows span y-4..y+4, a tree's y-6..y. A pixel or so of mercy on
+  // Skier rows span y-4..y+4, a tree's y-8..y. A pixel or so of mercy on
   // each edge, so a brush past the canopy doesn't end the run. Returns
   // what was hit, or null.
   function hitTree(x, y) {
@@ -746,11 +1005,13 @@
       for (let i = i0; i <= i1; i++) {
         const tr = treeAt(i, j, salt, centerAt);
         if (!tr) continue;
-        // A pineapple is two pixels shorter and narrower than a tree.
-        const reach = tr.pine ? 3 : 4, top = tr.pine ? 6 : 8;
+        // A pineapple is two pixels shorter and four narrower than a tree.
+        const reach = tr.pine ? 3 : 5, top = tr.pine ? 8 : 10;
         if (Math.abs(x - tr.x) <= reach && y >= tr.y - top && y <= tr.y + 2) return tr;
       }
     }
+    const tp = course.titlePine;
+    if (!exploded.has('t,t') && Math.abs(x - tp.x) <= 3 && y >= tp.y - 8 && y <= tp.y + 2) return tp;
     return null;
   }
 
@@ -796,37 +1057,42 @@
   SPRITES.right = SPRITES.left.map(r => r.split('').reverse().join(''));
 
   const TREE = [
-    '...X...',
-    '..XXX..',
-    '..XXX..',
-    '.XXXXX.',
-    '.XXXXX.',
-    'XXXXXXX',
-    '...O...',
+    '....X....',
+    '...XXX...',
+    '...XXX...',
+    '..XXXXX..',
+    '..XXXXX..',
+    '.XXXXXXX.',
+    '.XXXXXXX.',
+    'XXXXXXXXX',
+    '....O....',
   ];
 
-  // snake-bit's pineapple in VIC colours, smaller than a tree.
+  // A pineapple in VIC colours: bushy crown, orange rind, smaller than a
+  // tree.
   const PINEAPPLE = [
+    'G.G.G',
     '.GGG.',
-    '..G..',
-    'YOYOY',
+    '.OOO.',
     'OYOYO',
-    '.YOY.',
+    'OOYOO',
+    'OYOYO',
+    '.OOO.',
   ];
-
-  // The title slope always shows one, somewhere new each time, anywhere
-  // below the title text. World coordinates, title camera.
-  let titlePine = null;
-  function placeTitlePine() {
-    titlePine = {
-      x: 4 + Math.floor(Math.random() * (W - 8)),
-      y: 112 + Math.floor(Math.random() * (H - 120)) - SKIER_Y,
-    };
-  }
-  placeTitlePine();
 
   // X takes the ink passed in; the other letters are fixed colours.
   const INKS = { O: VIC.orange, G: VIC.green, Y: VIC.yellow };
+
+  // The title reads SUPER SLALOM VS <pineapple>, drawn from the sprite.
+  (() => {
+    const c = document.getElementById('title-pineapple');
+    const tctx = c.getContext('2d');
+    PINEAPPLE.forEach((row, y) => [...row].forEach((ch, x) => {
+      if (!INKS[ch]) return;
+      tctx.fillStyle = css(INKS[ch]);
+      tctx.fillRect(x, y, 1, 1);
+    }));
+  })();
 
   function blit(rows, x0, y0, ink) {
     for (let r = 0; r < rows.length; r++) {
@@ -858,6 +1124,22 @@
         life: 0.6 + Math.random() * 0.5,
         size: Math.random() < 0.35 ? 3 : 2,
         color: PIECE_COLORS[Math.floor(Math.random() * PIECE_COLORS.length)],
+      });
+    }
+  }
+
+  // Three stars: a fountain of bright specks in every colour the VIC has.
+  const SPARKLE_COLORS = [VIC.yellow, VIC.orange, VIC.red, VIC.green, VIC.lightBlue, VIC.blue, VIC.cyan];
+  function spawnSparkles(x, y) {
+    for (let k = 0; k < 70; k++) {
+      const a = -Math.PI * (0.1 + 0.8 * Math.random());
+      const v = 40 + Math.random() * 70;
+      particles.push({
+        x: x + (Math.random() - 0.5) * 50, y,
+        vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+        life: 0.8 + Math.random() * 0.9,
+        size: Math.random() < 0.3 ? 2 : 1,
+        color: SPARKLE_COLORS[Math.floor(Math.random() * SPARKLE_COLORS.length)],
       });
     }
   }
@@ -944,13 +1226,14 @@
       for (let i = 0; i < iMax; i++) {
         const tr = treeAt(i, j, salt, centerAt);
         if (!tr) continue;
-        if (!course && Math.abs(tr.x - titlePine.x) < 9 && Math.abs(tr.y - titlePine.y) < 10) continue;
-        if (!tr.pine) blit(TREE, tr.x - 3, tr.y - camY - 6, VIC.green);
-        else if (!exploded.has(i + ',' + j)) blit(PINEAPPLE, tr.x - 2, tr.y - camY - 4);
+        if (!tr.pine) blit(TREE, tr.x - 4, tr.y - camY - 8, VIC.green);
+        else if (!exploded.has(i + ',' + j)) blit(PINEAPPLE, tr.x - 2, tr.y - camY - 6);
       }
     }
 
-    if (!course) blit(PINEAPPLE, titlePine.x - 2, titlePine.y - camY - 4);
+    if (course && !exploded.has('t,t')) {
+      blit(PINEAPPLE, course.titlePine.x - 2, course.titlePine.y - camY - 6);
+    }
 
     // Fences: a post every third pixel, a rail between.
     const k0 = Math.floor(camY / FENCE_SLOT) - 1, k1 = Math.floor((camY + H) / FENCE_SLOT) + 1;
@@ -999,8 +1282,37 @@
       }
     }
 
+    if (tally && tally.dinged) drawStars(tally.starsShown);
+
     ctx.putImageData(img, 0, 0);
   }
+
+  // Three star slots under the bonus; earned ones gold with an orange rim,
+  // the rest outlines in light blue.
+  const STAR = [
+    '....X....',
+    '...XXX...',
+    '...XXX...',
+    'XXXXXXXXX',
+    '.XXXXXXX.',
+    '..XXXXX..',
+    '..XXXXX..',
+    '.XXX.XXX.',
+    '.XX...XX.',
+  ];
+  const STAR_ROW = 76;         // screen row of the stars' centres
+  function drawStars(n) {
+    for (let k = 0; k < 3; k++) {
+      const x0 = W / 2 - 4 + (k - 1) * 16, y0 = STAR_ROW - 4;
+      if (k < n) {
+        for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) blit(STAR, x0 + dx, y0 + dy, VIC.orange);
+        blit(STAR, x0, y0, VIC.yellow);
+      } else {
+        blit(STAR, x0, y0, VIC.lightBlue);
+      }
+    }
+  }
+  const starText = n => '<span class="gold">' + '\u2605'.repeat(n) + '</span>' + '\u2606'.repeat(3 - n);
 
   // ------------------------------------------------------------------ hud
   let flashUntil = 0;
@@ -1010,7 +1322,7 @@
   }
 
   function paintHud() {
-    scoreEl.textContent = state === 'title' ? POINTS_BASE : points();
+    scoreEl.textContent = state === 'title' ? 0 : earned() + shownBonus;
     poleEl.textContent = `${Math.min(nextPole || 0, POLE_COUNT)}/${POLE_COUNT}`;
     missEl.textContent = missed || 0;
     redEl.textContent = reds || 0;
@@ -1020,19 +1332,25 @@
   function showOverlay(finished) {
     overlayTitleEl.textContent = finished ? 'FINISH' : 'WIPEOUT';
     overlayTitleEl.className = finished ? 'ok' : 'bad';
-    if (finished) {
-      breakdownEl.innerHTML =
-        `<div><span>RUN</span><span>${fmt(runCs())}</span></div>` +
-        `<div><span>MISSED ${missed} x 3.00</span><span>+${fmt(missed * MALUS_CS)}</span></div>` +
-        `<div><span>RED ${reds} x 1.50</span><span>-${fmt(reds * BONUS_CS)}</span></div>` +
-        `<div><span>TIME</span><span>${fmt(finalCs())}</span></div>` +
+    const poles =
+      `<div><span>POLES ${passed} x ${POLE_POINTS}</span><span>${passed * POLE_POINTS}</span></div>` +
+      `<div><span>RED ${reds} x ${RED_POINTS}</span><span>${reds * RED_POINTS}</span></div>` +
+      (clips ? `<div><span>CLIPPED ${clips} x ${CLIP_POINTS}</span><span>${clips * CLIP_POINTS}</span></div>` : '');
+    breakdownEl.innerHTML = finished
+      ? poles +
+        `<div><span>FINISH</span><span>+${FINISH_POINTS}</span></div>` +
+        `<div><span>TIME</span><span>${fmt(runCs())}</span></div>` +
+        (missed ? `<div><span>MISSED ${missed} x ${fmt(MISS_CS)}</span><span>+${fmt(missed * MISS_CS)}</span></div>` : '') +
+        `<div><span>BONUS ON ${fmt(bonusCs())}</span><span>+${timeBonus()}</span></div>` +
+        `<div class="total"><span>SCORE</span><span>${points()}</span></div>` +
+        `<div class="center stars">${starText(stars())}</div>`
+      : `<div class="center">INTO THE ${hitWhat}</div>` + poles +
+        `<div><span>NO TIME BONUS</span><span></span></div>` +
         `<div class="total"><span>SCORE</span><span>${points()}</span></div>`;
-    } else {
-      breakdownEl.innerHTML = `<div class="center">INTO THE ${hitWhat}. NO SCORE.</div>`;
-    }
-    // Only a finished, ranked run can be submitted.
-    submitFormEl.hidden = !(finished && sessionId);
-    submitStatusEl.textContent = finished && !sessionId ? 'UNRANKED RUN' : '';
+    // Any ranked run with something to show can go on the board, crashes
+    // included.
+    submitFormEl.hidden = !(sessionId && points() > 0);
+    submitStatusEl.textContent = sessionId ? '' : 'UNRANKED RUN';
     submitStatusEl.classList.remove('error');
     try { initialsInputEl.value = localStorage.getItem('slalom_initials') || ''; } catch (_) {}
     overlayEl.hidden = false;
@@ -1081,7 +1399,8 @@
         initials: raw.padEnd(3, '-'),
         score: points(),
         time_cs: runCs(),
-        passed, missed, reds,
+        passed, missed, reds, clips,
+        finished: state === 'finished',
       },
     });
     submitBtnEl.disabled = skipBtnEl.disabled = false;
@@ -1117,18 +1436,20 @@
     } else {
       acc = 0;
       if (state === 'finished') glide(Math.min(dt, 0.05));
+      if (tally) updateTally(Math.min(dt, 0.05));
     }
     if (state === 'running') {
       SFX.updateSwoosh(speed / DOWN_SPEED, snowDepth(skierX, course.centerAt(skierY), skierY), heading !== 'down');
     }
     if (particles.length) updateParticles(Math.min(dt, 0.05));
     if (state === 'running' || state === 'crashed' || state === 'finished') paintHud();
-    if (now > flashUntil && state !== 'title') msgEl.textContent = '';
+    if (now > flashUntil && state !== 'title' && state !== 'paused') msgEl.textContent = '';
     render();
     requestAnimationFrame(frame);
   }
 
   msgEl.textContent = 'PRESS SPACE';
+  prepareRun();
   paintHud();
   fetchLeaderboard();
   requestAnimationFrame(frame);
