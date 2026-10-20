@@ -62,10 +62,9 @@
   // this far from a pole, so the ideal line is always open.
   const CLEAR_LINE = 24;
   const CLEAR_POLE = 9;
-  // Tuned for about 3-4 pineapples a run, nearly all close to the piste.
-  const PINE_ZONE = 0.4;       // "near the piste": depth below this
-  const PINE_NEAR = 1 / 50;
-  const PINE_FAR = 1 / 1000;
+  // Pineapples turn up anywhere, piste included, about 7 a run. Dodging
+  // them is the point, so only the poles are kept clear.
+  const PINE_CHANCE = 1 / 300; // chance per tree cell
 
   const SKIER_Y = 48;          // skier's fixed screen row
   const DOWN_SPEED = 72;       // px/s straight down on the piste
@@ -421,6 +420,7 @@
   function toTitle() {
     state = 'title';
     course = null;
+    placeTitlePine();
     particles = [];
     snowRows.clear();
     overlayEl.hidden = true;
@@ -644,13 +644,16 @@
 
   // At most one tree per TREE_CELL square, placed by hash so it's stable
   // as the slope scrolls. Rendering and collision both ask this, so a tree
-  // you can see is exactly a tree you can hit. Now and then the tree is a
-  // pineapple, which is just as solid and a lot louder.
+  // you can see is exactly a tree you can hit. Now and then a cell holds a
+  // pineapple instead, which is just as solid and a lot louder.
   function treeAt(i, j, salt, centerAt) {
     const x = i * TREE_CELL + 2 + Math.floor(hash(i * 7 + salt, j * 3 + 1) * (TREE_CELL - 4));
     const y = j * TREE_CELL + 2 + Math.floor(hash(i * 5 + salt, j * 11 + 7) * (TREE_CELL - 4));
     const depth = snowDepth(x, centerAt(y), y);
-    if (depth <= 0) {
+    const pine = hash(i * 48271 + salt, j * 13 + 5) < PINE_CHANCE && pineIsFair(x, y);
+    if (pine) {
+      // Anywhere at all, so no tree chance to pass.
+    } else if (depth <= 0) {
       // The odd tree on the piste itself, never on the racing line.
       if (hash(i * 92821 + salt, j) >= PISTE_TREE || !lineIsClear(x, y)) return null;
     } else {
@@ -663,9 +666,6 @@
       const f = fenceAt(kk, side, salt, centerAt);
       if (f && Math.abs(y - f.y) <= 8 && x >= f.x0 - 4 && x <= f.x1 + 4) return null;
     }
-    // Pineapples mostly turn up in the sparse trees near the piste, where
-    // they can be seen, rarely in the thick of the forest.
-    const pine = hash(i * 48271 + salt, j * 13 + 5) < (depth < PINE_ZONE ? PINE_NEAR : PINE_FAR);
     return { i, j, x, y, pine };
   }
 
@@ -679,6 +679,18 @@
     // straight on from wherever that pole left you.
     if (!course || y < START_PAD + 30 || y > course.poles[POLE_COUNT - 1].y - 10) return false;
     if (Math.abs(x - course.lineAt(y)) < CLEAR_LINE) return false;
+    for (const p of course.poles) {
+      if (Math.abs(p.y - y) <= 12 && Math.abs(x - p.x) < CLEAR_POLE) return false;
+    }
+    return true;
+  }
+
+  // Pineapples can sit anywhere on a course, the racing line too, but
+  // never before the first pole (you'd start into one) or beside a pole,
+  // so every pole can still be passed on its flag side. The title slope
+  // places its own.
+  function pineIsFair(x, y) {
+    if (!course || y < START_PAD) return false;
     for (const p of course.poles) {
       if (Math.abs(p.y - y) <= 12 && Math.abs(x - p.x) < CLEAR_POLE) return false;
     }
@@ -802,9 +814,16 @@
     '.YOY.',
   ];
 
-  // The title slope always shows one, in the sparse trees left of the
-  // piste and below the title text. World coordinates, title camera.
-  const TITLE_PINE = { x: 58, y: 130 - SKIER_Y };
+  // The title slope always shows one, somewhere new each time, anywhere
+  // below the title text. World coordinates, title camera.
+  let titlePine = null;
+  function placeTitlePine() {
+    titlePine = {
+      x: 4 + Math.floor(Math.random() * (W - 8)),
+      y: 112 + Math.floor(Math.random() * (H - 120)) - SKIER_Y,
+    };
+  }
+  placeTitlePine();
 
   // X takes the ink passed in; the other letters are fixed colours.
   const INKS = { O: VIC.orange, G: VIC.green, Y: VIC.yellow };
@@ -925,13 +944,13 @@
       for (let i = 0; i < iMax; i++) {
         const tr = treeAt(i, j, salt, centerAt);
         if (!tr) continue;
-        if (!course && Math.abs(tr.x - TITLE_PINE.x) < 9 && Math.abs(tr.y - TITLE_PINE.y) < 10) continue;
+        if (!course && Math.abs(tr.x - titlePine.x) < 9 && Math.abs(tr.y - titlePine.y) < 10) continue;
         if (!tr.pine) blit(TREE, tr.x - 3, tr.y - camY - 6, VIC.green);
         else if (!exploded.has(i + ',' + j)) blit(PINEAPPLE, tr.x - 2, tr.y - camY - 4);
       }
     }
 
-    if (!course) blit(PINEAPPLE, TITLE_PINE.x - 2, TITLE_PINE.y - camY - 4);
+    if (!course) blit(PINEAPPLE, titlePine.x - 2, titlePine.y - camY - 4);
 
     // Fences: a post every third pixel, a rail between.
     const k0 = Math.floor(camY / FENCE_SLOT) - 1, k1 = Math.floor((camY + H) / FENCE_SLOT) + 1;
