@@ -22,9 +22,10 @@
 --
 -- The score is POINTS and higher is better. Poles earn points; a finished
 -- run also earns 50 for the line and a bonus for its time under par, each
--- missed pole adding 0.60s to that time:
+-- missed pole adding 0.60s to that time, and no bonus past 3 misses:
 --   score = passed * 10 + reds * 25 + clips * 10
---         + (finished: 50 + greatest(0, (3040 - (time_cs + missed * 60)) * 5))
+--         + (finished: 50
+--            + (missed <= 3: greatest(0, (3040 - (time_cs + missed * 60)) * 5)))
 -- A clip is a pole cleared close enough to knock it flat.
 -- The payload says whether the run finished. A finish must account for
 -- every pole; a crash scores its poles alone, so claiming one only costs
@@ -33,11 +34,12 @@
 
 -- ---------------------------------------------------------------- constants
 -- Kept in sync by hand with game.js: POLE_COUNT, RED_COUNT, POLE_POINTS,
--- RED_POINTS, FINISH_POINTS, PAR_CS, BONUS_PER_CS, MISS_CS. 25 poles, 4 of
+-- RED_POINTS, FINISH_POINTS, PAR_CS, BONUS_PER_CS, MISS_CS, MISS_LIMIT.
+-- 25 poles, 4 of
 -- them red; 10 points a pole cleared, 25 more if it's red, 10 more if it
 -- was clipped (CLIP_POINTS); 50 for
 -- finishing; 5 points for every hundredth of a second under 30.40s, with
--- 0.60s added per missed pole.
+-- 0.60s added per missed pole; more than 3 missed and there's no bonus.
 
 -- ---------------------------------------------------------------- sessions
 
@@ -201,7 +203,10 @@ begin
   if v_time_cs <= 0 then raise exception '%', v_msg; end if;
   v_expected := v_passed * 10 + v_reds * 25 + v_clips * 10;
   if v_finished then
-    v_expected := v_expected + 50 + greatest(0, (3040 - (v_time_cs + v_missed * 60)) * 5);
+    v_expected := v_expected + 50;
+    if v_missed <= 3 then
+      v_expected := v_expected + greatest(0, (3040 - (v_time_cs + v_missed * 60)) * 5);
+    end if;
   end if;
   if v_score <> v_expected then raise exception '%', v_msg; end if;
 

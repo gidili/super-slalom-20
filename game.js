@@ -34,10 +34,13 @@
   const FINISH_POINTS = 50;
   const PAR_CS = 3040;         // no time bonus at or over 30.40s
   const BONUS_PER_CS = 5;
-  // A missed pole adds to the time the bonus is worked out on. Skipping a
-  // pole saves 0.45s on average (autopilot, normal poles; 0.24s in quick
-  // sections), so on average it doesn't pay, though a well-chosen one can.
+  // A missed pole adds 0.60s to the time the bonus is worked out on.
+  // Skipping one pole saves 0.45s on average (autopilot, normal poles;
+  // 0.24s in quick sections), so a well-chosen skip can pay. Skipping many
+  // saves more each, since you stay tucked (straight down the hill saved
+  // 0.65s a pole), so past MISS_LIMIT misses there's no time bonus at all.
   const MISS_CS = 60;
+  const MISS_LIMIT = 3;
   // Brushing a pole on the flag side, close enough to knock it flat.
   const CLIP_POINTS = 10;
   // Stars, for a finished run only (a crash gets none). One for finishing;
@@ -264,12 +267,14 @@
   const againBtnEl = document.getElementById('again-btn');
   const titleCardEl = document.getElementById('title-card');
   const bonusEl = document.getElementById('bonus');
+  const countdownEl = document.getElementById('countdown');
   const bonusTimeEl = document.getElementById('bonus-time');
   const bonusPointsEl = document.getElementById('bonus-points');
+  const bonusScoreEl = document.getElementById('bonus-score');
 
   // ------------------------------------------------------------ run state
-  // 'title' -> 'starting' -> 'running' <-> 'paused'
-  //                       'running' -> 'crashed' | 'finished'
+  // 'title' -> 'starting' -> 'countdown' -> 'running' <-> 'paused'
+  //                                      'running' -> 'crashed' | 'finished'
   let state = 'title';
   let skierX, skierY, vx, speed, mode;
   let straightFor = 0;         // seconds since the skier last steered
@@ -443,6 +448,13 @@
       o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.19);
     }
 
+    // The countdown: a short low beep for 3, 2 and 1, a longer high one
+    // for GO.
+    function playCount(isGo) {
+      if (!ac) return;
+      note(isGo ? 880 : 440, ac.currentTime, isGo ? 0.4 : 0.15, 0.12, 'square');
+    }
+
     // The bonus counting up: a blip per step, climbing as it goes.
     function playTick(progress) {
       if (!ac) return;
@@ -498,7 +510,7 @@
       unlock: safe(unlock), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
       stopSwoosh: safe(stopSwoosh), playDash: safe(playDash), playBreak: safe(playBreak),
       playExplosion: safe(playExplosion), playFanfare: safe(playFanfare), toggleMute: safe(toggleMute),
-      playCoin: safe(playCoin), playTick: safe(playTick), playDing: safe(playDing), playNoBonus: safe(playNoBonus),
+      playCoin: safe(playCoin), playCount: safe(playCount), playTick: safe(playTick), playDing: safe(playDing), playNoBonus: safe(playNoBonus),
       playStar: safe(playStar), playJingle: safe(playJingle),
     };
   })();
@@ -551,7 +563,8 @@
     passed * POLE_POINTS + reds * RED_POINTS + clips * CLIP_POINTS +
     (state === 'finished' ? FINISH_POINTS : 0);
   const bonusCs = () => runCs() + missed * MISS_CS;
-  const timeBonus = () => Math.max(0, (PAR_CS - bonusCs()) * BONUS_PER_CS);
+  const timeBonus = () =>
+    missed > MISS_LIMIT ? 0 : Math.max(0, (PAR_CS - bonusCs()) * BONUS_PER_CS);
   const points = () => earned() + (state === 'finished' ? timeBonus() : 0);
   function stars() {
     if (state !== 'finished') return 0;
@@ -585,6 +598,7 @@
     particles = [];
     overlayEl.hidden = true;
     titleCardEl.hidden = false;
+    countdownEl.hidden = true;
     tally = null;
     shownBonus = 0;
     bonusEl.hidden = true;
@@ -593,9 +607,14 @@
     paintHud();
   }
 
+  // Bumped by every run, so a card or tally queued by the last one can
+  // tell it's been restarted out from under it.
+  let runId = 0;
+
   async function startRun() {
     if (state !== 'title') return;
     state = 'starting';
+    runId++;
     overlayEl.hidden = true;
     titleCardEl.hidden = true;
     flash('GET READY');
@@ -609,6 +628,29 @@
     shownBonus = 0;
     runEnd = null;
     pausedMs = 0;
+    msgEl.textContent = '';
+    paintHud();
+    // 3, 2, 1 with the skier standing at the top, then GO. Neither clock
+    // starts until GO.
+    state = 'countdown';
+    const id = runId;
+    const beat = n => {
+      if (runId !== id || state !== 'countdown') return;
+      if (n === 0) { go(); return; }
+      showCount(String(n));
+      SFX.playCount(false);
+      setTimeout(() => beat(n - 1), COUNT_BEAT_MS);
+    };
+    beat(3);
+  }
+
+  const COUNT_BEAT_MS = 1000;
+  function showCount(text) {
+    countdownEl.textContent = text;
+    countdownEl.hidden = false;
+  }
+
+  function go() {
     tellServer('slalom_go');
     runStart = performance.now();
     // Physics and clock share an origin; nothing before this moment counts.
@@ -616,8 +658,25 @@
     acc = 0;
     state = 'running';
     SFX.startSwoosh();
-    flash(sessionId ? 'GO' : 'GO  (UNRANKED)');
-    paintHud();
+    SFX.playCount(true);
+    showCount('GO!');
+    if (!sessionId) flash('UNRANKED');
+    const id = runId;
+    setTimeout(() => { if (runId === id) countdownEl.hidden = true; }, 700);
+  }
+
+  // R: drop this run, unscored, and go again at once on a new course. The
+  // seed is spent with its session, so it can't be the same course.
+  function restart() {
+    if (state === 'starting') return;
+    if (state === 'title') { startRun(); return; }   // already a fresh course
+    if (state === 'running' || state === 'paused') {
+      runEnd = performance.now();
+      SFX.stopSwoosh();
+      closeSession();
+    }
+    toTitle();
+    startRun();
   }
 
   // Space mid-run: the run freezes where it is, PAUSED over it.
@@ -652,7 +711,8 @@
     }
     closeSession();
     // Long enough to watch the pieces land.
-    setTimeout(() => showOverlay(false), hit.pine ? 1400 : 900);
+    const id = runId;
+    setTimeout(() => { if (runId === id) showOverlay(false); }, hit.pine ? 1400 : 900);
   }
 
   function finish() {
@@ -666,12 +726,14 @@
     runEnd = performance.now();
     closeSession();
     // Time to glide to a stop past the line before the bonus counts up.
-    setTimeout(startTally, 1100);
+    const id = runId;
+    setTimeout(() => { if (runId === id) startTally(); }, 1100);
   }
 
   // ------------------------------------------------------------- the tally
-  // At the finish the time bonus counts up in big digits on the slope, a
-  // tick per step rising in pitch, the bigger the bonus the longer it runs.
+  // At the finish the time bonus drains into the score, in big digits on
+  // the slope: a tick per step rising in pitch, the bigger the bonus the
+  // longer it runs.
   // A ding, then the stars one by one; three of them get a jingle and
   // sparkles. Space skips to the card.
   let tally = null;
@@ -687,7 +749,7 @@
       count: bonus ? 0.6 + 1.6 * Math.min(1, bonus / 1500) : 0.4,
     };
     bonusTimeEl.textContent = `TIME ${fmt(bonusCs())}`;
-    bonusPointsEl.textContent = 'BONUS +0';
+    showTransfer(tally, 0);
     bonusEl.hidden = false;
   }
 
@@ -718,7 +780,14 @@
       if (k.t >= k.count + k.stars * TALLY_STAR_GAP + hold) endTally();
     }
     shownBonus = k.shown;
-    bonusPointsEl.textContent = `BONUS +${k.shown}`;
+    showTransfer(k, k.shown);
+  }
+
+  // The bonus drains into the score: what's left of one, the total so far.
+  // Takes the tally rather than reading it: the last update ends it.
+  function showTransfer(k, moved) {
+    bonusScoreEl.textContent = `SCORE ${earned() + moved}`;
+    bonusPointsEl.textContent = `BONUS +${k.bonus - moved}`;
   }
 
   function endTally() {
@@ -755,7 +824,7 @@
       if (said.length) flash(said.join('  '));
     } else {
       missed++;
-      flash(`MISS +${fmt(MISS_CS)}`);
+      flash(missed > MISS_LIMIT ? 'MISS  NO TIME BONUS' : `MISS +${fmt(MISS_CS)}`);
     }
     nextPole++;
     paintHud();
@@ -766,6 +835,7 @@
   const RIGHT = new Set(['ArrowRight', 'd', 'D', 'l', 'L', '6']);
   const STRAIGHT = new Set(['ArrowDown', 's', 'S', '2']);
   const GO = new Set([' ', 'Enter']);
+  const SHIFTS = { ShiftLeft: 'left', ShiftRight: 'right' };
 
   function press(id, dir) {
     held = held.filter(h => h.id !== id);
@@ -782,11 +852,17 @@
     SFX.unlock();
     if (document.activeElement === initialsInputEl) return;
     const id = 'k' + e.key.toLowerCase();
-    if (LEFT.has(e.key) || RIGHT.has(e.key)) {
+    // The two Shifts turn too, one per hand. Same key, so tell them apart
+    // by where it sits.
+    if (SHIFTS[e.code]) {
+      e.preventDefault();
+      if (!e.repeat) press('k' + e.code, SHIFTS[e.code]);
+    } else if (LEFT.has(e.key) || RIGHT.has(e.key)) {
       e.preventDefault();
       if (!e.repeat) press(id, LEFT.has(e.key) ? 'left' : 'right');
     } else if (STRAIGHT.has(e.key)) { straighten(); e.preventDefault(); }
     else if (e.key === 'm' || e.key === 'M') flash(SFX.toggleMute() ? 'SOUND OFF' : 'SOUND ON');
+    else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); restart(); }
     else if (GO.has(e.key)) {
       e.preventDefault();
       if (state === 'title') startRun();
@@ -795,7 +871,7 @@
       else if (overlayEl.hidden === false && (state === 'crashed' || state === 'finished')) toTitle();
     }
   });
-  window.addEventListener('keyup', (e) => release('k' + e.key.toLowerCase()));
+  window.addEventListener('keyup', (e) => release(SHIFTS[e.code] ? 'k' + e.code : 'k' + e.key.toLowerCase()));
   // A key let go while the window is unfocused never sends keyup.
   window.addEventListener('blur', straighten);
 
@@ -1022,13 +1098,14 @@
 
   // 1 = ink. Each 7 wide, drawn centred on the skier.
   const SPRITES = {
-    // Running straight: tucked, poles trailing back uphill.
+    // Running straight: tucked, short pole ends trailing back uphill.
     down: [
-      'X.....X',
       '.X.X.X.',
       '..XXX..',
       '..XXX..',
       '.X.X.X.',
+      '..X.X..',
+      '..X.X..',
       '..X.X..',
       '..X.X..',
     ],
@@ -1347,8 +1424,10 @@
       ? poles +
         `<div><span>FINISH</span><span>+${FINISH_POINTS}</span></div>` +
         `<div><span>TIME</span><span>${fmt(runCs())}</span></div>` +
-        (missed ? `<div><span>MISSED ${missed} x ${fmt(MISS_CS)}</span><span>+${fmt(missed * MISS_CS)}</span></div>` : '') +
-        `<div><span>BONUS ON ${fmt(bonusCs())}</span><span>+${timeBonus()}</span></div>` +
+        (missed > MISS_LIMIT
+          ? `<div><span>MISSED ${missed}: NO TIME BONUS</span><span>+0</span></div>`
+          : (missed ? `<div><span>MISSED ${missed} x ${fmt(MISS_CS)}</span><span>+${fmt(missed * MISS_CS)}</span></div>` : '') +
+            `<div><span>BONUS ON ${fmt(bonusCs())}</span><span>+${timeBonus()}</span></div>`) +
         `<div class="total"><span>SCORE</span><span>${points()}</span></div>` +
         `<div class="center stars">${starText(stars())}</div>`
       : `<div class="center">INTO THE ${hitWhat}</div>` + poles +

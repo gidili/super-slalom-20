@@ -66,9 +66,12 @@
   }
   #title-card p { font-size: clamp(6px, 1.3vw, 9px); line-height: 2; margin: 0; }
   #message { top: 62%; font-size: clamp(8px, 1.9vw, 13px); }
+  /* Below the skier, who stands at about 30% down the screen. */
+  #countdown { top: 45%; font-size: clamp(20px, 5.5vw, 38px); }
   #bonus { top: 20%; }
   #bonus-time { font-size: clamp(8px, 1.9vw, 13px); margin-bottom: 0.8em; }
-  #bonus-points { font-size: clamp(14px, 3.6vw, 26px); }
+  #bonus-score { font-size: clamp(14px, 3.6vw, 26px); margin-bottom: 0.4em; }
+  #bonus-points { font-size: clamp(8px, 1.9vw, 13px); }
 
   #overlay {
     position: fixed; inset: 0; background: var(--vic-cyan);
@@ -128,15 +131,18 @@
         25 POLES, ONE MOUNTAIN, NO SECOND CHANCES.<br>
         GOOD LUCK. YOU WILL NEED IT.<br>
         <br>
-        HOLD A OR L (OR THE ARROWS) TO TURN<br>
-        SPACE PAUSES &middot; M MUTES
+        HOLD A / L, THE SHIFTS OR THE ARROWS TO TURN<br>
+        SPACE PAUSES &middot; R RESTARTS &middot; M MUTES
       </p>
     </div>
 
     <div id="message" class="ontv"></div>
 
+    <div id="countdown" class="ontv" hidden></div>
+
     <div id="bonus" class="ontv" hidden>
       <div id="bonus-time"></div>
+      <div id="bonus-score"></div>
       <div id="bonus-points"></div>
     </div>
   </div>
