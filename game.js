@@ -851,7 +851,8 @@
       if (said.length) flash(said.join('  '));
     } else {
       missed++;
-      flash(missed > MISS_LIMIT ? 'MISS  NO TIME BONUS' : `MISS +${fmt(MISS_CS)}`);
+      // The time bonus is lost once, on the miss that loses it.
+      flash(missed === MISS_LIMIT + 1 ? 'MISS  NO TIME BONUS' : `MISS +${fmt(MISS_CS)}`);
     }
     nextPole++;
     paintHud();
