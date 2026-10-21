@@ -153,17 +153,17 @@
   body.narrow #bonus-score { font-size: 22px; }
   body.narrow .arrow-btn {
     display: flex; align-items: center; justify-content: center;
-    position: absolute; bottom: calc(24px + env(safe-area-inset-bottom, 0px));
-    width: 76px; height: 76px; padding: 0;
+    position: absolute; bottom: calc(44px + env(safe-area-inset-bottom, 0px));
+    width: 96px; height: 96px; padding: 0;
     background: var(--vic-white); border: 2px solid var(--vic-blue); border-radius: 0;
     touch-action: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
     cursor: pointer;
   }
   body.narrow .arrow-btn:active { background: var(--vic-cyan); }
-  body.narrow .arrow-btn[data-dir="left"] { left: 20px; }
-  body.narrow .arrow-btn[data-dir="right"] { right: 20px; }
+  body.narrow .arrow-btn[data-dir="left"] { left: 24px; }
+  body.narrow .arrow-btn[data-dir="right"] { right: 24px; }
   .arrow-btn canvas {
-    width: 42px; height: 42px; pointer-events: none;
+    width: 56px; height: 56px; pointer-events: none;
     image-rendering: pixelated; image-rendering: crisp-edges;
   }
   [hidden] { display: none !important; }

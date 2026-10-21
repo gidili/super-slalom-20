@@ -80,7 +80,7 @@
   // down the screen, and the skier runs down to it. Past the last pole.
   // 28 rows up from the bottom on the TV; on a phone, just above the arrow
   // buttons so they never cover the line.
-  const FINISH_ROW = H - (NARROW ? 50 : 28);
+  const FINISH_ROW = H - (NARROW ? 65 : 28);
   const PATH_HW = 40;          // groomed piste, half width
 
   // Off the piste, "depth" runs from 0 at the piste edge to 1 at the screen
@@ -907,12 +907,21 @@
   // Touch: a tap on the screen is Space. Steering is the two arrow
   // buttons in the bottom corners, held like the keys: the pointer is
   // captured, so a thumb sliding off the button keeps turning until lifted.
+  // A tap this close to an arrow is a thumb that missed it, not a pause.
+  const ARROW_SAFE = 40;
+  const arrowBtns = [...document.querySelectorAll('.arrow-btn')];
+  const nearArrow = (x, y) => arrowBtns.some((btn) => {
+    const r = btn.getBoundingClientRect();
+    return r.width > 0 && x > r.left - ARROW_SAFE && x < r.right + ARROW_SAFE
+      && y > r.top - ARROW_SAFE && y < r.bottom + ARROW_SAFE;
+  });
   canvas.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'mouse') return;
     SFX.unlock();
+    if (nearArrow(e.clientX, e.clientY)) return;
     spaceAction();
   });
-  document.querySelectorAll('.arrow-btn').forEach((btn) => {
+  arrowBtns.forEach((btn) => {
     const dir = btn.dataset.dir;
     const id = 'b' + dir;
     btn.addEventListener('pointerdown', (e) => {
