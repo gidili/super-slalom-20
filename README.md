@@ -1,22 +1,33 @@
 # Super Slalom vs Pineapple
 A super slalom ski game inspired by an old VIC-20 game
 
-Downhill slalom, in the spirit of the VIC-20: 22 columns, 23 rows, sixteen colours, and a skier made of about thirty pixels.
+Downhill slalom in the spirit of the VIC-20: sixteen colours, chunky pixels, beeps and swooshes, and a skier made of about thirty pixels.
 
-Play: (not deployed yet)
+**Play:** https://gidili.github.io/super-slalom-20/
 
 ## The run
 
-- **Twenty poles.** Each has a little flag pointing to the side you pass it on, and the sides alternate, so you weave down the hill. The first has no flag: pass it on whichever side you like. Pass on the wrong side, or skip it, and it costs you **300 points**. Clip a pole on the right side and it goes down, but it still counts.
-- **Red poles are a gift.** Clear one for **150 points**.
-- **Stay on the piste.** The fresh snow either side slows you down, more the further out you go — you can see it getting deeper. Out there are trees and wooden fences, and either one ends your run.
-- **Highest score wins.** The clock eats into your score from the start, so be quick.
+- **25 poles, one mountain.** Each pole has a little flag pointing to the side you pass it on, and the sides alternate, so you weave down the hill. Miss one and it costs you.
+- **Some stretches are tight.** Poles bunch up close together, and only quick hands get through.
+- **Red poles are worth chasing**, and brushing a pole as you pass it is worth a little extra.
+- **Stay on the piste.** The fresh snow on either side slows you down, more the further out you go. Out there are trees and wooden fences, and either one ends your run.
+- **Watch out for pineapples.**
+- **Fast and clean wins.** Finish quickly with few misses for a big bonus and up to three stars.
 
 ## Controls
 
-- Hold **A** or **←** to turn left, **D** or **→** to turn right
-- Let go and the skier straightens up; the longer you hold a straight line the faster you go
-- A quick tap gives a short turn, for small corrections
-- **S** or **↓** straightens right away
+On a computer:
 
-Keypad 4 / 6 / 2 work too. Space to start, **M** to mute. On mobile, hold the left third of the screen to turn left, the right third to turn right; tap the middle to straighten.
+- Hold **A**, **Left Shift** or **←** to turn left, and **L**, **Right Shift** or **→** to turn right
+- Let go and the skier straightens up; the longer you hold a straight line, the faster you go
+- **S** or **↓** straightens right away
+- **Space** starts and pauses, **R** restarts, **M** mutes
+
+On a phone held upright:
+
+- Hold the arrow buttons in the bottom corners to turn
+- Tap the screen to start and pause
+
+## High scores
+
+Coming soon: enter your initials at the end of a run and race for the top 10.
