@@ -103,6 +103,7 @@
   // Pineapples turn up anywhere, piste included, about 12 a run. Dodging
   // them is the point, so only the poles are kept clear.
   const PINE_CHANCE = 1 / 240; // chance per tree cell
+  const PINE_PISTE = 1.1;      // ...times this on the piste itself
 
   const SKIER_Y = 48;          // skier's fixed screen row
   const DOWN_SPEED = 72;       // px/s straight down on the piste
@@ -1029,7 +1030,8 @@
     const y = j * TREE_CELL + 2 + Math.floor(hash(i * 5 + salt, j * 11 + 7) * (TREE_CELL - 4));
     if (course && Math.abs(x - course.titlePine.x) < 10 && Math.abs(y - course.titlePine.y) < 12) return null;
     const depth = snowDepth(x, centerAt(y), y);
-    const pine = hash(i * 48271 + salt, j * 13 + 5) < PINE_CHANCE && pineIsFair(x, y);
+    const pineChance = depth <= 0 ? PINE_CHANCE * PINE_PISTE : PINE_CHANCE;
+    const pine = hash(i * 48271 + salt, j * 13 + 5) < pineChance && pineIsFair(x, y);
     if (pine) {
       // Anywhere at all, so no tree chance to pass.
     } else if (depth <= 0) {
@@ -1084,7 +1086,7 @@
     if (hash(k * 613 + salt, side + 71) >= FENCE_CHANCE) return null;
     const y = k * FENCE_SLOT + Math.floor(hash(k * 37 + salt, side + 5) * (FENCE_SLOT - 8));
     const c = centerAt(y);
-    const len = 12 + Math.floor(hash(k * 91 + salt, side + 13) * 18);
+    const len = 16 + Math.floor(hash(k * 91 + salt, side + 13) * 22);
     let a;
     if (course && hash(k * 17 + salt, side + 41) < INTRUDE_CHANCE) {
       a = Math.round(c + side * (PATH_HW - 4 - hash(k * 23 + salt, side + 3) * (INTRUDE_MAX - 4)));
@@ -1100,7 +1102,7 @@
     return { y, x0: Math.min(a, b), x1: Math.max(a, b) };
   }
 
-  // A fence occupies rows y-2..y; the skier is fenced in when any of the
+  // A fence occupies rows y-4..y; the skier is fenced in when any of the
   // skier's rows meet it, give or take a pixel.
   function hitFence(x, y) {
     const { salt, centerAt } = course;
@@ -1108,7 +1110,7 @@
     for (let k = k0; k <= k1; k++) {
       for (const side of [-1, 1]) {
         const f = fenceAt(k, side, salt, centerAt);
-        if (f && y >= f.y - 5 && y <= f.y + 1 && x >= f.x0 - 2 && x <= f.x1 + 2) return { fence: true };
+        if (f && y >= f.y - 7 && y <= f.y + 1 && x >= f.x0 - 2 && x <= f.x1 + 2) return { fence: true };
       }
     }
     return null;
@@ -1381,7 +1383,7 @@
       blit(PINEAPPLE, course.titlePine.x - 2, course.titlePine.y - camY - 6);
     }
 
-    // Fences: a post every third pixel, a rail between.
+    // Fences: a post every third pixel, two rails between.
     const k0 = Math.floor(camY / FENCE_SLOT) - 1, k1 = Math.floor((camY + H) / FENCE_SLOT) + 1;
     for (let k = k0; k <= k1; k++) {
       for (const side of [-1, 1]) {
@@ -1389,8 +1391,9 @@
         if (!f) continue;
         const sy = f.y - camY;
         for (let x = f.x0; x <= f.x1; x++) {
+          put(x, sy - 3, VIC.orange);
           put(x, sy - 1, VIC.orange);
-          if ((x - f.x0) % 3 === 0) { put(x, sy - 2, VIC.orange); put(x, sy, VIC.orange); }
+          if ((x - f.x0) % 3 === 0) { put(x, sy - 4, VIC.orange); put(x, sy - 2, VIC.orange); put(x, sy, VIC.orange); }
         }
       }
     }
