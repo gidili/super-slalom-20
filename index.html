@@ -132,9 +132,11 @@
     0%, 100% { background: var(--vic-white); color: var(--vic-blue); }
     50%      { background: var(--vic-blue); color: var(--vic-white); }
   }
-  #leaderboard-list .rank { width: 32px; text-align: left; opacity: 0.6; }
+  /* Rank and score get the same fixed width, so the initials sit dead
+     centre whatever the number of digits. */
+  #leaderboard-list .rank { width: 5em; text-align: left; opacity: 0.6; }
   #leaderboard-list .ini { flex: 1; text-align: center; letter-spacing: 2px; }
-  #leaderboard-list .sc { text-align: right; }
+  #leaderboard-list .sc { width: 5em; text-align: right; }
   #restart-hint { font-size: 8px; opacity: 0.7; }
   /* Phones held upright: the screen is the whole phone, arrows on top of
      the slope in the bottom corners. */
@@ -165,6 +167,29 @@
   .arrow-btn canvas {
     width: 56px; height: 56px; pointer-events: none;
     image-rendering: pixelated; image-rendering: crisp-edges;
+  }
+  /* The crown opens the top 10, snake-bit style. On the TV it mirrors the
+     SCORE box: left edges lined up (the box is centred in the first third
+     and is 'SCORE' plus padding and border wide: 6em + 4px), as far from
+     the bottom as the HUD is from the top, and the same height (two HUD
+     lines plus padding and border). On a phone it sits between the arrows. */
+  #board-btn {
+    position: absolute; left: calc(100% / 6 - 3em - 2px); bottom: 2.5%;
+    font-size: clamp(7px, 1.6vw, 11px);
+    width: calc(3.7em + 4px); height: calc(3.7em + 4px); box-sizing: border-box;
+    display: flex; align-items: center; justify-content: center; padding: 0;
+    background: var(--vic-blue); border: 2px solid var(--vic-blue); border-radius: 0;
+    cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  #board-btn:active { background: rgb(40, 30, 96); border-color: rgb(40, 30, 96); }
+  #board-btn canvas {
+    width: 70%; height: 70%; pointer-events: none;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+  }
+  body.narrow #board-btn {
+    left: 50%; transform: translateX(-50%);
+    bottom: calc(62px + env(safe-area-inset-bottom, 0px));
+    width: 60px; height: 60px;
   }
   [hidden] { display: none !important; }
 </style>
@@ -201,6 +226,7 @@
 
     <button class="arrow-btn" data-dir="left" aria-label="Turn left"><canvas width="7" height="7"></canvas></button>
     <button class="arrow-btn" data-dir="right" aria-label="Turn right"><canvas width="7" height="7"></canvas></button>
+    <button id="board-btn" type="button" aria-label="Leaderboard"><canvas width="8" height="8"></canvas></button>
 
     <div id="bonus" class="ontv" hidden>
       <div id="bonus-time"></div>
@@ -231,10 +257,13 @@
         <ol id="leaderboard-list"></ol>
       </div>
 
-      <div class="btn-row">
+      <div class="btn-row" id="again-row">
         <button id="again-btn" type="button">RUN AGAIN</button>
       </div>
       <div id="restart-hint">OR PRESS <b>R</b></div>
+      <div class="btn-row" id="close-row" hidden>
+        <button id="close-btn" type="button" class="secondary">CLOSE</button>
+      </div>
     </div>
   </div>
 

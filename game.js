@@ -272,6 +272,11 @@
   const finalScoreEl = document.getElementById('final-score-val');
   const finalStarsEl = document.getElementById('final-stars');
   const leaderboardEl = document.getElementById('leaderboard');
+  const finalScoreRowEl = document.getElementById('final-score');
+  const againRowEl = document.getElementById('again-row');
+  const restartHintEl = document.getElementById('restart-hint');
+  const closeRowEl = document.getElementById('close-row');
+  const boardBtnEl = document.getElementById('board-btn');
   const breakdownEl = document.getElementById('breakdown');
   const submitFormEl = document.getElementById('submit-form');
   const initialsInputEl = document.getElementById('initials-input');
@@ -880,6 +885,13 @@
   window.addEventListener('keydown', (e) => {
     SFX.unlock();
     if (document.activeElement === initialsInputEl) return;
+    // With the board up, Space or Escape closes it and R restarts.
+    if (boardView) {
+      if (GO.has(e.key) || e.key === 'Escape') { e.preventDefault(); closeBoard(); }
+      else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); closeBoard(); restart(); }
+      else if (e.key === 'm' || e.key === 'M') flash(SFX.toggleMute() ? 'SOUND OFF' : 'SOUND ON');
+      return;
+    }
     const id = 'k' + e.key.toLowerCase();
     // The two Shifts turn too, one per hand. Same key, so tell them apart
     // by where it sits.
@@ -1228,6 +1240,23 @@
     }));
   });
 
+  // snake-bit's crown, gold on the blue button.
+  const CROWN = [
+    '........',
+    '.Y.YY.Y.',
+    '.Y.YY.Y.',
+    '.YYYYYY.',
+    '.Y.YY.Y.',
+    '.YYYYYY.',
+    '.YYYYYY.',
+    '........',
+  ];
+  (() => {
+    const cctx = boardBtnEl.querySelector('canvas').getContext('2d');
+    cctx.fillStyle = css(VIC.yellow);
+    CROWN.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === 'Y') cctx.fillRect(x, y, 1, 1); }));
+  })();
+
   // The title reads SUPER SLALOM VS <pineapple>, and the score card
   // carries one too; both drawn from the sprite.
   document.querySelectorAll('canvas.pine-icon').forEach((c) => {
@@ -1536,6 +1565,39 @@
     if (document.activeElement === initialsInputEl) initialsInputEl.blur();
     overlayEl.classList.remove('visible');
     overlayEl.hidden = true;
+    setBoardView(false);
+  }
+
+  // The crown: the top 10 on its own, any time but mid-countdown or while
+  // a run's own card is on its way. A run in progress pauses under it and
+  // carries on when the board closes.
+  let boardView = false, boardPaused = false;
+  function setBoardView(on) {
+    boardView = on;
+    for (const el of [overlayTitleEl, finalScoreRowEl, againRowEl, restartHintEl]) el.hidden = on;
+    closeRowEl.hidden = !on;
+    if (on) {
+      finalStarsEl.hidden = breakdownEl.hidden = submitFormEl.hidden = true;
+      submitStatusEl.textContent = '';
+      leaderboardEl.hidden = false;
+    }
+  }
+
+  function openBoard() {
+    if (boardView || !overlayEl.hidden) return;
+    if (state !== 'title' && state !== 'running' && state !== 'paused') return;
+    if (state === 'running') { togglePause(); boardPaused = true; }
+    setBoardView(true);
+    overlayEl.hidden = false;
+    requestAnimationFrame(() => overlayEl.classList.add('visible'));
+    fetchLeaderboard();
+  }
+
+  function closeBoard() {
+    if (!boardView) return;
+    hideOverlay();
+    if (boardPaused && state === 'paused') togglePause();
+    boardPaused = false;
   }
 
   // Step two: the run folds down to its score and the board takes over.
@@ -1606,6 +1668,9 @@
 
   skipBtnEl.addEventListener('click', showLeaderboard);
   againBtnEl.addEventListener('click', restart);
+  document.getElementById('close-btn').addEventListener('click', closeBoard);
+  // Blurred straight away, so Space never "clicks" it again later.
+  boardBtnEl.addEventListener('click', () => { boardBtnEl.blur(); openBoard(); });
 
   // ----------------------------------------------------------------- loop
   // Physics runs on WALL time, in fixed substeps, never capped. The run
