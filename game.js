@@ -1740,6 +1740,44 @@
   againBtnEl.addEventListener('click', restart);
   document.getElementById('close-btn').addEventListener('click', closeBoard);
   // Blurred straight away, so Space never "clicks" it again later.
+  // A game controller, polled every frame like snake-bit's: the d-pad or
+  // left stick turns while held, Start is Space, A is R, B closes the board
+  // or the card. Typing initials, A submits and B skips. First pad only.
+  let gpDir = null, gpPrev = [];
+  function pollGamepad() {
+    const pads = typeof navigator.getGamepads === 'function' ? navigator.getGamepads() : [];
+    let pad = null;
+    for (let i = 0; i < pads.length; i++) if (pads[i]) { pad = pads[i]; break; }
+    if (!pad) { gpPrev = []; if (gpDir) { release('gp'); gpDir = null; } return; }
+    const pressed = (i) => !!(pad.buttons[i] && pad.buttons[i].pressed);
+    const justPressed = (i) => pressed(i) && !gpPrev[i];
+    const typing = document.activeElement === initialsInputEl;
+
+    const ax = pad.axes[0] || 0;
+    const dir = typing || boardView ? null
+      : pressed(14) || ax < -0.5 ? 'left'
+      : pressed(15) || ax > 0.5 ? 'right' : null;
+    if (dir !== gpDir) {
+      release('gp');
+      if (dir) press('gp', dir);
+      gpDir = dir;
+    }
+
+    if (typing) {
+      if (justPressed(0)) submitFormEl.requestSubmit();
+      else if (justPressed(1)) showLeaderboard();
+    } else if (boardView) {
+      if (justPressed(9) || justPressed(1)) closeBoard();
+      else if (justPressed(0)) { closeBoard(); restart(); }
+    } else {
+      if (justPressed(9)) spaceAction();
+      else if (justPressed(0)) restart();
+      else if (justPressed(1) && !overlayEl.hidden && (state === 'crashed' || state === 'finished')) toTitle();
+    }
+    if ([0, 1, 9, 14, 15].some(justPressed)) SFX.unlock();
+    gpPrev = pad.buttons.map(b => !!b.pressed);
+  }
+
   boardBtnEl.addEventListener('click', () => { boardBtnEl.blur(); openBoard(); });
   // Pause is Space, restart is R. Blurred like the crown.
   pauseBtnEl.addEventListener('click', () => { pauseBtnEl.blur(); spaceAction(); });
@@ -1759,6 +1797,7 @@
     const dt = (now - last) / 1000;
     last = now;
     paintPauseIcon();
+    pollGamepad();
     if (state === 'running') {
       acc += dt;
       while (acc >= STEP && state === 'running') { step(STEP); acc -= STEP; }
