@@ -28,6 +28,4 @@ On a phone held upright:
 - Hold the arrow buttons in the bottom corners to turn
 - Tap the screen to start and pause
 
-## High scores
-
-Coming soon: enter your initials at the end of a run and race for the top 10.
+The **crown** shows the top 10.
