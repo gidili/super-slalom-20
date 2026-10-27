@@ -1548,9 +1548,9 @@
     breakdownEl.hidden = false;
     lastSubmittedId = null;
     submitStatusEl.classList.remove('error');
-    // Any ranked run with something to show can go on the board, crashes
-    // included. Anything else goes straight to the board.
-    const canSave = !!(sessionId && points() > 0);
+    // A ranked run that would make the top 10, crashes included, gets to
+    // save it, as in snake-bit. Anything else goes straight to the board.
+    const canSave = !!(sessionId && points() > 0 && makesTop10(points()));
     submitFormEl.hidden = !canSave;
     leaderboardEl.hidden = canSave;
     submitStatusEl.textContent = sessionId ? '' : 'UNRANKED RUN';
@@ -1611,6 +1611,14 @@
 
   const placeholder = (text) => `<li class="note">${text}</li>`;
 
+  // The last top 10 seen, kept to decide whether a run qualifies. Unknown
+  // (offline, not loaded yet) qualifies, so a real top score is never lost.
+  let leaderboardCache = null;
+  function makesTop10(score) {
+    if (!leaderboardCache || leaderboardCache.length < 10) return true;
+    return score > leaderboardCache[9].score;
+  }
+
   async function fetchLeaderboard() {
     if (!juicer) { leaderboardListEl.innerHTML = placeholder('OFFLINE'); return; }
     if (!leaderboardListEl.children.length) leaderboardListEl.innerHTML = placeholder('LOADING...');
@@ -1621,6 +1629,7 @@
       .order('created_at', { ascending: true })
       .limit(10);
     if (error) { leaderboardListEl.innerHTML = placeholder('UNAVAILABLE'); return; }
+    leaderboardCache = data;
     if (!data.length) { leaderboardListEl.innerHTML = placeholder('NO SCORES YET'); return; }
     leaderboardListEl.innerHTML = data.map((row, i) => {
       const mine = row.id === lastSubmittedId ? ' class="mine"' : '';
@@ -1707,5 +1716,6 @@
   prepareRun();
   paintHud();
   fetchLeaderboard();
+  if (juicer) setInterval(fetchLeaderboard, 60000);   // keeps makesTop10 current
   requestAnimationFrame(frame);
 })();
