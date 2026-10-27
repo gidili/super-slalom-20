@@ -277,6 +277,8 @@
   const restartHintEl = document.getElementById('restart-hint');
   const closeRowEl = document.getElementById('close-row');
   const boardBtnEl = document.getElementById('board-btn');
+  const pauseBtnEl = document.getElementById('pause-btn');
+  const restartBtnEl = document.getElementById('restart-btn');
   const breakdownEl = document.getElementById('breakdown');
   const submitFormEl = document.getElementById('submit-form');
   const initialsInputEl = document.getElementById('initials-input');
@@ -1240,7 +1242,44 @@
     }));
   });
 
-  // snake-bit's crown, gold on the blue button.
+  // snake-bit's button icons, gold on the blue buttons.
+  function paintIcon(btn, rows) {
+    const c = btn.querySelector('canvas');
+    const ictx = c.getContext('2d');
+    ictx.clearRect(0, 0, c.width, c.height);
+    ictx.fillStyle = css(VIC.yellow);
+    rows.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === 'Y') ictx.fillRect(x, y, 1, 1); }));
+  }
+  const PAUSE_ICON = [
+    '........',
+    '.YY..YY.',
+    '.YY..YY.',
+    '.YY..YY.',
+    '.YY..YY.',
+    '.YY..YY.',
+    '.YY..YY.',
+    '........',
+  ];
+  const PLAY_ICON = [
+    '........',
+    '..Y.....',
+    '..YYY...',
+    '..YYYYY.',
+    '..YYYYY.',
+    '..YYY...',
+    '..Y.....',
+    '........',
+  ];
+  const RESTART_ICON = [      // snake's R, moved a column right to sit centred
+    '........',
+    '..YYYY..',
+    '..Y..Y..',
+    '..Y..Y..',
+    '..YYYY..',
+    '..Y.Y...',
+    '..Y..Y..',
+    '........',
+  ];
   const CROWN = [
     '........',
     '.Y.YY.Y.',
@@ -1251,11 +1290,32 @@
     '.YYYYYY.',
     '........',
   ];
-  (() => {
-    const cctx = boardBtnEl.querySelector('canvas').getContext('2d');
-    cctx.fillStyle = css(VIC.yellow);
-    CROWN.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === 'Y') cctx.fillRect(x, y, 1, 1); }));
-  })();
+  paintIcon(boardBtnEl, CROWN);
+  paintIcon(restartBtnEl, RESTART_ICON);
+  // The pause button shows play while paused; repainted only on a change.
+  let pauseIconPlay = null;
+  function paintPauseIcon() {
+    const play = state === 'paused';
+    if (play === pauseIconPlay) return;
+    pauseIconPlay = play;
+    paintIcon(pauseBtnEl, play ? PLAY_ICON : PAUSE_ICON);
+  }
+  paintPauseIcon();
+
+  // Line the TV's buttons up with the HUD boxes above them. BEST widens
+  // with its digits, so this runs again whenever the HUD is painted.
+  const tvEl = document.getElementById('tv');
+  const hudBoxes = [...document.querySelectorAll('#hud > div')];
+  function placeHudButtons() {
+    if (NARROW || hudBoxes.length < 3) return;
+    const tv = tvEl.getBoundingClientRect();
+    const [s, m, b] = hudBoxes.map(el => el.getBoundingClientRect());
+    pauseBtnEl.style.left = (s.left - tv.left) + 'px';
+    restartBtnEl.style.left = (m.left + m.width / 2 - tv.left - restartBtnEl.offsetWidth / 2) + 'px';
+    boardBtnEl.style.left = (b.right - tv.left - boardBtnEl.offsetWidth) + 'px';
+  }
+  window.addEventListener('resize', placeHudButtons);
+  if (document.fonts) document.fonts.ready.then(placeHudButtons);
 
   // The title reads SUPER SLALOM VS <pineapple>, and the score card
   // carries one too; both drawn from the sprite.
@@ -1529,6 +1589,7 @@
       try { localStorage.setItem('slalom_best', best); } catch (_) {}
     }
     bestEl.textContent = best;
+    placeHudButtons();
   }
 
   // -------------------------------------------------------------- overlay
@@ -1680,6 +1741,9 @@
   document.getElementById('close-btn').addEventListener('click', closeBoard);
   // Blurred straight away, so Space never "clicks" it again later.
   boardBtnEl.addEventListener('click', () => { boardBtnEl.blur(); openBoard(); });
+  // Pause is Space, restart is R. Blurred like the crown.
+  pauseBtnEl.addEventListener('click', () => { pauseBtnEl.blur(); spaceAction(); });
+  restartBtnEl.addEventListener('click', () => { restartBtnEl.blur(); restart(); });
 
   // ----------------------------------------------------------------- loop
   // Physics runs on WALL time, in fixed substeps, never capped. The run
@@ -1694,6 +1758,7 @@
   function frame(now) {
     const dt = (now - last) / 1000;
     last = now;
+    paintPauseIcon();
     if (state === 'running') {
       acc += dt;
       while (acc >= STEP && state === 'running') { step(STEP); acc -= STEP; }

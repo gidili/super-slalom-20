@@ -172,24 +172,27 @@
     width: 56px; height: 56px; pointer-events: none;
     image-rendering: pixelated; image-rendering: crisp-edges;
   }
-  /* The crown opens the top 10, snake-bit style. On the TV it mirrors the
-     SCORE box: left edges lined up (the box is centred in the first third
-     and is 'SCORE' plus padding and border wide: 6em + 4px), as far from
-     the bottom as the HUD is from the top, and the same height (two HUD
-     lines plus padding and border). On a phone it sits between the arrows. */
-  #board-btn {
-    position: absolute; left: calc(100% / 6 - 3em - 2px); bottom: 2.5%;
+  /* Pause, restart and the crown (the top 10), snake-bit style. On the TV
+     they sit along the bottom, as far from it as the HUD is from the top
+     and as tall as its boxes (two HUD lines plus padding and border);
+     game.js lines them up with the boxes: pause with SCORE's left edge,
+     restart with MISS's centre, the crown with BEST's right edge. On a
+     phone only the crown shows, between the arrows. */
+  .hud-btn {
+    position: absolute; left: 0; bottom: 2.5%;
     font-size: clamp(7px, 1.6vw, 11px);
     width: calc(3.7em + 4px); height: calc(3.7em + 4px); box-sizing: border-box;
     display: flex; align-items: center; justify-content: center; padding: 0;
     background: var(--vic-blue); border: 2px solid var(--vic-blue); border-radius: 0;
+    box-shadow: inset 0 0 0 2px var(--vic-white);   /* a keycap's white inner ring */
     cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
   }
-  #board-btn:active { background: rgb(40, 30, 96); border-color: rgb(40, 30, 96); }
-  #board-btn canvas {
+  .hud-btn:active { background: rgb(40, 30, 96); border-color: rgb(40, 30, 96); }
+  .hud-btn canvas {
     width: 70%; height: 70%; pointer-events: none;
     image-rendering: pixelated; image-rendering: crisp-edges;
   }
+  body.narrow #pause-btn, body.narrow #restart-btn { display: none; }
   body.narrow #board-btn {
     left: 50%; transform: translateX(-50%);
     bottom: calc(44px + env(safe-area-inset-bottom, 0px));   /* level with the arrows' bottom */
@@ -230,7 +233,9 @@
 
     <button class="arrow-btn" data-dir="left" aria-label="Turn left"><canvas width="7" height="7"></canvas></button>
     <button class="arrow-btn" data-dir="right" aria-label="Turn right"><canvas width="7" height="7"></canvas></button>
-    <button id="board-btn" type="button" aria-label="Leaderboard"><canvas width="8" height="8"></canvas></button>
+    <button id="pause-btn" class="hud-btn" type="button" aria-label="Pause"><canvas width="8" height="8"></canvas></button>
+    <button id="restart-btn" class="hud-btn" type="button" aria-label="Restart"><canvas width="8" height="8"></canvas></button>
+    <button id="board-btn" class="hud-btn" type="button" aria-label="Leaderboard"><canvas width="8" height="8"></canvas></button>
 
     <div id="bonus" class="ontv" hidden>
       <div id="bonus-time"></div>
