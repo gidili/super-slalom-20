@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Super Slalom vs Pineapple</title>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -15,6 +15,10 @@
     --vic-red: rgb(120, 41, 34);
     --vic-black: rgb(0, 0, 0);
   }
+  /* A game, not a page: no double-tap zoom anywhere. touch-action applies
+     to everything inside, so this covers the whole page; the score card
+     still scrolls. (Pinch is stopped in game.js.) */
+  html { touch-action: manipulation; }
   html, body {
     margin: 0; min-height: 100%;
     background: var(--vic-cyan); color: var(--vic-blue);

@@ -881,6 +881,19 @@
   function release(id) { held = held.filter(h => h.id !== id); }
   function straighten() { held = []; tapLeft = 0; }
 
+  // No zooming mid-run. iPhone browsers (Safari and Chrome alike, both
+  // WebKit) ignore the viewport's user-scalable=no, and two thumbs on the
+  // arrows drifting apart reads as a pinch. Cancelling WebKit's own gesture
+  // events and any two-finger touch move stops it; taps and the arrows
+  // work through pointer events, which this leaves alone.
+  for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+    document.addEventListener(type, (e) => e.preventDefault());
+  }
+  document.addEventListener('touchmove', (e) => {
+    if (e.touches.length > 1) e.preventDefault();
+  }, { passive: false });
+  document.addEventListener('dblclick', (e) => e.preventDefault());
+
   // Any first key, tap or click lets the page make sound.
   window.addEventListener('pointerdown', SFX.unlock);
 
