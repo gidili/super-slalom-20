@@ -920,6 +920,7 @@
     else if (e.key === 'm' || e.key === 'M') flash(SFX.toggleMute() ? 'SOUND OFF' : 'SOUND ON');
     else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); restart(); }
     else if (GO.has(e.key)) { e.preventDefault(); spaceAction(); }
+    else if (e.key === 'Escape') closeCard();
   });
 
   // Space, or a tap on the screen: start, pause and resume, skip the tally.
@@ -927,7 +928,7 @@
     if (state === 'title') startRun();
     else if (state === 'running' || state === 'paused') togglePause();
     else if (tally) endTally();
-    else if (overlayEl.hidden === false && (state === 'crashed' || state === 'finished')) toTitle();
+    else if ((overlayEl.hidden === false || cardClosed) && (state === 'crashed' || state === 'finished')) toTitle();
   }
   window.addEventListener('keyup', (e) => release(SHIFTS[e.code] ? 'k' + e.code : 'k' + e.key.toLowerCase()));
   // A key let go while the window is unfocused never sends keyup.
@@ -1636,6 +1637,7 @@
   }
 
   function hideOverlay() {
+    cardClosed = false;
     if (document.activeElement === initialsInputEl) initialsInputEl.blur();
     overlayEl.classList.remove('visible');
     overlayEl.hidden = true;
@@ -1659,7 +1661,7 @@
 
   function openBoard() {
     if (boardView || !overlayEl.hidden) return;
-    if (state !== 'title' && state !== 'running' && state !== 'paused') return;
+    if (state !== 'title' && state !== 'running' && state !== 'paused' && !cardClosed) return;
     if (state === 'running') { togglePause(); boardPaused = true; }
     setBoardView(true);
     overlayEl.hidden = false;
@@ -1672,6 +1674,19 @@
     hideOverlay();
     if (boardPaused && state === 'paused') togglePause();
     boardPaused = false;
+    if (state === 'crashed' || state === 'finished') { cardClosed = true; msgEl.textContent = startPrompt(); }
+  }
+
+  // CLOSE on a run's own card, as in snake-bit: the card goes and the
+  // finished run stays on screen. Space or a tap then goes to the title.
+  let cardClosed = false;
+  const startPrompt = () => NARROW ? 'TAP TO START' : 'PRESS SPACE';
+  function closeCard() {
+    if (overlayEl.hidden || boardView) return;
+    if (state !== 'crashed' && state !== 'finished') return;
+    hideOverlay();
+    cardClosed = true;
+    msgEl.textContent = startPrompt();
   }
 
   // Step two: the run folds down to its score and the board takes over.
@@ -1752,6 +1767,7 @@
   skipBtnEl.addEventListener('click', showLeaderboard);
   againBtnEl.addEventListener('click', restart);
   document.getElementById('close-btn').addEventListener('click', closeBoard);
+  document.getElementById('card-close-btn').addEventListener('click', (e) => { e.currentTarget.blur(); closeCard(); });
   // Blurred straight away, so Space never "clicks" it again later.
   // A game controller, polled every frame like snake-bit's: the d-pad or
   // left stick turns while held, Start is Space, A is R, B closes the board
@@ -1785,7 +1801,7 @@
     } else {
       if (justPressed(9)) spaceAction();
       else if (justPressed(0)) restart();
-      else if (justPressed(1) && !overlayEl.hidden && (state === 'crashed' || state === 'finished')) toTitle();
+      else if (justPressed(1)) closeCard();
     }
     if ([0, 1, 9, 14, 15].some(justPressed)) SFX.unlock();
     gpPrev = pad.buttons.map(b => !!b.pressed);
@@ -1824,7 +1840,7 @@
     }
     if (particles.length) updateParticles(Math.min(dt, 0.05));
     if (state === 'running' || state === 'crashed' || state === 'finished') paintHud();
-    if (now > flashUntil && state !== 'title' && state !== 'paused') msgEl.textContent = '';
+    if (now > flashUntil && state !== 'title' && state !== 'paused') msgEl.textContent = cardClosed ? startPrompt() : '';
     render();
     requestAnimationFrame(frame);
   }
