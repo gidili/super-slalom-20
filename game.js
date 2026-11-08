@@ -49,7 +49,11 @@
   const MISS_CS = 60;
   const MISS_LIMIT = 3;
   // Brushing a pole on the flag side, close enough to knock it flat.
+  // Clips in a row are a combo: each is worth CLIP_POINTS times its place
+  // in the streak, up to COMBO_CAP times. A pole cleared without a clip,
+  // or missed, ends the streak.
   const CLIP_POINTS = 10;
+  const COMBO_CAP = 12;
   // Stars, for a finished run only (a crash gets none). One for finishing;
   // two for a few misses at most and the bonus time under par; three for
   // no misses and a tight run. Display only; the server never needs them,
@@ -301,6 +305,7 @@
   let skierX, skierY, vx, speed, mode;
   let straightFor = 0;         // seconds since the skier last steered
   let passed, missed, reds, clips, nextPole;
+  let streak = 0, streaks = [], clipPoints = 0;   // the combo, see COMBO_CAP
   let runStart = 0, runEnd = null;
   let hitWhat = 'TREES';       // what ended a crashed run, for the card
   let exploded = new Set();    // pineapples already blown up, by cell
@@ -457,14 +462,15 @@
     };
 
     // A clip: snake-bit's coin, itself the Super Mario Bros. one, a square
-    // wave with a hard step from B5 up to E6.
-    function playCoin() {
+    // wave with a hard step from B5 up to E6. A combo raises it a semitone
+    // a step, so the cap is an octave up.
+    function playCoin(step = 1) {
       if (!ac) return;
-      const t = ac.currentTime;
+      const t = ac.currentTime, up = Math.pow(2, (step - 1) / 12);
       const o = ac.createOscillator(), g = ac.createGain();
       o.type = 'square';
-      o.frequency.setValueAtTime(988, t);
-      o.frequency.setValueAtTime(1319, t + 0.065);
+      o.frequency.setValueAtTime(988 * up, t);
+      o.frequency.setValueAtTime(1319 * up, t + 0.065);
       g.gain.setValueAtTime(0.15, t);
       g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
       o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.19);
@@ -582,7 +588,7 @@
 
   // Everything but the time bonus, which counts up separately at the end.
   const earned = () =>
-    passed * POLE_POINTS + reds * RED_POINTS + clips * CLIP_POINTS +
+    passed * POLE_POINTS + reds * RED_POINTS + clipPoints +
     (state === 'finished' ? FINISH_POINTS : 0);
   const bonusCs = () => runCs() + missed * MISS_CS;
   const timeBonus = () =>
@@ -625,6 +631,7 @@
     shownBonus = 0;
     bonusEl.hidden = true;
     passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
+    streak = 0; streaks = []; clipPoints = 0;
     msgEl.textContent = NARROW ? 'TAP TO START' : 'PRESS SPACE';
     paintHud();
   }
@@ -647,6 +654,7 @@
     held = []; tapLeft = 0;
     hitWhat = 'TREES'; exploded = new Set(); particles = [];
     passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
+    streak = 0; streaks = []; clipPoints = 0;
     shownBonus = 0;
     runEnd = null;
     pausedMs = 0;
@@ -855,15 +863,27 @@
       passed++;
       const said = [];
       if (p.red) { reds++; said.push(`RED +${POLE_POINTS + RED_POINTS}`); }
-      if (clipped) { clips++; said.push(`CLIP +${CLIP_POINTS}`); SFX.playCoin(); }
+      if (clipped) {
+        clips++; streak++;
+        const pts = CLIP_POINTS * Math.min(streak, COMBO_CAP);
+        clipPoints += pts;
+        said.unshift(streak === 1 ? `CLIP +${pts}` : `${Math.min(streak, COMBO_CAP)}x COMBO !!! +${pts}`);
+        SFX.playCoin(Math.min(streak, COMBO_CAP));
+      } else endStreak();
       if (said.length) flash(said.join('  '));
     } else {
+      endStreak();
       missed++;
       // The time bonus is lost once, on the miss that loses it.
       flash(missed === MISS_LIMIT + 1 ? 'MISS  NO TIME BONUS' : `MISS +${fmt(MISS_CS)}`);
     }
     nextPole++;
     paintHud();
+  }
+
+  function endStreak() {
+    if (streak) streaks.push(streak);
+    streak = 0;
   }
 
   // ----------------------------------------------------------------- input
@@ -1768,6 +1788,7 @@
         score: points(),
         time_cs: runCs(),
         passed, missed, reds, clips,
+        streaks: streak ? [...streaks, streak] : streaks,
         finished: state === 'finished',
       },
     });

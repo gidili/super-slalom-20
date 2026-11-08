@@ -23,10 +23,13 @@
 -- The score is POINTS and higher is better. Poles earn points; a finished
 -- run also earns 50 for the line and a bonus for its time under par, each
 -- missed pole adding 0.60s to that time, and no bonus past 3 misses:
---   score = passed * 10 + reds * 25 + clips * 10
+--   score = passed * 10 + reds * 25 + clip points
 --         + (finished: 50
 --            + (missed <= 3: greatest(0, (3040 - (time_cs + missed * 60)) * 5)))
--- A clip is a pole cleared close enough to knock it flat.
+-- A clip is a pole cleared close enough to knock it flat. Clips in a row
+-- are a combo: the k-th clip of a streak is worth 10 * least(k, 12). The
+-- payload lists each streak's length; one without that list (sent before
+-- combos) is scored at 10 a clip.
 -- The payload says whether the run finished. A finish must account for
 -- every pole; a crash scores its poles alone, so claiming one only costs
 -- points.
@@ -37,7 +40,8 @@
 -- RED_POINTS, FINISH_POINTS, PAR_CS, BONUS_PER_CS, MISS_CS, MISS_LIMIT.
 -- 25 poles, 4 of
 -- them red; 10 points a pole cleared, 25 more if it's red, 10 more if it
--- was clipped (CLIP_POINTS); 50 for
+-- was clipped (CLIP_POINTS), times its place in a streak up to 12
+-- (COMBO_CAP); 50 for
 -- finishing; 5 points for every hundredth of a second under 30.40s, with
 -- 0.60s added per missed pole; more than 3 missed and there's no bonus.
 
@@ -144,6 +148,10 @@ declare
   v_missed   int;
   v_reds     int;
   v_clips    int;
+  v_streaks  jsonb;
+  v_n        int;
+  v_sum      int := 0;
+  v_clip_pts int := 0;
   v_time_cs  int;
   v_finished boolean;
   v_expected int;
@@ -161,6 +169,7 @@ begin
   v_missed   := (p_payload->>'missed')::int;
   v_reds     := (p_payload->>'reds')::int;
   v_clips    := coalesce((p_payload->>'clips')::int, 0);
+  v_streaks  := p_payload->'streaks';
   v_time_cs  := (p_payload->>'time_cs')::int;
   v_finished := coalesce((p_payload->>'finished')::boolean, false);
 
@@ -198,10 +207,25 @@ begin
   -- Only a pole that was cleared can have been clipped.
   if v_clips < 0 or v_clips > v_passed then raise exception '%', v_msg; end if;
 
+  -- The streaks add up to the clips, and each one after the first needs a
+  -- pole cleared without a clip, or missed, to have broken the one before.
+  if v_streaks is null then
+    v_clip_pts := v_clips * 10;
+  else
+    if jsonb_typeof(v_streaks) <> 'array' then raise exception '%', v_msg; end if;
+    if jsonb_array_length(v_streaks) > (v_passed - v_clips) + v_missed + 1 then raise exception '%', v_msg; end if;
+    for v_n in select (e #>> '{}')::int from jsonb_array_elements(v_streaks) e loop
+      if v_n is null or v_n < 1 then raise exception '%', v_msg; end if;
+      v_sum := v_sum + v_n;
+      v_clip_pts := v_clip_pts + 10 * (least(v_n, 12) * (least(v_n, 12) + 1) / 2 + greatest(v_n - 12, 0) * 12);
+    end loop;
+    if v_sum <> v_clips then raise exception '%', v_msg; end if;
+  end if;
+
   if length(coalesce(v_initials, '')) <> 3 then raise exception '%', v_msg; end if;
 
   if v_time_cs <= 0 then raise exception '%', v_msg; end if;
-  v_expected := v_passed * 10 + v_reds * 25 + v_clips * 10;
+  v_expected := v_passed * 10 + v_reds * 25 + v_clip_pts;
   if v_finished then
     v_expected := v_expected + 50;
     if v_missed <= 3 then

@@ -14,7 +14,7 @@ Downhill slalom in the spirit of the VIC-20: sixteen colours, chunky pixels, bee
 
 - **25 poles, one mountain.** Each pole has a little flag pointing to the side you pass it on, and the sides alternate, so you weave down the hill. Miss one and it costs you.
 - **Some stretches are tight.** Poles bunch up close together, and only quick hands get through.
-- **Red poles are worth chasing**, and brushing a pole as you pass it is worth a little extra.
+- **Red poles are worth chasing**, and brushing a pole as you pass it is worth a little extra; a streak of them is worth a lot more.
 - **Stay on the piste.** The fresh snow on either side slows you down, more the further out you go. Out there are trees and wooden fences, and either one ends your run.
 - **Watch out for pineapples.**
 - **Fast and clean wins.** Finish quickly with few misses for a big bonus and up to three stars.
