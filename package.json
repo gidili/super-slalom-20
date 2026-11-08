@@ -3,9 +3,11 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
-    "build": "mkdir -p dist && javascript-obfuscator game.js --output dist/game.js && cp index.html dist/index.html && cp -r cover-art dist/cover-art"
+    "build": "node build.mjs"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
+    "html-minifier-terser": "^7.2.0",
     "javascript-obfuscator": "^4.1.1"
   }
 }
