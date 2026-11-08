@@ -30,6 +30,10 @@
 -- are a combo: the k-th clip of a streak is worth 10 * least(k, 12). The
 -- payload lists each streak's length; one without that list (sent before
 -- combos) is scored at 10 a clip.
+-- A streak that reaches 8 sets the skier on fire until it breaks, and on
+-- fire pineapples, trees and fences blow up instead of ending the run:
+--   + burned pineapples * 50 + burned trees * 25 + burned fences * 25
+-- Nothing burns unless some streak reached 8, and at most 100 in a run.
 -- The payload says whether the run finished. A finish must account for
 -- every pole; a crash scores its poles alone, so claiming one only costs
 -- points.
@@ -152,6 +156,10 @@ declare
   v_n        int;
   v_sum      int := 0;
   v_clip_pts int := 0;
+  v_max_streak int := 0;
+  v_pine     int;
+  v_tree     int;
+  v_fence    int;
   v_time_cs  int;
   v_finished boolean;
   v_expected int;
@@ -170,6 +178,9 @@ begin
   v_reds     := (p_payload->>'reds')::int;
   v_clips    := coalesce((p_payload->>'clips')::int, 0);
   v_streaks  := p_payload->'streaks';
+  v_pine     := coalesce((p_payload#>>'{burned,pine}')::int, 0);
+  v_tree     := coalesce((p_payload#>>'{burned,tree}')::int, 0);
+  v_fence    := coalesce((p_payload#>>'{burned,fence}')::int, 0);
   v_time_cs  := (p_payload->>'time_cs')::int;
   v_finished := coalesce((p_payload->>'finished')::boolean, false);
 
@@ -217,15 +228,22 @@ begin
     for v_n in select (e #>> '{}')::int from jsonb_array_elements(v_streaks) e loop
       if v_n is null or v_n < 1 then raise exception '%', v_msg; end if;
       v_sum := v_sum + v_n;
+      v_max_streak := greatest(v_max_streak, v_n);
       v_clip_pts := v_clip_pts + 10 * (least(v_n, 12) * (least(v_n, 12) + 1) / 2 + greatest(v_n - 12, 0) * 12);
     end loop;
     if v_sum <> v_clips then raise exception '%', v_msg; end if;
   end if;
 
+  -- Only a skier on fire burns anything, and only so much in one run.
+  if v_pine < 0 or v_tree < 0 or v_fence < 0 then raise exception '%', v_msg; end if;
+  if v_pine + v_tree + v_fence > 100 then raise exception '%', v_msg; end if;
+  if v_pine + v_tree + v_fence > 0 and v_max_streak < 8 then raise exception '%', v_msg; end if;
+
   if length(coalesce(v_initials, '')) <> 3 then raise exception '%', v_msg; end if;
 
   if v_time_cs <= 0 then raise exception '%', v_msg; end if;
-  v_expected := v_passed * 10 + v_reds * 25 + v_clip_pts;
+  v_expected := v_passed * 10 + v_reds * 25 + v_clip_pts
+              + v_pine * 50 + v_tree * 25 + v_fence * 25;
   if v_finished then
     v_expected := v_expected + 50;
     if v_missed <= 3 then

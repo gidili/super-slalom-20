@@ -54,6 +54,12 @@
   // or missed, ends the streak.
   const CLIP_POINTS = 10;
   const COMBO_CAP = 12;
+  // At FIRE_AT in a row the skier catches fire, until the streak breaks.
+  // Also in slalom_submit_score. On fire,
+  // pineapples, trees and fences explode for points instead of ending
+  // the run.
+  const FIRE_AT = 8;
+  const BURN_POINTS = { pine: 50, tree: 25, fence: 25 };
   // Stars, for a finished run only (a crash gets none). One for finishing;
   // two for a few misses at most and the bonus time under par; three for
   // no misses and a tight run. Display only; the server never needs them,
@@ -306,9 +312,19 @@
   let straightFor = 0;         // seconds since the skier last steered
   let passed, missed, reds, clips, nextPole;
   let streak = 0, streaks = [], clipPoints = 0;   // the combo, see COMBO_CAP
+  let burned = { pine: 0, tree: 0, fence: 0 };     // blown up on fire
+  // The Konami code's god mode: on fire from the start of every run and
+  // never going out, blue so it's never mistaken for the real thing.
+  // Same rules otherwise, but fire not earned isn't ranked.
+  let godMode = false;
+  const onFire = () => godMode || streak >= FIRE_AT;
   let runStart = 0, runEnd = null;
   let hitWhat = 'TREES';       // what ended a crashed run, for the card
   let exploded = new Set();    // pineapples already blown up, by cell
+  // Trees and fences set alight on fire, by the same keys, each with when
+  // and in which fire's colours. A tree hit is a stump; a tree passed burns
+  // and chars; a fence hit burns outward from the gap it was hit at.
+  let scorched = new Map();
   let particles = [];
   // Turn while a key is held, straighten when it's let go. The newest
   // held key wins, and a tap still commits a short turn so it isn't lost.
@@ -435,6 +451,38 @@
       osc.connect(g); g.connect(master); osc.start(t); osc.stop(t + 0.26);
     }
 
+    // Catching fire: a whoosh, noise swelling as it rises, over a low roar.
+    function playIgnite() {
+      if (!ac) return;
+      const t = ac.currentTime;
+      const { src, f, g: ng } = noiseThrough('bandpass', 300, 1.2, t);
+      f.frequency.setValueAtTime(300, t); f.frequency.exponentialRampToValueAtTime(3200, t + 0.45);
+      ng.gain.setValueAtTime(0.001, t); ng.gain.exponentialRampToValueAtTime(0.4, t + 0.25);
+      ng.gain.exponentialRampToValueAtTime(0.001, t + 0.7);
+      src.stop(t + 0.71);
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(55, t); o.frequency.exponentialRampToValueAtTime(110, t + 0.4);
+      g.gain.setValueAtTime(0.001, t); g.gain.exponentialRampToValueAtTime(0.2, t + 0.2);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+      o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.61);
+    }
+
+    // The fire going out: a short phoop, muffling as it drops.
+    function playDouse() {
+      if (!ac) return;
+      const t = ac.currentTime;
+      const { src, f, g: ng } = noiseThrough('lowpass', 2400, 0.8, t);
+      f.frequency.setValueAtTime(2400, t); f.frequency.exponentialRampToValueAtTime(120, t + 0.25);
+      ng.gain.setValueAtTime(0.35, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+      src.stop(t + 0.31);
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(200, t); o.frequency.exponentialRampToValueAtTime(60, t + 0.15);
+      g.gain.setValueAtTime(0.25, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+      o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.19);
+    }
+
     // Crossing the line: a quick rising arpeggio, then the chord held.
     function playFanfare() {
       if (!ac) return;
@@ -540,6 +588,7 @@
       playExplosion: safe(playExplosion), playFanfare: safe(playFanfare), toggleMute: safe(toggleMute),
       playCoin: safe(playCoin), playCount: safe(playCount), playTick: safe(playTick), playDing: safe(playDing), playNoBonus: safe(playNoBonus),
       playStar: safe(playStar), playJingle: safe(playJingle),
+      playIgnite: safe(playIgnite), playDouse: safe(playDouse),
     };
   })();
 
@@ -556,7 +605,7 @@
     sessionId = null;
     endPromise = null;
     edges = Promise.resolve();
-    if (juicer) {
+    if (juicer && !godMode) {
       try {
         const { data, error } = await juicer.rpc('slalom_start_game');
         if (!error && data && data.session) {
@@ -589,6 +638,7 @@
   // Everything but the time bonus, which counts up separately at the end.
   const earned = () =>
     passed * POLE_POINTS + reds * RED_POINTS + clipPoints +
+    burned.pine * BURN_POINTS.pine + burned.tree * BURN_POINTS.tree + burned.fence * BURN_POINTS.fence +
     (state === 'finished' ? FINISH_POINTS : 0);
   const bonusCs = () => runCs() + missed * MISS_CS;
   const timeBonus = () =>
@@ -631,7 +681,7 @@
     shownBonus = 0;
     bonusEl.hidden = true;
     passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
-    streak = 0; streaks = []; clipPoints = 0;
+    streak = 0; streaks = []; clipPoints = 0; burned = { pine: 0, tree: 0, fence: 0 };
     msgEl.textContent = NARROW ? 'TAP TO START' : 'PRESS SPACE';
     paintHud();
   }
@@ -652,9 +702,9 @@
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     held = []; tapLeft = 0;
-    hitWhat = 'TREES'; exploded = new Set(); particles = [];
+    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = [];
     passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
-    streak = 0; streaks = []; clipPoints = 0;
+    streak = 0; streaks = []; clipPoints = 0; burned = { pine: 0, tree: 0, fence: 0 };
     shownBonus = 0;
     runEnd = null;
     pausedMs = 0;
@@ -690,7 +740,8 @@
     SFX.startSwoosh();
     SFX.playCount(true);
     showCount('GO!');
-    if (!sessionId) flash('UNRANKED');
+    if (godMode) { flash('GOD MODE'); SFX.playIgnite(); }
+    else if (!sessionId) flash('UNRANKED');
     const id = runId;
     setTimeout(() => { if (runId === id) countdownEl.hidden = true; }, 700);
   }
@@ -743,6 +794,26 @@
     // Long enough to watch the pieces land.
     const id = runId;
     setTimeout(() => { if (runId === id) showOverlay(false); }, hit.pine ? 1400 : 900);
+  }
+
+  // On fire: whatever was hit goes up like a pineapple, for points.
+  // A pineapple just explodes; a tree or a fence explodes in flames.
+  function burn(hit) {
+    const kind = hit.fence ? 'fence' : hit.pine ? 'pine' : 'tree';
+    const key = hit.fence ? `f${hit.k},${hit.side}` : hit.i + ',' + hit.j;
+    exploded.add(key);
+    const fire = fireColors(godMode);
+    if (kind === 'tree') scorched.set(key, { at: performance.now(), god: godMode, hit: true });
+    if (kind === 'fence') {
+      const x = Math.round(hit.x);
+      scorched.set(key, { at: performance.now(), god: godMode, gap0: x - 3, gap1: x + 3 });
+    }
+    burned[kind]++;
+    SFX.playExplosion();
+    spawnExplosion(hit.x, hit.y - 4, kind === 'tree' ? [...fire, ...fire, ...TREE_PIECES]
+      : kind === 'fence' ? [...fire, ...fire, ...FENCE_PIECES] : PIECE_COLORS);
+    flash(`${{ pine: 'PINEAPPLE', tree: 'TREE', fence: 'FENCE' }[kind]} +${BURN_POINTS[kind]}`);
+    paintHud();
   }
 
   function finish() {
@@ -869,6 +940,11 @@
         clipPoints += pts;
         said.unshift(streak === 1 ? `CLIP +${pts}` : `${Math.min(streak, COMBO_CAP)}x COMBO !!! +${pts}`);
         SFX.playCoin(Math.min(streak, COMBO_CAP));
+        if (streak === FIRE_AT) {
+          if (!godMode) SFX.playIgnite();
+          const id = runId;
+          setTimeout(() => { if (runId === id && streak >= FIRE_AT) flash('YOU ARE ON FIRE !!!'); }, 1000);
+        }
       } else endStreak();
       if (said.length) flash(said.join('  '));
     } else {
@@ -882,6 +958,7 @@
   }
 
   function endStreak() {
+    if (streak >= FIRE_AT && !godMode) SFX.playDouse();
     if (streak) streaks.push(streak);
     streak = 0;
   }
@@ -938,6 +1015,7 @@
       return;
     }
     if (document.activeElement === initialsInputEl) return;
+    if ((state === 'title' || state === 'crashed' || state === 'finished') && !boardView) konami(e.key);
     // With the board up, Space or Escape closes it and R restarts.
     if (boardView) {
       if (GO.has(e.key) || e.key === 'Escape') { e.preventDefault(); closeBoard(); }
@@ -960,6 +1038,24 @@
     else if (GO.has(e.key)) { e.preventDefault(); spaceAction(); }
     else if (e.key === 'Escape') closeCard();
   });
+
+  // Up up down down left right left right, any time but mid-run: god mode
+  // for every run from the next one, until it's entered again.
+  const KONAMI = 'uuddlrlr';
+  const KONAMI_DIRS = { ArrowUp: 'u', w: 'u', W: 'u', ArrowDown: 'd', s: 'd', S: 'd',
+    ArrowLeft: 'l', a: 'l', A: 'l', ArrowRight: 'r', d: 'r', D: 'r' };
+  let konamiSoFar = '';
+  function konami(key) {
+    konamiSoFar = (konamiSoFar + (KONAMI_DIRS[key] || '-')).slice(-KONAMI.length);
+    if (konamiSoFar !== KONAMI) return;
+    konamiSoFar = '';
+    godMode = !godMode;
+    // The title's course is a fresh one, with or without a session to rank
+    // it; after a run, going back to the title prepares the next one anyway.
+    if (state === 'title') prepareRun();
+    flash(godMode ? 'GOD MODE ON' : 'GOD MODE OFF');
+    setTimeout(() => { if (state === 'title') msgEl.textContent = startPrompt(); }, 1100);
+  }
 
   // Space, or a tap on the screen: start, pause and resume, skip the tally.
   function spaceAction() {
@@ -1019,7 +1115,8 @@
     mode = heading;
 
     const hit = hitTree(skierX, skierY) || hitFence(skierX, skierY);
-    if (hit) { crash(hit); return; }
+    if (hit && onFire()) burn(hit);
+    else if (hit) { crash(hit); return; }
 
     // Holding a straight line builds speed: quickly at first, then more
     // the longer you hold it. Any steering cancels it.
@@ -1048,10 +1145,34 @@
       const p = course.poles[nextPole];
       const brushed = Math.abs(skierX - p.x) <= CLIP;
       if (brushed) p.fallen = skierX < p.x ? 1 : -1;
-      resolvePole((skierX - p.x) * p.pass >= 0, brushed);
+      const through = (skierX - p.x) * p.pass >= 0;
+      resolvePole(through, brushed);
+      // Clipped on fire, it burns where it fell, then goes to ash.
+      if (through && brushed && onFire()) p.burning = { at: performance.now(), god: godMode };
     }
 
+    if (onFire()) scorchPassed();
     if (skierY >= course.finishY) finish();
+  }
+
+  // On fire, a tree the skis have just gone past close by catches too.
+  // Only once it's behind the skier, so it can't steal a hit. Scenery only.
+  const SCORCH_REACH = 9;
+  function scorchPassed() {
+    const { salt, centerAt } = course;
+    const i0 = Math.floor((skierX - SCORCH_REACH - 4) / TREE_CELL), i1 = Math.floor((skierX + SCORCH_REACH + 4) / TREE_CELL);
+    const j0 = Math.floor((skierY - 12) / TREE_CELL), j1 = Math.floor(skierY / TREE_CELL);
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const key = i + ',' + j;
+        if (scorched.has(key) || exploded.has(key)) continue;
+        const tr = treeAt(i, j, salt, centerAt);
+        if (!tr || tr.pine) continue;
+        if (Math.abs(skierX - tr.x) <= SCORCH_REACH && skierY > tr.y + 2 && skierY <= tr.y + 10) {
+          scorched.set(key, { at: performance.now(), god: godMode, hit: false });
+        }
+      }
+    }
   }
 
   // ---------------------------------------------------------------- render
@@ -1176,7 +1297,9 @@
     for (let k = k0; k <= k1; k++) {
       for (const side of [-1, 1]) {
         const f = fenceAt(k, side, salt, centerAt);
-        if (f && y >= f.y - 7 && y <= f.y + 1 && x >= f.x0 - 2 && x <= f.x1 + 2) return { fence: true };
+        if (f && !exploded.has(`f${k},${side}`) && y >= f.y - 7 && y <= f.y + 1 && x >= f.x0 - 2 && x <= f.x1 + 2) {
+          return { fence: true, k, side, x, y: f.y };
+        }
       }
     }
     return null;
@@ -1192,7 +1315,7 @@
     for (let j = j0; j <= j1; j++) {
       for (let i = i0; i <= i1; i++) {
         const tr = treeAt(i, j, salt, centerAt);
-        if (!tr) continue;
+        if (!tr || exploded.has(i + ',' + j) || scorched.has(i + ',' + j)) continue;
         // A pineapple is two pixels shorter and four narrower than a tree.
         const reach = tr.pine ? 3 : 5, top = tr.pine ? 8 : 10;
         if (Math.abs(x - tr.x) <= reach && y >= tr.y - top && y <= tr.y + 2) return tr;
@@ -1272,8 +1395,19 @@
     '.OOO.',
   ];
 
+  // On fire: three frames of flame licking up off the skier's head.
+  const FLAMES = [
+    ['...Y...', '.Y.O.Y.', '.OYRYO.', '..RRR..'],
+    ['.Y...Y.', '.O.Y.O.', '.ROYOR.', '..RRR..'],
+    ['..Y..Y.', '.YO.YO.', '.ORYRO.', '..RRR..'],
+  ];
+
+  // God mode's fire: the same flames, burning blue.
+  const GOD_FLAMES = FLAMES.map(f => f.map(r => r.replace(/Y/g, 'C').replace(/O/g, 'B').replace(/R/g, 'V')));
+
   // X takes the ink passed in; the other letters are fixed colours.
-  const INKS = { O: VIC.orange, G: VIC.green, Y: VIC.yellow };
+  const INKS = { O: VIC.orange, G: VIC.green, Y: VIC.yellow, R: VIC.red,
+    B: VIC.lightBlue, C: VIC.cyan, V: VIC.blue };
 
   // The on-screen arrows, in the same blocky pixels as everything else.
   const ARROW = [
@@ -1395,8 +1529,11 @@
   // scaled to a 224-pixel screen and kept to the VIC palette. Positions
   // are world coordinates, so the pieces stay where the pineapple was.
   const PIECE_COLORS = [VIC.yellow, VIC.yellow, VIC.orange, VIC.green, VIC.red];
+  // Burnt on fire, a tree or a fence goes up in its own colours.
+  const TREE_PIECES = [VIC.green, VIC.green, VIC.green, VIC.orange];
+  const FENCE_PIECES = [VIC.orange, VIC.orange, VIC.red];
 
-  function spawnExplosion(x, y) {
+  function spawnExplosion(x, y, colors = PIECE_COLORS) {
     // A white flash first, so it reads as a bang over the speckle...
     particles.push({ x, y, vx: 0, vy: 0, life: 0.12, flash: true });
     // ...then chunks: single pixels vanish into the snow at this size.
@@ -1409,7 +1546,7 @@
         vy: Math.sin(a) * v - 40,
         life: 0.6 + Math.random() * 0.5,
         size: Math.random() < 0.35 ? 3 : 2,
-        color: PIECE_COLORS[Math.floor(Math.random() * PIECE_COLORS.length)],
+        color: colors[Math.floor(Math.random() * colors.length)],
       });
     }
   }
@@ -1430,16 +1567,97 @@
     }
   }
 
+  // A short trail of embers left on the slope behind a skier on fire.
+  const EMBER_COLORS = [VIC.red, VIC.orange, VIC.yellow];
+  const GOD_EMBER_COLORS = [VIC.blue, VIC.lightBlue, VIC.cyan];
+  function spawnEmbers() {
+    for (let k = 0; k < 3; k++) {
+      particles.push({
+        x: skierX + (Math.random() - 0.5) * 6, y: skierY - 2 + Math.random() * 4,
+        vx: (Math.random() - 0.5) * 8, vy: -4 - Math.random() * 6, g: 0,
+        life: 0.16 + Math.random() * 0.16,
+        size: Math.random() < 0.2 ? 2 : 1,
+        color: (godMode ? GOD_EMBER_COLORS : EMBER_COLORS)[Math.floor(Math.random() * 3)],
+      });
+    }
+  }
+
   function updateParticles(dt) {
     for (const p of particles) {
       p.x += p.vx * dt; p.y += p.vy * dt;
-      p.vy += 160 * dt;
+      p.vy += (p.g === undefined ? 160 : p.g) * dt;
       p.life -= dt;
     }
     particles = particles.filter(p => p.life > 0);
   }
 
+  const fireColors = god => god ? [VIC.blue, VIC.lightBlue, VIC.cyan] : [VIC.red, VIC.orange, VIC.yellow];
+
+  // A flickering tongue of flame up to `max` pixels tall standing on (x, y).
+  function flameUp(x, y, god, max) {
+    const colors = fireColors(god);
+    const h = Math.round(hash(x * 7 + 3, Math.floor(performance.now() / 90)) * max);
+    for (let r = 1; r <= h; r++) put(x, y - r, colors[Math.min(2, r - 1)]);
+  }
+
+  // A tree on fire: the canopy flickers in the fire's colours with flames
+  // above, for POLE_BURN_MS; then a charred black skeleton. A tree that
+  // was hit leaves only a stump.
+  function drawScorchedTree(tr, sc, camY) {
+    const x0 = tr.x - 4, y0 = tr.y - camY - 8;
+    if (sc.hit) {
+      put(tr.x, y0 + 8, VIC.black); put(tr.x, y0 + 7, VIC.black);
+      put(tr.x - 1, y0 + 8, VIC.black); put(tr.x + 1, y0 + 8, VIC.black);
+      return;
+    }
+    const age = performance.now() - sc.at, frame = Math.floor(performance.now() / 90);
+    const colors = fireColors(sc.god);
+    for (let r = 0; r < TREE.length; r++) {
+      for (let c = 0; c < TREE[r].length; c++) {
+        if (TREE[r][c] === '.') continue;
+        if (age < POLE_BURN_MS) put(x0 + c, y0 + r, colors[Math.floor(hash(c * 31 + r, frame + tr.x) * 3)]);
+        else if (TREE[r][c] === 'O' || hash(tr.x * 13 + c, tr.y + r) > 0.35) put(x0 + c, y0 + r, VIC.black);
+      }
+    }
+    if (age < POLE_BURN_MS) for (let c = 2; c <= 6; c++) flameUp(x0 + c, y0 + (c === 4 ? 0 : 2), sc.god, 3);
+  }
+
+  // One column of a fence that was hit: gone where it was hit, then the
+  // fire creeps out from the gap at FENCE_SPREAD px/s, each bit burning
+  // for POLE_BURN_MS before it chars.
+  const FENCE_SPREAD = 8;
+  function fenceState(sc, x) {
+    if (x >= sc.gap0 && x <= sc.gap1) return 'gone';
+    const lit = sc.at + 1000 * (x < sc.gap0 ? sc.gap0 - x : x - sc.gap1) / FENCE_SPREAD;
+    const now = performance.now();
+    return now < lit ? 'wood' : now < lit + POLE_BURN_MS ? 'burning' : 'char';
+  }
+
+  // A pole clipped on fire: flames along it in that fire's colours,
+  // dying down over POLE_BURN_MS, then a little heap of ash.
+  const POLE_BURN_MS = 4000;
+  function drawBurningPole(p, sy) {
+    const d = p.fallen, age = performance.now() - p.burning.at;
+    if (age >= POLE_BURN_MS) {
+      const cx = p.x + d * 4, cy = sy - 1;
+      for (let x = -4; x <= 4; x++) put(cx + x, cy, VIC.black);
+      for (let x = -2; x <= 2; x++) put(cx + x, cy - 1, VIC.black);
+      put(cx, cy - 2, VIC.black); put(cx - d, cy - 2, VIC.black);
+      return;
+    }
+    const ink = p.red ? VIC.red : VIC.blue;
+    for (let k = 0; k < 9; k++) put(p.x + d * k, sy - (k >> 2), ink);
+    const colors = p.burning.god ? [VIC.blue, VIC.lightBlue, VIC.cyan] : [VIC.red, VIC.orange, VIC.yellow];
+    const frame = Math.floor(performance.now() / 90);
+    const left = 1 - age / POLE_BURN_MS;
+    for (let k = 0; k < 9; k++) {
+      const h = Math.round(hash(k + p.x, frame) * 4 * left);
+      for (let r = 1; r <= h; r++) put(p.x + d * k, sy - (k >> 2) - r, colors[Math.min(2, r - 1)]);
+    }
+  }
+
   function drawPole(p, sy) {
+    if (p.burning) { drawBurningPole(p, sy); return; }
     const ink = p.red ? VIC.red : VIC.blue;
     if (p.fallen) {
       // Knocked flat, lying away from the skis that hit it, flag at the tip.
@@ -1515,8 +1733,11 @@
       for (let i = 0; i < iMax; i++) {
         const tr = treeAt(i, j, salt, centerAt);
         if (!tr) continue;
-        if (!tr.pine) blit(TREE, tr.x - 4, tr.y - camY - 8, VIC.green);
-        else if (!exploded.has(i + ',' + j)) blit(PINEAPPLE, tr.x - 2, tr.y - camY - 6);
+        const sc = scorched.get(i + ',' + j);
+        if (sc) drawScorchedTree(tr, sc, camY);
+        else if (exploded.has(i + ',' + j)) continue;
+        else if (!tr.pine) blit(TREE, tr.x - 4, tr.y - camY - 8, VIC.green);
+        else blit(PINEAPPLE, tr.x - 2, tr.y - camY - 6);
       }
     }
 
@@ -1530,11 +1751,17 @@
       for (const side of [-1, 1]) {
         const f = fenceAt(k, side, salt, centerAt);
         if (!f) continue;
+        const sc = scorched.get(`f${k},${side}`);
         const sy = f.y - camY;
         for (let x = f.x0; x <= f.x1; x++) {
-          put(x, sy - 3, VIC.orange);
-          put(x, sy - 1, VIC.orange);
-          if ((x - f.x0) % 3 === 0) { put(x, sy - 4, VIC.orange); put(x, sy - 2, VIC.orange); put(x, sy, VIC.orange); }
+          const state = sc ? fenceState(sc, x) : 'wood';
+          if (state === 'gone') continue;
+          const ink = state === 'wood' ? VIC.orange : state === 'char' ? VIC.black
+            : fireColors(sc.god)[Math.floor(hash(x, Math.floor(performance.now() / 90)) * 3)];
+          put(x, sy - 3, ink);
+          put(x, sy - 1, ink);
+          if ((x - f.x0) % 3 === 0) { put(x, sy - 4, ink); put(x, sy - 2, ink); put(x, sy, ink); }
+          if (state === 'burning') flameUp(x, sy - 4, sc.god, 3);
         }
       }
     }
@@ -1558,6 +1785,11 @@
         const s = SPRITES[mode] || SPRITES.down;
         // Sprites differ in height; they all stand on the same row.
         blit(s, Math.round(skierX) - 3, Math.round(skierY) - camY + 5 - s.length, VIC.black);
+        if (onFire() && state !== 'crashed') {
+          const frames = godMode ? GOD_FLAMES : FLAMES;
+          const fl = frames[Math.floor(performance.now() / 90) % frames.length];
+          blit(fl, Math.round(skierX) - 3, Math.round(skierY) - camY + 5 - s.length - 3);
+        }
       }
       for (const p of particles) {
         const px = Math.round(p.x), py = Math.round(p.y - camY);
@@ -1666,7 +1898,7 @@
     const canSave = !!(sessionId && points() > 0 && makesTop10(points()));
     submitFormEl.hidden = !canSave;
     leaderboardEl.hidden = canSave;
-    submitStatusEl.textContent = sessionId ? '' : 'UNRANKED RUN';
+    submitStatusEl.textContent = godMode ? 'GOD MODE RUN' : sessionId ? '' : 'UNRANKED RUN';
     try { initialsInputEl.value = localStorage.getItem('slalom_initials') || ''; } catch (_) {}
     overlayEl.hidden = false;
     requestAnimationFrame(() => overlayEl.classList.add('visible'));
@@ -1789,6 +2021,7 @@
         time_cs: runCs(),
         passed, missed, reds, clips,
         streaks: streak ? [...streaks, streak] : streaks,
+        burned,
         finished: state === 'finished',
       },
     });
@@ -1876,6 +2109,7 @@
       if (state === 'finished') glide(Math.min(dt, 0.05));
       if (tally) updateTally(Math.min(dt, 0.05));
     }
+    if (state === 'running' && onFire()) spawnEmbers();
     if (state === 'running') {
       SFX.updateSwoosh(speed / DOWN_SPEED, snowDepth(skierX, course.centerAt(skierY), skierY), heading !== 'down');
     }
