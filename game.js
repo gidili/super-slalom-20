@@ -296,6 +296,7 @@
   const skipBtnEl = document.getElementById('skip-btn');
   const submitStatusEl = document.getElementById('submit-status');
   const leaderboardListEl = document.getElementById('leaderboard-list');
+  const boardTitleEl = leaderboardEl.querySelector('h3');
   const againBtnEl = document.getElementById('again-btn');
   const titleCardEl = document.getElementById('title-card');
   const bonusEl = document.getElementById('bonus');
@@ -317,7 +318,10 @@
   // never going out, blue so it's never mistaken for the real thing.
   // Same rules otherwise, but fire not earned isn't ranked.
   let godMode = false;
-  const onFire = () => godMode || streak >= FIRE_AT;
+  // The mode the current run's session was issued in; fire, sounds, the
+  // card and the save all go by this, not by the setting.
+  let runGod = false;
+  const onFire = () => runGod || streak >= FIRE_AT;
   let runStart = 0, runEnd = null;
   let hitWhat = 'TREES';       // what ended a crashed run, for the card
   let exploded = new Set();    // pineapples already blown up, by cell
@@ -601,13 +605,19 @@
   let sessionId = null, endPromise = null, edges = Promise.resolve();
   let prepared = Promise.resolve();   // settles once the next course is built
 
-  async function openSession() {
+  // Each run's session is normal or GOD MODE, fixed when it's issued.
+  // Switching on the title asks again; an answer to an older ask is
+  // dropped, so the session is always the kind last asked for.
+  let sessionGod = false, prepareSeq = 0;
+  async function openSession(seq) {
     sessionId = null;
     endPromise = null;
     edges = Promise.resolve();
-    if (juicer && !godMode) {
+    sessionGod = godMode;
+    if (juicer) {
       try {
-        const { data, error } = await juicer.rpc('slalom_start_game');
+        const { data, error } = await juicer.rpc(sessionGod ? 'slalom_start_god_game' : 'slalom_start_game');
+        if (seq !== prepareSeq) return 0;
         if (!error && data && data.session) {
           sessionId = data.session;
           return Number(data.seed);
@@ -660,9 +670,11 @@
   // The title screen is the top of the next course, built from the seed as
   // soon as the server sends it. Until then, a stand-in slope.
   function prepareRun() {
+    const seq = ++prepareSeq;
     course = null;
     snowRows.clear();
-    prepared = openSession().then(seed => {
+    prepared = openSession(seq).then(seed => {
+      if (seq !== prepareSeq) return;
       buildCourse(seed);
       skierX = course.centerAt(0);
       skierY = 0;
@@ -698,6 +710,7 @@
     titleCardEl.hidden = true;
     flash('GET READY');
     await prepared;
+    runGod = sessionGod;
     skierX = course.centerAt(0);
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
@@ -740,7 +753,7 @@
     SFX.startSwoosh();
     SFX.playCount(true);
     showCount('GO!');
-    if (godMode) { flash('GOD MODE'); SFX.playIgnite(); }
+    if (runGod) { flash('GOD MODE'); SFX.playIgnite(); }
     else if (!sessionId) flash('UNRANKED');
     const id = runId;
     setTimeout(() => { if (runId === id) countdownEl.hidden = true; }, 700);
@@ -802,11 +815,11 @@
     const kind = hit.fence ? 'fence' : hit.pine ? 'pine' : 'tree';
     const key = hit.fence ? `f${hit.k},${hit.side}` : hit.i + ',' + hit.j;
     exploded.add(key);
-    const fire = fireColors(godMode);
-    if (kind === 'tree') scorched.set(key, { at: performance.now(), god: godMode, hit: true });
+    const fire = fireColors(runGod);
+    if (kind === 'tree') scorched.set(key, { at: performance.now(), god: runGod, hit: true });
     if (kind === 'fence') {
       const x = Math.round(hit.x);
-      scorched.set(key, { at: performance.now(), god: godMode, gap0: x - 3, gap1: x + 3 });
+      scorched.set(key, { at: performance.now(), god: runGod, gap0: x - 3, gap1: x + 3 });
     }
     burned[kind]++;
     SFX.playExplosion();
@@ -941,7 +954,7 @@
         said.unshift(streak === 1 ? `CLIP +${pts}` : `${Math.min(streak, COMBO_CAP)}x COMBO !!! +${pts}`);
         SFX.playCoin(Math.min(streak, COMBO_CAP));
         if (streak === FIRE_AT) {
-          if (!godMode) SFX.playIgnite();
+          if (!runGod) SFX.playIgnite();
           const id = runId;
           setTimeout(() => { if (runId === id && streak >= FIRE_AT) flash('YOU ARE ON FIRE !!!'); }, 1000);
         }
@@ -958,7 +971,7 @@
   }
 
   function endStreak() {
-    if (streak >= FIRE_AT && !godMode) SFX.playDouse();
+    if (streak >= FIRE_AT && !runGod) SFX.playDouse();
     if (streak) streaks.push(streak);
     streak = 0;
   }
@@ -1054,6 +1067,7 @@
     // it; after a run, going back to the title prepares the next one anyway.
     if (state === 'title') prepareRun();
     flash(godMode ? 'GOD MODE ON' : 'GOD MODE OFF');
+    fetchLeaderboard(godMode);   // so the next run knows what it must beat
     setTimeout(() => { if (state === 'title') msgEl.textContent = startPrompt(); }, 1100);
   }
 
@@ -1148,7 +1162,7 @@
       const through = (skierX - p.x) * p.pass >= 0;
       resolvePole(through, brushed);
       // Clipped on fire, it burns where it fell, then goes to ash.
-      if (through && brushed && onFire()) p.burning = { at: performance.now(), god: godMode };
+      if (through && brushed && onFire()) p.burning = { at: performance.now(), god: runGod };
     }
 
     if (onFire()) scorchPassed();
@@ -1169,7 +1183,7 @@
         const tr = treeAt(i, j, salt, centerAt);
         if (!tr || tr.pine) continue;
         if (Math.abs(skierX - tr.x) <= SCORCH_REACH && skierY > tr.y + 2 && skierY <= tr.y + 10) {
-          scorched.set(key, { at: performance.now(), god: godMode, hit: false });
+          scorched.set(key, { at: performance.now(), god: runGod, hit: false });
         }
       }
     }
@@ -1577,7 +1591,7 @@
         vx: (Math.random() - 0.5) * 8, vy: -4 - Math.random() * 6, g: 0,
         life: 0.16 + Math.random() * 0.16,
         size: Math.random() < 0.2 ? 2 : 1,
-        color: (godMode ? GOD_EMBER_COLORS : EMBER_COLORS)[Math.floor(Math.random() * 3)],
+        color: (runGod ? GOD_EMBER_COLORS : EMBER_COLORS)[Math.floor(Math.random() * 3)],
       });
     }
   }
@@ -1786,7 +1800,7 @@
         // Sprites differ in height; they all stand on the same row.
         blit(s, Math.round(skierX) - 3, Math.round(skierY) - camY + 5 - s.length, VIC.black);
         if (onFire() && state !== 'crashed') {
-          const frames = godMode ? GOD_FLAMES : FLAMES;
+          const frames = runGod ? GOD_FLAMES : FLAMES;
           const fl = frames[Math.floor(performance.now() / 90) % frames.length];
           blit(fl, Math.round(skierX) - 3, Math.round(skierY) - camY + 5 - s.length - 3);
         }
@@ -1895,15 +1909,15 @@
     submitStatusEl.classList.remove('error');
     // A ranked run that would make the top 10, crashes included, gets to
     // save it, as in snake-bit. Anything else goes straight to the board.
-    const canSave = !!(sessionId && points() > 0 && makesTop10(points()));
+    const canSave = !!(sessionId && points() > 0 && makesTop10(points(), runGod));
     submitFormEl.hidden = !canSave;
     leaderboardEl.hidden = canSave;
-    submitStatusEl.textContent = godMode ? 'GOD MODE RUN' : sessionId ? '' : 'UNRANKED RUN';
+    submitStatusEl.textContent = runGod ? 'GOD MODE RUN' : sessionId ? '' : 'UNRANKED RUN';
     try { initialsInputEl.value = localStorage.getItem('slalom_initials') || ''; } catch (_) {}
     overlayEl.hidden = false;
     requestAnimationFrame(() => overlayEl.classList.add('visible'));
     if (canSave) setTimeout(() => { if (!overlayEl.hidden) initialsInputEl.focus(); }, 450);
-    else fetchLeaderboard();
+    else showBoard(runGod);
   }
 
   function hideOverlay() {
@@ -1936,7 +1950,7 @@
     setBoardView(true);
     overlayEl.hidden = false;
     requestAnimationFrame(() => overlayEl.classList.add('visible'));
-    fetchLeaderboard();
+    showBoard(godMode);
   }
 
   function closeBoard() {
@@ -1965,30 +1979,45 @@
     submitFormEl.hidden = true;
     breakdownEl.hidden = true;
     leaderboardEl.hidden = false;
-    fetchLeaderboard();
+    showBoard(runGod);
   }
 
   const placeholder = (text) => `<li class="note">${text}</li>`;
 
-  // The last top 10 seen, kept to decide whether a run qualifies. Unknown
-  // (offline, not loaded yet) qualifies, so a real top score is never lost.
-  let leaderboardCache = null;
-  function makesTop10(score) {
-    if (!leaderboardCache || leaderboardCache.length < 10) return true;
-    return score > leaderboardCache[9].score;
+  // The last top 10 seen of each board, kept to decide whether a run
+  // qualifies. Unknown (offline, not loaded yet) qualifies, so a real top
+  // score is never lost.
+  const leaderboardCache = { false: null, true: null };
+  function makesTop10(score, god) {
+    const top = leaderboardCache[god];
+    if (!top || top.length < 10) return true;
+    return score > top[9].score;
   }
 
-  async function fetchLeaderboard() {
-    if (!juicer) { leaderboardListEl.innerHTML = placeholder('OFFLINE'); return; }
-    if (!leaderboardListEl.children.length) leaderboardListEl.innerHTML = placeholder('LOADING...');
+  // Which board the list is showing: the run's on its card, the current
+  // mode's under the crown. The secret one says so in its header.
+  let shownGod = false;
+  function showBoard(god) {
+    if (god !== shownGod) leaderboardListEl.innerHTML = '';
+    shownGod = god;
+    boardTitleEl.innerHTML = god ? 'SECRET GOD MODE<br>TOP 10' : 'TOP 10';
+    boardTitleEl.classList.toggle('god', god);
+    fetchLeaderboard(god);
+  }
+
+  async function fetchLeaderboard(god = godMode) {
+    const render = god === shownGod;
+    if (!juicer) { if (render) leaderboardListEl.innerHTML = placeholder('OFFLINE'); return; }
+    if (render && !leaderboardListEl.children.length) leaderboardListEl.innerHTML = placeholder('LOADING...');
     const { data, error } = await juicer
-      .from('slalom_scores')
+      .from(god ? 'slalom_god_scores' : 'slalom_scores')
       .select('id, initials, score')
       .order('score', { ascending: false })       // highest first
       .order('created_at', { ascending: true })
       .limit(10);
+    if (god !== shownGod) { if (!error) leaderboardCache[god] = data; return; }
     if (error) { leaderboardListEl.innerHTML = placeholder('UNAVAILABLE'); return; }
-    leaderboardCache = data;
+    leaderboardCache[god] = data;
     if (!data.length) { leaderboardListEl.innerHTML = placeholder('NO SCORES YET'); return; }
     leaderboardListEl.innerHTML = data.map((row, i) => {
       const mine = row.id === lastSubmittedId ? ' class="mine"' : '';
@@ -2013,7 +2042,7 @@
     // ended_at, so wait for it rather than racing it.
     if (endPromise) await endPromise;
 
-    const { data, error } = await juicer.rpc('slalom_submit_score', {
+    const { data, error } = await juicer.rpc(runGod ? 'slalom_submit_god_score' : 'slalom_submit_score', {
       p_session: sessionId,
       p_payload: {
         initials: raw.padEnd(3, '-'),

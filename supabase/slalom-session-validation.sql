@@ -62,6 +62,10 @@ create table if not exists slalom_sessions (
   ended_at   timestamptz,
   used_at    timestamptz
 );
+-- God mode (the Konami code) gets its own sessions, scored only on the
+-- secret board. Fixed when the session is issued, so a run can't change
+-- boards halfway.
+alter table slalom_sessions add column if not exists god boolean not null default false;
 
 -- RLS on with NO policies: the anon key cannot read this table, so it
 -- cannot learn a seed it was not issued, forge a row, or backdate a start.
@@ -91,6 +95,26 @@ create policy slalom_scores_public_read
 create index if not exists slalom_scores_leaderboard_idx
   on slalom_scores (score desc, created_at asc);
 
+-- The secret GOD MODE board: same shape, its own table.
+create table if not exists slalom_god_scores (
+  id         uuid primary key default gen_random_uuid(),
+  initials   text not null,
+  score      int  not null,          -- points; HIGHER wins
+  payload    jsonb not null,
+  created_at timestamptz not null default now()
+);
+
+alter table slalom_god_scores enable row level security;
+
+drop policy if exists slalom_god_scores_public_read on slalom_god_scores;
+create policy slalom_god_scores_public_read
+  on slalom_god_scores for select
+  to anon, authenticated
+  using (true);
+
+create index if not exists slalom_god_scores_leaderboard_idx
+  on slalom_god_scores (score desc, created_at asc);
+
 -- --------------------------------------------------------------- functions
 
 -- Returns {"session": uuid, "seed": bigint}. A 40-bit seed: everything the
@@ -102,6 +126,17 @@ declare
   v_seed bigint := floor(random() * 1099511627776)::bigint;  -- 2^40
 begin
   insert into slalom_sessions (seed) values (v_seed) returning id into v_id;
+  return jsonb_build_object('session', v_id, 'seed', v_seed);
+end $$;
+
+-- The same, for a GOD MODE run.
+create or replace function slalom_start_god_game() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  v_id   uuid;
+  v_seed bigint := floor(random() * 1099511627776)::bigint;  -- 2^40
+begin
+  insert into slalom_sessions (seed, god) values (v_seed, true) returning id into v_id;
   return jsonb_build_object('session', v_id, 'seed', v_seed);
 end $$;
 
@@ -141,11 +176,16 @@ begin
    where id = p_session and go_at is not null and ended_at is null;
 end $$;
 
-create or replace function slalom_submit_score(p_session uuid, p_payload jsonb)
+-- Both boards' check, in one place. p_god says which board the caller
+-- means, and the session must be of that kind. God mode is on fire from
+-- the start, so there it needs no streak to burn, and it can burn far
+-- more (the best runs mow ~210 trees).
+create or replace function slalom_submit(p_session uuid, p_payload jsonb, p_god boolean)
 returns uuid
 language plpgsql security definer set search_path = public as $$
 declare
   v_id       uuid;
+  v_god      boolean;
   v_initials text;
   v_score    int;
   v_passed   int;
@@ -184,13 +224,14 @@ begin
   v_time_cs  := (p_payload->>'time_cs')::int;
   v_finished := coalesce((p_payload->>'finished')::boolean, false);
 
-  select go_at, paused_cs, pauses, ended_at, used_at
-    into v_started, v_paused_cs, v_pauses, v_ended, v_used
+  select go_at, paused_cs, pauses, ended_at, used_at, god
+    into v_started, v_paused_cs, v_pauses, v_ended, v_used, v_god
     from slalom_sessions
    where id = p_session
      for update;
 
   if not found           then raise exception '%', v_msg; end if;
+  if v_god <> p_god      then raise exception '%', v_msg; end if;
   if v_started is null   then raise exception '%', v_msg; end if;
   if v_ended is null     then raise exception '%', v_msg; end if;
   if v_used  is not null then raise exception '%', v_msg; end if;
@@ -236,8 +277,8 @@ begin
 
   -- Only a skier on fire burns anything, and only so much in one run.
   if v_pine < 0 or v_tree < 0 or v_fence < 0 then raise exception '%', v_msg; end if;
-  if v_pine + v_tree + v_fence > 100 then raise exception '%', v_msg; end if;
-  if v_pine + v_tree + v_fence > 0 and v_max_streak < 8 then raise exception '%', v_msg; end if;
+  if v_pine + v_tree + v_fence > (case when p_god then 400 else 100 end) then raise exception '%', v_msg; end if;
+  if not p_god and v_pine + v_tree + v_fence > 0 and v_max_streak < 8 then raise exception '%', v_msg; end if;
 
   if length(coalesce(v_initials, '')) <> 3 then raise exception '%', v_msg; end if;
 
@@ -252,18 +293,43 @@ begin
   end if;
   if v_score <> v_expected then raise exception '%', v_msg; end if;
 
-  insert into slalom_scores (initials, score, payload)
-  values (v_initials, v_score, p_payload)
-  returning id into v_id;
+  if p_god then
+    insert into slalom_god_scores (initials, score, payload)
+    values (v_initials, v_score, p_payload)
+    returning id into v_id;
+  else
+    insert into slalom_scores (initials, score, payload)
+    values (v_initials, v_score, p_payload)
+    returning id into v_id;
+  end if;
 
   update slalom_sessions set used_at = now() where id = p_session;
 
   return v_id;
 end $$;
 
+-- The two doors in: the real board and the secret one.
+create or replace function slalom_submit_score(p_session uuid, p_payload jsonb)
+returns uuid
+language plpgsql security definer set search_path = public as $$
+begin
+  return slalom_submit(p_session, p_payload, false);
+end $$;
+
+create or replace function slalom_submit_god_score(p_session uuid, p_payload jsonb)
+returns uuid
+language plpgsql security definer set search_path = public as $$
+begin
+  return slalom_submit(p_session, p_payload, true);
+end $$;
+
 grant execute on function slalom_start_game()               to anon, authenticated;
+grant execute on function slalom_start_god_game()           to anon, authenticated;
 grant execute on function slalom_go(uuid)                   to anon, authenticated;
 grant execute on function slalom_pause(uuid)                to anon, authenticated;
 grant execute on function slalom_resume(uuid)               to anon, authenticated;
 grant execute on function slalom_end_game(uuid)             to anon, authenticated;
 grant execute on function slalom_submit_score(uuid, jsonb)  to anon, authenticated;
+grant execute on function slalom_submit_god_score(uuid, jsonb) to anon, authenticated;
+-- Reached only through the two above.
+revoke execute on function slalom_submit(uuid, jsonb, boolean) from public, anon, authenticated;
