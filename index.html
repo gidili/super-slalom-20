@@ -203,9 +203,73 @@
     width: 44px; height: 44px;
   }
   [hidden] { display: none !important; }
+
+  /* The box art and PLAY, as in snake-bit: front and back side by side,
+     the front alone on a narrow screen. */
+  #splash {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    z-index: 9999;
+    transition: opacity 0.5s ease;
+  }
+  #splash.fade-out {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .splash-covers {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+    justify-content: center;
+  }
+  .splash-covers img {
+    height: 85vh;
+    max-height: min(700px, calc(100dvh - 120px));
+    max-width: calc(100vw - 32px);
+    object-fit: contain;
+    display: block;
+  }
+  .splash-covers img.splash-back { display: none; }
+  @media (min-width: 1000px) {
+    .splash-covers img.splash-back { display: block; }
+  }
+  @keyframes circus {
+    0%   { border-color: #F8B800; box-shadow: 0 0 10px #F8B800; }
+    17%  { border-color: #F83800; box-shadow: 0 0 10px #F83800; }
+    33%  { border-color: #58F898; box-shadow: 0 0 10px #58F898; }
+    50%  { border-color: #3CBCFC; box-shadow: 0 0 10px #3CBCFC; }
+    67%  { border-color: #C040FF; box-shadow: 0 0 10px #C040FF; }
+    83%  { border-color: #FC9838; box-shadow: 0 0 10px #FC9838; }
+    100% { border-color: #F8B800; box-shadow: 0 0 10px #F8B800; }
+  }
+  #splash-play {
+    font-family: inherit;
+    font-size: 14px;
+    color: #e5e7eb;
+    background: #1a1a24;
+    border: 3px solid #F8B800;
+    padding: 12px 40px;
+    cursor: pointer;
+    letter-spacing: 2px;
+    animation: circus 0.8s linear infinite;
+  }
+  #splash-play:hover { background: #3a3a4a; }
 </style>
 </head>
 <body>
+  <div id="splash">
+    <div class="splash-covers">
+      <img src="cover-art/front.png" alt="Super Slalom vs Pineapple front cover">
+      <img src="cover-art/back.png" alt="Super Slalom vs Pineapple back cover" class="splash-back">
+    </div>
+    <button id="splash-play" type="button">PLAY</button>
+  </div>
   <span id="pineappl" hidden>dYGBfYBHPDx7e2+Gf396hW6DdX1ucXpycINwhjuAgn1ub26AcjtwfIlyhld1b1Rwdlx2V1Zih1Y+W3ZWgFZ7X0JwUFZDVnh9ZWNQV0Y7coZXfXBAWnZcdleHcWVPdWZ6U4dnYFaAVntXeWd2VkNWekKCZnt5hnB6PkFmZWd8cFRTeG9kY3dxeltCVnaEdnB6RoBnYFZDVnpTgm8/QXZZUFd9ZmVedlx3UkBbh3CEW1FwQlxhcIBWemNBcFBWQ1p3TkJad2aGWod4QltAPTtweHVsWmA6Y0RVdlSGQ11sX4BcXnVEYWZhYGWFdXdWbHhTUoRRZHRBg2A9</span>
 
   <div id="tv">

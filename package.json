@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
-    "build": "mkdir -p dist && javascript-obfuscator game.js --output dist/game.js && cp index.html dist/index.html"
+    "build": "mkdir -p dist && javascript-obfuscator game.js --output dist/game.js && cp index.html dist/index.html && cp -r cover-art dist/cover-art"
   },
   "devDependencies": {
     "javascript-obfuscator": "^4.1.1"

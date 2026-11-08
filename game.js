@@ -897,8 +897,26 @@
   // Any first key, tap or click lets the page make sound.
   window.addEventListener('pointerdown', SFX.unlock);
 
+  // The box art first, as in snake-bit. PLAY is the first click, so it
+  // also lets the page make sound; nothing underneath answers until then.
+  const splashEl = document.getElementById('splash');
+  let splashUp = !!splashEl;
+  function dismissSplash() {
+    if (!splashUp) return;
+    splashUp = false;
+    SFX.unlock();
+    splashEl.classList.add('fade-out');
+    splashEl.addEventListener('transitionend', () => splashEl.remove(), { once: true });
+    placeHudButtons();
+  }
+  if (splashEl) document.getElementById('splash-play').addEventListener('click', dismissSplash);
+
   window.addEventListener('keydown', (e) => {
     SFX.unlock();
+    if (splashUp) {
+      if (GO.has(e.key)) { e.preventDefault(); dismissSplash(); }
+      return;
+    }
     if (document.activeElement === initialsInputEl) return;
     // With the board up, Space or Escape closes it and R restarts.
     if (boardView) {
@@ -1783,7 +1801,7 @@
     const typing = document.activeElement === initialsInputEl;
 
     const ax = pad.axes[0] || 0;
-    const dir = typing || boardView ? null
+    const dir = splashUp || typing || boardView ? null
       : pressed(14) || ax < -0.5 ? 'left'
       : pressed(15) || ax > 0.5 ? 'right' : null;
     if (dir !== gpDir) {
@@ -1792,7 +1810,9 @@
       gpDir = dir;
     }
 
-    if (typing) {
+    if (splashUp) {
+      if (justPressed(9) || justPressed(0)) dismissSplash();
+    } else if (typing) {
       if (justPressed(0)) submitFormEl.requestSubmit();
       else if (justPressed(1)) showLeaderboard();
     } else if (boardView) {

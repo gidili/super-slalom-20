@@ -1,6 +1,11 @@
 # Super Slalom vs Pineapple
 A super slalom ski game inspired by an old VIC-20 game
 
+<p align="center">
+  <img src="cover-art/front.png" alt="Super Slalom vs Pineapple — front cover" height="550">
+  <img src="cover-art/back.png" alt="Super Slalom vs Pineapple — back cover" height="550">
+</p>
+
 Downhill slalom in the spirit of the VIC-20: sixteen colours, chunky pixels, beeps and swooshes, and a skier made of about thirty pixels.
 
 **Play:** https://gidili.github.io/super-slalom-20/
