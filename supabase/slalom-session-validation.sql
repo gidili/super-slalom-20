@@ -30,10 +30,10 @@
 -- are a combo: the k-th clip of a streak is worth 10 * least(k, 12). The
 -- payload lists each streak's length; one without that list (sent before
 -- combos) is scored at 10 a clip.
--- A streak that reaches 8 sets the skier on fire until it breaks, and on
+-- A streak that reaches 4 sets the skier on fire until it breaks, and on
 -- fire pineapples, trees and fences blow up instead of ending the run:
 --   + burned pineapples * 50 + burned trees * 25 + burned fences * 25
--- Nothing burns unless some streak reached 8, and at most 100 in a run.
+-- Nothing burns unless some streak reached 4, and at most 100 in a run.
 -- The payload says whether the run finished. A finish must account for
 -- every pole; a crash scores its poles alone, so claiming one only costs
 -- points.
@@ -278,7 +278,7 @@ begin
   -- Only a skier on fire burns anything, and only so much in one run.
   if v_pine < 0 or v_tree < 0 or v_fence < 0 then raise exception '%', v_msg; end if;
   if v_pine + v_tree + v_fence > (case when p_god then 400 else 100 end) then raise exception '%', v_msg; end if;
-  if not p_god and v_pine + v_tree + v_fence > 0 and v_max_streak < 8 then raise exception '%', v_msg; end if;
+  if not p_god and v_pine + v_tree + v_fence > 0 and v_max_streak < 4 then raise exception '%', v_msg; end if;
 
   if length(coalesce(v_initials, '')) <> 3 then raise exception '%', v_msg; end if;
 

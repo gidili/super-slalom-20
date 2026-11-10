@@ -58,7 +58,7 @@
   // Also in slalom_submit_score. On fire,
   // pineapples, trees and fences explode for points instead of ending
   // the run.
-  const FIRE_AT = 8;
+  const FIRE_AT = 4;
   const BURN_POINTS = { pine: 50, tree: 25, fence: 25 };
   // Stars, for a finished run only (a crash gets none). One for finishing;
   // two for a few misses at most and the bonus time under par; three for
