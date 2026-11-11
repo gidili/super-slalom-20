@@ -596,6 +596,26 @@
       o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.61);
     }
 
+    // Then the power-up: quick arpeggios climbing a step at a time, a
+    // shimmer on top. Starts as the whoosh peaks.
+    function playPowerUp() {
+      if (!ac) return;
+      const t = ac.currentTime + 0.3;
+      const steps = [[392, 493.88, 587.33], [440, 554.37, 659.25], [493.88, 622.25, 739.99], [523.25, 659.25, 783.99]];
+      steps.forEach((chord, i) => chord.forEach((f, j) => note(f, t + (i * 3 + j) * 0.045, 0.045, 0.09, 'square')));
+      const top = t + 12 * 0.045;
+      note(1046.5, top, 0.3, 0.08, 'square');
+      note(1567.98, top + 0.05, 0.25, 0.04, 'triangle');
+    }
+
+    // A miss forgiven: a bright little run that leaps upward, an extra
+    // life's feeling without its tune.
+    function playForgiven() {
+      if (!ac) return;
+      const t = ac.currentTime + 0.12;
+      [783.99, 1046.5, 1318.5, 1174.66, 1567.98, 2093].forEach((f, i) => note(f, t + i * 0.085, i === 5 ? 0.22 : 0.07, 0.09, 'square'));
+    }
+
     // The fire going out: a short phoop, muffling as it drops.
     function playDouse() {
       if (!ac) return;
@@ -716,7 +736,7 @@
       playExplosion: safe(playExplosion), playFanfare: safe(playFanfare), toggleMute: safe(toggleMute),
       playCoin: safe(playCoin), playCount: safe(playCount), playTick: safe(playTick), playDing: safe(playDing), playNoBonus: safe(playNoBonus),
       playStar: safe(playStar), playJingle: safe(playJingle),
-      playIgnite: safe(playIgnite), playDouse: safe(playDouse), playClack: safe(playClack), playBlips: safe(playBlips), playRunOver: safe(playRunOver), playQualify: safe(playQualify), playGrowl: safe(playGrowl),
+      playIgnite: safe(playIgnite), playDouse: safe(playDouse), playPowerUp: safe(playPowerUp), playForgiven: safe(playForgiven), playClack: safe(playClack), playBlips: safe(playBlips), playRunOver: safe(playRunOver), playQualify: safe(playQualify), playGrowl: safe(playGrowl),
     };
   })();
 
@@ -892,7 +912,7 @@
     SFX.startSwoosh();
     SFX.playCount(true);
     showCount('GO!');
-    if (runGod) { flash('GOD MODE'); SFX.playIgnite(); }
+    if (runGod) { flash('GOD MODE'); SFX.playIgnite(); SFX.playPowerUp(); }
     else if (!sessionId) flash('UNRANKED');
     const id = runId;
     setTimeout(() => { if (runId === id) countdownEl.hidden = true; }, 700);
@@ -973,7 +993,7 @@
       : kind === 'fence' ? [...fire, ...fire, ...FENCE_PIECES] : PIECE_COLORS);
     // A pineapple smashed on fire takes back a miss, if there's one to take.
     const forgive = kind === 'pine' && missed > 0;
-    if (forgive) { missed--; forgiven++; }
+    if (forgive) { missed--; forgiven++; SFX.playForgiven(); }
     pop(`${{ pine: 'PINEAPPLE', tree: 'TREE', fence: 'FENCE' }[kind]} +${BURN_POINTS[kind]}${forgive ? '  MISS FORGIVEN' : ''}`);
     paintHud();
   }
@@ -1115,7 +1135,7 @@
         said.unshift(streak === 1 ? `CLIP +${pts}` : `${Math.min(streak, COMBO_CAP)}x COMBO !!! +${pts}`);
         SFX.playCoin(Math.min(streak, COMBO_CAP));
         if (streak === FIRE_AT) {
-          if (!runGod) SFX.playIgnite();
+          if (!runGod) { SFX.playIgnite(); SFX.playPowerUp(); }
           const id = runId;
           setTimeout(() => { if (runId === id && streak >= FIRE_AT) pop('YOU ARE ON FIRE !!!'); }, 1000);
         }
