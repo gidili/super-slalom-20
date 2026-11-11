@@ -70,7 +70,19 @@
     image-rendering: pixelated; image-rendering: crisp-edges;
   }
   #title-card p { font-size: clamp(6px, 1.3vw, 9px); line-height: 2; margin: 0; }
+  /* The three modes: the chosen one in reverse video, like the TOP 10. */
+  #mode-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-bottom: 1.2em; }
+  .mode-btn {
+    font-family: inherit; font-size: clamp(7px, 1.4vw, 11px); padding: 0.7em 1em;
+    color: var(--vic-blue); background: var(--vic-white);
+    border: 2px solid var(--vic-blue); cursor: pointer; pointer-events: auto;
+    touch-action: manipulation;
+  }
+  .mode-btn.chosen { color: var(--vic-white); background: var(--vic-blue); }
+  /* Room for the longest explanation, so changing mode moves nothing. */
+  #title-card p#mode-text { min-height: 4em; margin-bottom: 1em; }
   #message { top: 62%; font-size: clamp(8px, 1.9vw, 13px); }
+  #message.above-count { top: 39%; }
   /* Below the skier, who stands at about 30% down the screen. */
   #countdown { top: 45%; font-size: clamp(20px, 5.5vw, 38px); }
   #bonus { top: 20%; }
@@ -163,7 +175,9 @@
   body.narrow #title-card { top: 26%; padding: 0 12px; }
   body.narrow #title-card h1 { font-size: 15px; }
   body.narrow #title-card p { font-size: 8px; }
+  body.narrow .mode-btn { font-size: 9px; padding: 14px 0.7em; }
   body.narrow #message { top: 58%; font-size: 11px; }
+  body.narrow #message.above-count { top: 34%; }
   body.narrow #countdown { font-size: 34px; top: 40%; }
   body.narrow #bonus-time, body.narrow #bonus-points { font-size: 11px; }
   body.narrow #bonus-score { font-size: 22px; }
@@ -289,15 +303,21 @@
 
     <div id="title-card" class="ontv">
       <h1>SUPER SLALOM VS <canvas id="title-pineapple" class="pine-icon" width="5" height="7" aria-label="PINEAPPLE"></canvas></h1>
+      <div id="mode-row">
+        <button type="button" class="mode-btn" data-mode="single">SINGLE</button>
+        <button type="button" class="mode-btn" data-mode="championship">CHAMPIONSHIP</button>
+        <button type="button" class="mode-btn" data-mode="endless">ENDLESS</button>
+      </div>
+      <p id="mode-text"></p>
       <p>
-        TEST YOUR SLALOM SKILLS:<br>
-        25 POLES, ONE MOUNTAIN, NO SECOND CHANCES.<br>
-        GOOD LUCK. YOU WILL NEED IT.<br>
+        <span class="wide-only">LEFT / RIGHT CHOOSES &middot; SPACE STARTS<br>
         <br>
-        <span class="wide-only">HOLD A / L, THE SHIFTS OR THE ARROWS TO TURN<br>
+        HOLD A / L, THE SHIFTS OR THE ARROWS TO TURN<br>
         SPACE PAUSES &middot; R RESTARTS &middot; M MUTES</span>
-        <span class="narrow-only">HOLD THE ARROWS TO TURN<br>
-        TAP THE SCREEN TO START AND PAUSE</span>
+        <span class="narrow-only">TAP ONE TO START<br>
+        <br>
+        HOLD THE ARROWS TO TURN<br>
+        TAP THE SCREEN TO PAUSE</span>
       </p>
     </div>
 

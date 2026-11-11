@@ -713,7 +713,7 @@
     bonusEl.hidden = true;
     passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
     streak = 0; streaks = []; clipPoints = 0; burned = { pine: 0, tree: 0, fence: 0 };
-    msgEl.textContent = NARROW ? 'TAP TO START' : 'PRESS SPACE';
+    msgEl.textContent = '';
     paintHud();
   }
 
@@ -740,10 +740,11 @@
     shownBonus = 0;
     runEnd = null;
     pausedMs = 0;
-    msgEl.textContent = '';
     paintHud();
     // 3, 2, 1 with the skier standing at the top, then GO. Neither clock
     // starts until GO.
+    msgEl.classList.add('above-count');
+    flash("GOOD LUCK, YOU'RE GONNA NEED IT", 3 * COUNT_BEAT_MS);
     state = 'countdown';
     const id = runId;
     const beat = n => {
@@ -763,6 +764,7 @@
   }
 
   function go() {
+    msgEl.classList.remove('above-count');
     tellServer('slalom_go');
     runStart = performance.now();
     // Physics and clock share an origin; nothing before this moment counts.
@@ -782,7 +784,7 @@
   // seed is spent with its session, so it can't be the same course.
   function restart() {
     if (state === 'starting') return;
-    if (state === 'title') { startRun(); return; }   // already a fresh course
+    if (state === 'title') { startChosen(); return; }   // already a fresh course
     if (state === 'running' || state === 'paused') {
       runEnd = performance.now();
       SFX.stopSwoosh();
@@ -1059,6 +1061,11 @@
       else if (e.key === 'm' || e.key === 'M') flash(SFX.toggleMute() ? 'SOUND OFF' : 'SOUND ON');
       return;
     }
+    if (state === 'title' && (LEFT.has(e.key) || RIGHT.has(e.key))) {
+      e.preventDefault();
+      if (!e.repeat) chooseMode(modeIndex + (LEFT.has(e.key) ? -1 : 1));
+      return;
+    }
     const id = 'k' + e.key.toLowerCase();
     // The two Shifts turn too, one per hand. Same key, so tell them apart
     // by where it sits.
@@ -1091,12 +1098,39 @@
     if (state === 'title') prepareRun();
     flash(godMode ? 'GOD MODE ON' : 'GOD MODE OFF');
     fetchLeaderboard(godMode);   // so the next run knows what it must beat
-    setTimeout(() => { if (state === 'title') msgEl.textContent = startPrompt(); }, 1100);
   }
+
+  // The title's three modes. Left and right move the highlight, which wraps
+  // so the Konami code's left-right-left-right ends where it began. Only
+  // Single is built so far.
+  const MODE_TEXT = {
+    single: 'TEST YOUR SLALOM SKILLS:<br>25 POLES, ONE MOUNTAIN, NO SECOND CHANCES.',
+    championship: '12 LEGENDARY MOUNTAINS, ONE CHAMPION.<br>CAN YOU CONQUER THE NORTH FACE OF EVEREST?',
+    endless: 'NO FINISH LINE. HOW FAR CAN YOU GO?<br>A CRASH OR 4 MISSES AND IT\'S OVER.',
+  };
+  const modeBtns = [...document.querySelectorAll('.mode-btn')];
+  const modeTextEl = document.getElementById('mode-text');
+  let modeIndex = 0;
+  function chooseMode(i) {
+    modeIndex = (i + modeBtns.length) % modeBtns.length;
+    modeBtns.forEach((b, k) => b.classList.toggle('chosen', k === modeIndex));
+    modeTextEl.innerHTML = MODE_TEXT[modeBtns[modeIndex].dataset.mode];
+  }
+  function startChosen() {
+    if (modeBtns[modeIndex].dataset.mode === 'single') startRun();
+    else flash('COMING SOON');
+  }
+  modeBtns.forEach((btn, i) => btn.addEventListener('click', () => {
+    btn.blur();
+    if (state !== 'title') return;
+    chooseMode(i);
+    startChosen();
+  }));
+  chooseMode(0);
 
   // Space, or a tap on the screen: start, pause and resume, skip the tally.
   function spaceAction() {
-    if (state === 'title') startRun();
+    if (state === 'title') startChosen();
     else if (state === 'running' || state === 'paused') togglePause();
     else if (tally) endTally();
     else if ((overlayEl.hidden === false || cardClosed) && (state === 'crashed' || state === 'finished')) toTitle();
@@ -1119,7 +1153,7 @@
   canvas.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'mouse') return;
     SFX.unlock();
-    if (nearArrow(e.clientX, e.clientY)) return;
+    if (nearArrow(e.clientX, e.clientY) || state === 'title') return;   // on the title, tap a mode
     spaceAction();
   });
   arrowBtns.forEach((btn) => {
@@ -1892,9 +1926,9 @@
 
   // ------------------------------------------------------------------ hud
   let flashUntil = 0;
-  function flash(text) {
+  function flash(text, ms = 1100) {
     msgEl.textContent = text;
-    flashUntil = performance.now() + 1100;
+    flashUntil = performance.now() + ms;
   }
 
   let best = 0;
@@ -2113,6 +2147,7 @@
     if (dir !== gpDir) {
       release('gp');
       if (dir) press('gp', dir);
+      if (dir && state === 'title') chooseMode(modeIndex + (dir === 'left' ? -1 : 1));
       gpDir = dir;
     }
 
@@ -2167,12 +2202,11 @@
     }
     if (particles.length) updateParticles(Math.min(dt, 0.05));
     if (state === 'running' || state === 'crashed' || state === 'finished') paintHud();
-    if (now > flashUntil && state !== 'title' && state !== 'paused') msgEl.textContent = cardClosed ? startPrompt() : '';
+    if (now > flashUntil && state !== 'paused') msgEl.textContent = cardClosed ? startPrompt() : '';
     render();
     requestAnimationFrame(frame);
   }
 
-  msgEl.textContent = NARROW ? 'TAP TO START' : 'PRESS SPACE';
   prepareRun();
   paintHud();
   fetchLeaderboard();

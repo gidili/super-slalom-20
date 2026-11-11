@@ -31,6 +31,6 @@ On a computer:
 On a phone held upright:
 
 - Hold the arrow buttons in the bottom corners to turn
-- Tap the screen to start and pause
+- Tap a mode on the title screen to start, and tap the screen to pause
 
 The **crown** shows the top 10.
