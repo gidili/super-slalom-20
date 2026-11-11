@@ -386,6 +386,7 @@
   let streak = 0, streaks = [], clipPoints = 0;   // the combo, see COMBO_CAP
   let burned = { pine: 0, tree: 0, fence: 0 };     // blown up on fire
   let survived = { fox: 0, wolf: 0, bear: 0 };     // chases that gave up
+  let forgiven = 0;   // misses a pineapple smashed on fire took back
   // The Konami code's god mode: on fire from the start of every run and
   // never going out, blue so it's never mistaken for the real thing.
   // Same rules otherwise, but fire not earned isn't ranked.
@@ -820,7 +821,7 @@
     bonusEl.hidden = true;
     passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
     streak = 0; streaks = []; clipPoints = 0; burned = { pine: 0, tree: 0, fence: 0 };
-    survived = { fox: 0, wolf: 0, bear: 0 };
+    survived = { fox: 0, wolf: 0, bear: 0 }; forgiven = 0;
     msgEl.textContent = '';
     paintHud();
   }
@@ -853,7 +854,7 @@
     birds = []; birdIn = between(course.endless ? BIRD_EVERY_ENDLESS : BIRD_EVERY);
     passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
     streak = 0; streaks = []; clipPoints = 0; burned = { pine: 0, tree: 0, fence: 0 };
-    survived = { fox: 0, wolf: 0, bear: 0 };
+    survived = { fox: 0, wolf: 0, bear: 0 }; forgiven = 0;
     shownBonus = 0;
     runEnd = null;
     pausedMs = 0;
@@ -970,7 +971,10 @@
     SFX.playExplosion();
     spawnExplosion(hit.x, hit.y - 4, kind === 'tree' ? [...fire, ...fire, ...TREE_PIECES]
       : kind === 'fence' ? [...fire, ...fire, ...FENCE_PIECES] : PIECE_COLORS);
-    flash(`${{ pine: 'PINEAPPLE', tree: 'TREE', fence: 'FENCE' }[kind]} +${BURN_POINTS[kind]}`);
+    // A pineapple smashed on fire takes back a miss, if there's one to take.
+    const forgive = kind === 'pine' && missed > 0;
+    if (forgive) { missed--; forgiven++; }
+    pop(`${{ pine: 'PINEAPPLE', tree: 'TREE', fence: 'FENCE' }[kind]} +${BURN_POINTS[kind]}${forgive ? '  MISS FORGIVEN' : ''}`);
     paintHud();
   }
 
@@ -1113,10 +1117,10 @@
         if (streak === FIRE_AT) {
           if (!runGod) SFX.playIgnite();
           const id = runId;
-          setTimeout(() => { if (runId === id && streak >= FIRE_AT) flash('YOU ARE ON FIRE !!!'); }, 1000);
+          setTimeout(() => { if (runId === id && streak >= FIRE_AT) pop('YOU ARE ON FIRE !!!'); }, 1000);
         }
       } else endStreak();
-      if (said.length) flash(said.join('  '));
+      if (said.length) pop(said.join('  '));
     } else {
       endStreak();
       missed++;
@@ -1126,7 +1130,7 @@
       const what = clipped ? 'FORK  MISS' : 'MISS';
       // The time bonus is lost once, on the miss that loses it. Endless
       // has no clock for a miss to add to.
-      flash(course.endless ? what
+      pop(course.endless ? what
         : missed === MISS_LIMIT + 1 ? `${what}  NO TIME BONUS` : `${what} +${fmt(MISS_CS)}`);
       if (course.endless && missed === ENDLESS_MISSES - 1) SFX.playBlips();
       if (course.endless && missed >= ENDLESS_MISSES) outOfMisses();
@@ -1201,9 +1205,11 @@
       else if (e.key === 'm' || e.key === 'M') flash(SFX.toggleMute() ? 'SOUND OFF' : 'SOUND ON');
       return;
     }
-    if (state === 'title' && (LEFT.has(e.key) || RIGHT.has(e.key))) {
+    const titleDir = SHIFTS[e.code] || (LEFT.has(e.key) ? 'left' : RIGHT.has(e.key) ? 'right' : null);
+    if ((state === 'title' || cardUp()) && titleDir) {
       e.preventDefault();
-      if (!e.repeat) chooseMode(modeIndex + (LEFT.has(e.key) ? -1 : 1));
+      const step = titleDir === 'left' ? -1 : 1;
+      if (!e.repeat) state === 'title' ? chooseMode(modeIndex + step) : pickCard(cardPick + step);
       return;
     }
     const id = 'k' + e.key.toLowerCase();
@@ -1219,7 +1225,7 @@
     else if (e.key === 'm' || e.key === 'M') flash(SFX.toggleMute() ? 'SOUND OFF' : 'SOUND ON');
     else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); restart(); }
     else if (GO.has(e.key)) { e.preventDefault(); spaceAction(); }
-    else if (e.key === 'Escape') closeCard();
+    else if (e.key === 'Escape') backOut();
   });
 
   // Up up down down left right left right, any time but mid-run: god mode
@@ -1271,12 +1277,14 @@
     else chooseMode(i);
   }));
 
-  // Space, or a tap on the screen: start, pause and resume, skip the tally.
+  // Space, or a tap on the screen: start, pause and resume, skip the tally,
+  // and after a run, go again.
   function spaceAction() {
     if (state === 'title') startChosen();
     else if (state === 'running' || state === 'paused') togglePause();
     else if (tally) endTally();
-    else if ((overlayEl.hidden === false || cardClosed) && (state === 'crashed' || state === 'finished')) toTitle();
+    else if (cardUp()) cardBtns[cardPick].click();
+    else if (cardClosed && (state === 'crashed' || state === 'finished')) restart();
   }
   window.addEventListener('keyup', (e) => release(SHIFTS[e.code] ? 'k' + e.code : 'k' + e.key.toLowerCase()));
   // A key let go while the window is unfocused never sends keyup.
@@ -1559,7 +1567,7 @@
   // Worth more the rarer the animal; also in slalom_submit.
   function survivedChase(a) {
     survived[a.kind]++;
-    flash(`SURVIVED ${a.kind.toUpperCase()} CHASE !!! +${ANIMALS[a.kind].bonus}`);
+    pop(`SURVIVED ${a.kind.toUpperCase()} CHASE !!! +${ANIMALS[a.kind].bonus}`);
     SFX.playDing();
     paintHud();
   }
@@ -2283,6 +2291,23 @@
     flashUntil = performance.now() + ms;
   }
 
+  // The same for what the skier just did: shown right under them, where
+  // the player is looking, and kept inside the screen.
+  const popEl = document.getElementById('pop');
+  let popUntil = 0;
+  function pop(text) {
+    popEl.textContent = text;
+    popEl.hidden = false;
+    popUntil = performance.now() + 1100;
+    placePop();
+  }
+  function placePop() {
+    const tvW = popEl.parentElement.clientWidth, half = popEl.offsetWidth / 2 + 4;
+    const x = (skierX - camX) / VW * tvW;
+    popEl.style.left = Math.max(half, Math.min(tvW - half, x)) + 'px';
+    popEl.style.top = ((SKIER_Y + 12) / H * 100) + '%';
+  }
+
   // Each mode keeps its own BEST; the box shows the highlighted mode's on
   // the title and the run's during it.
   const BEST_KEYS = { single: 'slalom_best', endless: 'slalom_best_endless' };
@@ -2340,6 +2365,7 @@
     try { initialsInputEl.value = localStorage.getItem('slalom_initials') || ''; } catch (_) {}
     overlayEl.hidden = false;
     requestAnimationFrame(() => overlayEl.classList.add('visible'));
+    pickCard(0);
     if (canSave) setTimeout(() => { if (!overlayEl.hidden) initialsInputEl.focus(); }, 450);
     else showBoard(runBoard());
   }
@@ -2389,7 +2415,24 @@
   // CLOSE on a run's own card, as in snake-bit: the card goes and the
   // finished run stays on screen. Space or a tap then goes to the title.
   let cardClosed = false;
-  const startPrompt = () => NARROW ? 'TAP TO START' : 'PRESS SPACE';
+  const startPrompt = () => NARROW ? 'TAP TO RUN AGAIN' : 'SPACE TO RUN AGAIN';
+
+  // After a run, going again is one key or tap; the menu is a step back:
+  // Escape (or B) closes the card, and again goes to the title.
+  function backOut() {
+    if (cardClosed) toTitle();
+    else closeCard();
+  }
+  // The card's buttons, for keys and controllers: left and right move the
+  // pick, Space, Enter, A or Start press it. RUN AGAIN to begin with.
+  const cardBtns = ['again-btn', 'menu-btn', 'card-close-btn'].map(id => document.getElementById(id));
+  let cardPick = 0;
+  const cardUp = () => !overlayEl.hidden && !boardView && !tally && (state === 'crashed' || state === 'finished');
+  function pickCard(i) {
+    cardPick = (i + cardBtns.length) % cardBtns.length;
+    cardBtns.forEach((b, k) => b.classList.toggle('picked', k === cardPick));
+  }
+
   function closeCard() {
     if (overlayEl.hidden || boardView) return;
     if (state !== 'crashed' && state !== 'finished') return;
@@ -2483,6 +2526,7 @@
         time_cs: runCs(),
         passed, missed, reds, clips,
         streaks: streak ? [...streaks, streak] : streaks,
+        forgiven,
         burned,
         survived,
         finished: state === 'finished',
@@ -2504,6 +2548,10 @@
   againBtnEl.addEventListener('click', restart);
   document.getElementById('close-btn').addEventListener('click', closeBoard);
   document.getElementById('card-close-btn').addEventListener('click', (e) => { e.currentTarget.blur(); closeCard(); });
+  document.getElementById('menu-btn').addEventListener('click', (e) => {
+    e.currentTarget.blur();
+    if (state === 'crashed' || state === 'finished') toTitle();
+  });
   // Blurred straight away, so Space never "clicks" it again later.
   // A game controller, polled every frame like snake-bit's: the d-pad or
   // left stick turns while held, Start is Space, A is R, B closes the board
@@ -2526,6 +2574,7 @@
       release('gp');
       if (dir) press('gp', dir);
       if (dir && state === 'title') chooseMode(modeIndex + (dir === 'left' ? -1 : 1));
+      else if (dir && cardUp()) pickCard(cardPick + (dir === 'left' ? -1 : 1));
       gpDir = dir;
     }
 
@@ -2539,8 +2588,8 @@
       else if (justPressed(0)) { closeBoard(); restart(); }
     } else {
       if (justPressed(9)) spaceAction();
-      else if (justPressed(0)) restart();
-      else if (justPressed(1)) closeCard();
+      else if (justPressed(0)) cardUp() ? spaceAction() : restart();
+      else if (justPressed(1)) backOut();
     }
     if ([0, 1, 9, 14, 15].some(justPressed)) SFX.unlock();
     gpPrev = pad.buttons.map(b => !!b.pressed);
@@ -2585,6 +2634,7 @@
     if (particles.length) updateParticles(Math.min(dt, 0.05));
     if (state === 'running' || state === 'crashed' || state === 'finished') paintHud();
     if (now > flashUntil && state !== 'paused') msgEl.textContent = cardClosed ? startPrompt() : '';
+    if (!popEl.hidden) { if (now > popUntil || state === 'title') popEl.hidden = true; else placePop(); }
     render();
     requestAnimationFrame(frame);
   }

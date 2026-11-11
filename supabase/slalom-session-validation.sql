@@ -34,6 +34,9 @@
 -- fire pineapples, trees and fences blow up instead of ending the run:
 --   + burned pineapples * 50 + burned trees * 25 + burned fences * 25
 -- Nothing burns unless some streak reached 4, and at most 100 in a run.
+-- A pineapple smashed on fire takes back a miss: missed is what counts,
+-- forgiven how many were taken back, and missed + forgiven the poles that
+-- really went by.
 -- A chase survived is worth more the rarer the animal, at most 20 a run:
 --   + survived foxes * 50 + survived wolves * 100 + survived bears * 300
 -- The payload says whether the run finished. A finish must account for
@@ -243,6 +246,7 @@ declare
   v_fox      int;
   v_wolf     int;
   v_bear     int;
+  v_forgiven int;
   v_time_cs  int;
   v_finished boolean;
   v_expected int;
@@ -267,6 +271,7 @@ begin
   v_fox      := coalesce((p_payload#>>'{survived,fox}')::int, 0);
   v_wolf     := coalesce((p_payload#>>'{survived,wolf}')::int, 0);
   v_bear     := coalesce((p_payload#>>'{survived,bear}')::int, 0);
+  v_forgiven := coalesce((p_payload->>'forgiven')::int, 0);
   v_time_cs  := (p_payload->>'time_cs')::int;
   v_finished := coalesce((p_payload->>'finished')::boolean, false);
 
@@ -295,9 +300,11 @@ begin
   if abs(v_time_cs - v_elapsed_cs) > 400 + 100 * v_pauses then raise exception '%', v_msg; end if;
 
   -- Every pole is cleared or missed at most once; all 25 on a finish.
-  if v_passed < 0 or v_missed < 0       then raise exception '%', v_msg; end if;
-  if v_passed + v_missed > 25           then raise exception '%', v_msg; end if;
-  if v_finished and v_passed + v_missed <> 25 then raise exception '%', v_msg; end if;
+  -- Only a pineapple can forgive a miss.
+  if v_passed < 0 or v_missed < 0 or v_forgiven < 0 then raise exception '%', v_msg; end if;
+  if v_forgiven > coalesce((p_payload#>>'{burned,pine}')::int, 0) then raise exception '%', v_msg; end if;
+  if v_passed + v_missed + v_forgiven > 25 then raise exception '%', v_msg; end if;
+  if v_finished and v_passed + v_missed + v_forgiven <> 25 then raise exception '%', v_msg; end if;
 
   -- Every course has exactly 4 red poles, and a red pole only counts if
   -- it was actually cleared.
@@ -312,7 +319,7 @@ begin
     v_clip_pts := v_clips * 10;
   else
     if jsonb_typeof(v_streaks) <> 'array' then raise exception '%', v_msg; end if;
-    if jsonb_array_length(v_streaks) > (v_passed - v_clips) + v_missed + 1 then raise exception '%', v_msg; end if;
+    if jsonb_array_length(v_streaks) > (v_passed - v_clips) + v_missed + v_forgiven + 1 then raise exception '%', v_msg; end if;
     for v_n in select (e #>> '{}')::int from jsonb_array_elements(v_streaks) e loop
       if v_n is null or v_n < 1 then raise exception '%', v_msg; end if;
       v_sum := v_sum + v_n;
@@ -389,6 +396,7 @@ declare
   v_fox      int;
   v_wolf     int;
   v_bear     int;
+  v_forgiven int;
   v_burned   int;
   v_time_cs  int;
   v_expected int;
@@ -414,6 +422,7 @@ begin
   v_fox      := coalesce((p_payload#>>'{survived,fox}')::int, 0);
   v_wolf     := coalesce((p_payload#>>'{survived,wolf}')::int, 0);
   v_bear     := coalesce((p_payload#>>'{survived,bear}')::int, 0);
+  v_forgiven := coalesce((p_payload->>'forgiven')::int, 0);
   v_time_cs  := (p_payload->>'time_cs')::int;
 
   select go_at, paused_cs, pauses, ended_at, used_at, god, mode
@@ -439,12 +448,13 @@ begin
 
   -- Poles can't go by faster than the skier can reach them.
   if v_passed < 0 or v_missed < 0 or v_missed > 4 then raise exception '%', v_msg; end if;
-  if v_passed + v_missed > v_secs * 4 + 8 then raise exception '%', v_msg; end if;
+  if v_forgiven < 0 or v_forgiven > v_pine then raise exception '%', v_msg; end if;
+  if v_passed + v_missed + v_forgiven > v_secs * 4 + 8 then raise exception '%', v_msg; end if;
   if v_reds < 0 or v_reds > v_passed then raise exception '%', v_msg; end if;
   if v_clips < 0 or v_clips > v_passed then raise exception '%', v_msg; end if;
 
   if jsonb_typeof(v_streaks) <> 'array' then raise exception '%', v_msg; end if;
-  if jsonb_array_length(v_streaks) > (v_passed - v_clips) + v_missed + 1 then raise exception '%', v_msg; end if;
+  if jsonb_array_length(v_streaks) > (v_passed - v_clips) + v_missed + v_forgiven + 1 then raise exception '%', v_msg; end if;
   for v_n in select (e #>> '{}')::int from jsonb_array_elements(v_streaks) e loop
     if v_n is null or v_n < 1 then raise exception '%', v_msg; end if;
     v_sum := v_sum + v_n;

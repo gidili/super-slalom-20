@@ -83,6 +83,8 @@
   #title-card p#mode-text { min-height: 4em; margin-bottom: 1em; }
   #message { top: 62%; font-size: clamp(8px, 1.9vw, 13px); }
   #message.above-count { top: 39%; }
+  /* What just happened, right under the skier, where the eyes are. */
+  #tv #pop { right: auto; white-space: nowrap; transform: translateX(-50%); font-size: clamp(7px, 1.5vw, 11px); }
   /* Below the skier, who stands at about 30% down the screen. */
   #countdown { top: 45%; font-size: clamp(20px, 5.5vw, 38px); }
   #bonus { top: 20%; }
@@ -136,6 +138,8 @@
     background: var(--vic-blue); color: var(--vic-white); border: 2px solid var(--vic-blue);
   }
   #overlay button.secondary { background: transparent; color: var(--vic-blue); }
+  /* The card's button the keys or a controller would press. */
+  #overlay button.picked { outline: 2px solid var(--vic-red); outline-offset: 2px; }
   #overlay button:active { background: rgb(40, 30, 96); border-color: rgb(40, 30, 96); color: var(--vic-white); }
   #overlay button:disabled { opacity: 0.5; cursor: default; }
   #submit-status { font-size: 8px; margin: 0 0 8px; min-height: 10px; line-height: 1.6; }
@@ -185,6 +189,7 @@
   body.narrow .mode-btn { font-size: 9px; padding: 14px 0.7em; }
   body.narrow #message { top: 58%; font-size: 11px; }
   body.narrow #message.above-count { top: 34%; }
+  body.narrow #tv #pop { font-size: 9px; }
   body.narrow #countdown { font-size: 34px; top: 40%; }
   body.narrow #bonus-time, body.narrow #bonus-points { font-size: 11px; }
   body.narrow #bonus-score { font-size: 22px; }
@@ -329,6 +334,7 @@
     </div>
 
     <div id="message" class="ontv"></div>
+    <div id="pop" class="ontv" hidden></div>
 
     <div id="countdown" class="ontv" hidden></div>
 
@@ -370,6 +376,7 @@
 
       <div class="btn-row" id="again-row">
         <button id="again-btn" type="button">RUN AGAIN</button>
+        <button id="menu-btn" type="button" class="secondary">MENU</button>
         <button id="card-close-btn" type="button" class="secondary">CLOSE</button>
       </div>
       <div id="restart-hint">OR PRESS <b>R</b></div>
