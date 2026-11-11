@@ -11,8 +11,15 @@
   // the screen allows. The window slides sideways to follow the piste, so
   // the course, and the score, are the same as on the TV.
   const NARROW = window.innerWidth / window.innerHeight < 0.85;
-  const VW = NARROW ? 144 : W;
-  const H = NARROW ? Math.round(VW * window.innerHeight / window.innerWidth) : 168;
+  // The TV draws its pixels about PIXEL screen points wide, so a big screen
+  // sees further down the slope instead of a blown-up skier: as much
+  // mountain as fits, centred, with forest past its edges to fill the sides.
+  const PIXEL = 4.5;
+  const tvWidth = Math.min(window.innerWidth - 32, (window.innerHeight - 32) * 4 / 3);
+  const VW = NARROW ? 144 : Math.max(W, Math.min(400, Math.floor(tvWidth / PIXEL / 4) * 4));
+  const H = NARROW ? Math.round(VW * window.innerHeight / window.innerWidth) : VW * 3 / 4;
+  const MARGIN = (VW - W) / 2 > 0 && !NARROW ? (VW - W) / 2 : 0;   // forest past each edge
+  const EDGE_STRIP = 6;        // the solid blue at the TV's sides
 
   // The VIC-20's palette. Nothing outside this list is ever drawn.
   const VIC = {
@@ -135,7 +142,7 @@
   const PINE_CHANCE = 1 / 240; // chance per tree cell
   const PINE_PISTE = 1.1;      // ...times this on the piste itself
 
-  const SKIER_Y = 48;          // skier's fixed screen row
+  const SKIER_Y = Math.round(H * (NARROW ? 0.22 : 0.3));   // skier's fixed screen row
   const DOWN_SPEED = 72;       // px/s straight down on the piste
   const CARVE_FACTOR = 0.82;   // steering costs a little speed
   const TUCK_BONUS = 0.3;      // extra speed after holding a straight line...
@@ -1114,7 +1121,7 @@
   // near the side, and never past the mountain's edges.
   const SIDE_ROOM = 16;
   function cameraLeft(camY) {
-    if (!NARROW) return 0;
+    if (!NARROW) return -MARGIN;
     const centerAt = course ? course.centerAt : titleCenter;
     const ahead = camY + SKIER_Y;
     let x = (centerAt(ahead) + centerAt(ahead + 80)) / 2 - VW / 2;
@@ -2134,11 +2141,19 @@
   function snowRow(wy, centerAt, lineAt) {
     let row = snowRows.get(wy);
     if (row) return row;
-    row = new Uint8ClampedArray(W * 4);
+    row = new Uint8ClampedArray((W + 2 * MARGIN) * 4);
     const c = centerAt(wy);
     const line = lineAt ? lineAt(wy) : null;
-    for (let sx = 0; sx < W; sx++) {
+    for (let sx = -MARGIN; sx < W + MARGIN; sx++) {
       let col = VIC.white;
+      if (sx < 0 || sx >= W) {   // past the edge: forest, densely speckled,
+        // and solid at the screen's edges, as the mountain's own edge was
+        const rim = Math.min(sx + MARGIN, W + MARGIN - 1 - sx) < EDGE_STRIP;
+        if (rim || hash(sx + 9001, wy) < 0.6) col = VIC.lightBlue;
+        const i = (sx + MARGIN) * 4;
+        row[i] = col[0]; row[i + 1] = col[1]; row[i + 2] = col[2]; row[i + 3] = 255;
+        continue;
+      }
       const depth = snowDepth(sx, c, wy);
       // The worn line: packed snow along the racing line, speckled cyan
       // (the VIC-20 has no grey), densest in the middle of the track.
@@ -2149,12 +2164,13 @@
         // around by drift noise, and solid only in a thin strip at the
         // margin.
         const drift = (noise2(sx / 13, wy / 13) - 0.5) * 0.5 * (1 - depth);
-        const density = depth > 0.92 ? 1 : Math.max(0, 0.7 * depth ** 2 + drift);
+        // (On a TV with forest past the edges, the strip melts into it.)
+        const density = depth > 0.92 ? (MARGIN ? 0.6 : 1) : Math.max(0, 0.7 * depth ** 2 + drift);
         if (hash(sx, wy) < density) col = VIC.lightBlue;
       } else if (hash(sx + 4441, wy + 17) < 0.005) {
         col = VIC.lightBlue;   // a stray speck, so the piste isn't spotless
       }
-      const i = sx * 4;
+      const i = (sx + MARGIN) * 4;
       row[i] = col[0]; row[i + 1] = col[1]; row[i + 2] = col[2]; row[i + 3] = 255;
     }
     snowRows.set(wy, row);
@@ -2171,16 +2187,16 @@
 
     const lineAt = course ? course.lineAt : null;
     for (let sy = 0; sy < H; sy++) {
-      img.data.set(snowRow(camY + sy, centerAt, lineAt).subarray(camX * 4, (camX + VW) * 4), sy * VW * 4);
+      img.data.set(snowRow(camY + sy, centerAt, lineAt).subarray((camX + MARGIN) * 4, (camX + MARGIN + VW) * 4), sy * VW * 4);
     }
 
     // Trees, scattered off the piste and thickening toward the edges.
     const salt = course ? course.salt : 0;
     const j0 = Math.floor(camY / TREE_CELL) - 1;
     const j1 = Math.floor((camY + H) / TREE_CELL) + 1;
-    const iMax = Math.ceil(W / TREE_CELL);
+    const iMin = Math.floor(-MARGIN / TREE_CELL), iMax = Math.ceil((W + MARGIN) / TREE_CELL);
     for (let j = j0; j <= j1; j++) {
-      for (let i = 0; i < iMax; i++) {
+      for (let i = iMin; i < iMax; i++) {
         const tr = treeAt(i, j, salt, centerAt);
         if (!tr) continue;
         const sc = scorched.get(i + ',' + j);
