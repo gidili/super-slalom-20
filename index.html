@@ -120,6 +120,7 @@
     image-rendering: pixelated; image-rendering: crisp-edges;
   }
   #breakdown { font-size: 9px; line-height: 2; margin: 8px 0 14px; }
+  #new-top { font-size: 11px; padding: 6px 0; margin-bottom: 10px; animation: row-flash 0.6s step-end infinite; }
   #submit-form label { display: block; font-size: 9px; margin-bottom: 8px; opacity: 0.7; }
   #initials-input {
     font-family: inherit; font-size: 22px; width: 140px; box-sizing: border-box;
@@ -154,6 +155,8 @@
   #leaderboard-list li { display: flex; justify-content: space-between; padding: 2px 4px; }
   #leaderboard-list li.note { justify-content: center; }
   #leaderboard-list li.mine { animation: row-flash 1.6s ease-in-out infinite; }
+  /* Endless, on the last miss: the box blinks, in reverse video. */
+  #hud-miss-box.last-miss { animation: row-flash 0.6s step-end infinite; }
   @keyframes row-flash {
     0%, 100% { background: var(--vic-white); color: var(--vic-blue); }
     50%      { background: var(--vic-blue); color: var(--vic-white); }
@@ -297,7 +300,7 @@
 
     <div id="hud" class="ontv">
       <div>SCORE<b id="hud-score">0</b></div>
-      <div>MISS<b id="hud-miss">0</b></div>
+      <div id="hud-miss-box"><span id="hud-miss-label">MISS</span><b id="hud-miss">0</b></div>
       <div>BEST<b id="hud-best">0</b></div>
     </div>
 
@@ -345,6 +348,7 @@
       <canvas id="final-stars" width="41" height="11"></canvas>
       <div id="breakdown"></div>
 
+      <div id="new-top" hidden>NEW TOP 10!</div>
       <form id="submit-form">
         <label for="initials-input">ENTER YOUR INITIALS</label>
         <input id="initials-input" maxlength="3" autocomplete="off" spellcheck="false">

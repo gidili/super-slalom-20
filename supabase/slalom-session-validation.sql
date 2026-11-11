@@ -34,6 +34,8 @@
 -- fire pineapples, trees and fences blow up instead of ending the run:
 --   + burned pineapples * 50 + burned trees * 25 + burned fences * 25
 -- Nothing burns unless some streak reached 4, and at most 100 in a run.
+-- A chase survived is worth more the rarer the animal, at most 20 a run:
+--   + survived foxes * 50 + survived wolves * 100 + survived bears * 300
 -- The payload says whether the run finished. A finish must account for
 -- every pole; a crash scores its poles alone, so claiming one only costs
 -- points.
@@ -200,6 +202,9 @@ declare
   v_pine     int;
   v_tree     int;
   v_fence    int;
+  v_fox      int;
+  v_wolf     int;
+  v_bear     int;
   v_time_cs  int;
   v_finished boolean;
   v_expected int;
@@ -221,6 +226,9 @@ begin
   v_pine     := coalesce((p_payload#>>'{burned,pine}')::int, 0);
   v_tree     := coalesce((p_payload#>>'{burned,tree}')::int, 0);
   v_fence    := coalesce((p_payload#>>'{burned,fence}')::int, 0);
+  v_fox      := coalesce((p_payload#>>'{survived,fox}')::int, 0);
+  v_wolf     := coalesce((p_payload#>>'{survived,wolf}')::int, 0);
+  v_bear     := coalesce((p_payload#>>'{survived,bear}')::int, 0);
   v_time_cs  := (p_payload->>'time_cs')::int;
   v_finished := coalesce((p_payload->>'finished')::boolean, false);
 
@@ -280,11 +288,15 @@ begin
   if v_pine + v_tree + v_fence > (case when p_god then 400 else 100 end) then raise exception '%', v_msg; end if;
   if not p_god and v_pine + v_tree + v_fence > 0 and v_max_streak < 4 then raise exception '%', v_msg; end if;
 
+  -- Animals are rare on a course; twenty escapes in one run are not real.
+  if v_fox < 0 or v_wolf < 0 or v_bear < 0 or v_fox + v_wolf + v_bear > 20 then raise exception '%', v_msg; end if;
+
   if length(coalesce(v_initials, '')) <> 3 then raise exception '%', v_msg; end if;
 
   if v_time_cs <= 0 then raise exception '%', v_msg; end if;
   v_expected := v_passed * 10 + v_reds * 25 + v_clip_pts
-              + v_pine * 50 + v_tree * 25 + v_fence * 25;
+              + v_pine * 50 + v_tree * 25 + v_fence * 25
+              + v_fox * 50 + v_wolf * 100 + v_bear * 300;
   if v_finished then
     v_expected := v_expected + 50;
     if v_missed <= 3 then

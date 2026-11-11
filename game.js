@@ -80,6 +80,13 @@
   const QUICK_POLES = 5;       // poles in each
   const QUICK_GAP = 40;
   const QUICK_OFFSET = 5;
+  // Endless: poles evenly spaced, about a mid-course gap, made this far
+  // ahead of the skier and dropped this far behind (both off screen).
+  const ENDLESS_GAP = 80;
+  const ENDLESS_AHEAD = H + 200;
+  const ENDLESS_BEHIND = 200;
+  const ENDLESS_RED = 1 / 6;   // chance a pole is red
+  const ENDLESS_MISSES = 4;    // the 4th ends the run; forks count
   const QUICK_FIRST = 4;       // the earliest pole a section can start on
   // Where a pole passes the skier, measured from the skier's centre toward
   // the flag side. The skis sit a pixel either side of centre: a pole
@@ -181,7 +188,7 @@
 
   let course = null;
 
-  function buildCourse(seed) {
+  function buildCourse(seed, endless = false) {
     const redPoles = pickRedPoles(seed);
     const rnd = mulberry32(seed % 4294967296);
     const f1 = 0.006 + rnd() * 0.004, p1 = rnd() * Math.PI * 2;
@@ -197,7 +204,7 @@
     const quick = pickQuickPoles(seed);
     const poles = [];
     let y = START_PAD;
-    for (let i = 0; i < POLE_COUNT; i++) {
+    for (let i = 0; i < (endless ? 0 : POLE_COUNT); i++) {
       if (i > 0) {
         y += quick.has(i) && quick.has(i - 1)
           ? QUICK_GAP
@@ -211,14 +218,14 @@
       // fell (-1 left, 1 right).
       poles.push({ y, x, side, pass: side, red: redPoles.has(i), result: null, fallen: 0 });
     }
-    const finishY = y + FINISH_PAD;
+    const finishY = endless ? Infinity : y + FINISH_PAD;
 
     // The racing line: start at the top of the piste, swing past each pole
     // just outside it, end mid-piste at the finish. Drawn as a worn track
     // in the snow.
     const pts = [{ y: 0, x: centerAt(0) }]
       .concat(poles.map(p => ({ y: p.y, x: p.x + p.side * LINE_WIDE })))
-      .concat([{ y: finishY, x: centerAt(finishY) }]);
+      .concat(endless ? [] : [{ y: finishY, x: centerAt(finishY) }]);
     const lineAt = (wy) => {
       if (wy <= 0) return pts[0].x;
       for (let k = 1; k < pts.length; k++) {
@@ -243,7 +250,29 @@
       x: 4 + Math.floor(prnd() * (W - 8)),
       y: 64 + Math.floor(prnd() * 40),
     };
-    course = { seed, centerAt, lineAt, poles, finishY, salt, titlePine };
+    // Endless never has the whole slope: called every step, this makes the
+    // poles coming up and forgets those long gone, so only a few screens'
+    // worth exist at once.
+    let made = 0, lastY = START_PAD - ENDLESS_GAP;
+    const extend = (at) => {
+      while (lastY < at + ENDLESS_AHEAD) {
+        lastY += ENDLESS_GAP;
+        const side = made % 2 === 0 ? first : -first;
+        const x = Math.round(centerAt(lastY) + side * (POLE_OFFSET + rnd() * 4));
+        const p = { y: lastY, x, side, pass: side, red: made > 0 && rnd() < ENDLESS_RED, result: null, fallen: 0 };
+        poles.push(p);
+        pts.push({ y: p.y, x: p.x + side * LINE_WIDE });
+        made++;
+      }
+      let gone = 0;
+      while (gone < nextPole && poles[gone].y < at - ENDLESS_BEHIND) gone++;
+      poles.splice(0, gone);
+      nextPole -= gone;
+      while (pts.length > 2 && pts[1].y < at - ENDLESS_BEHIND) pts.shift();
+    };
+    const lineEnd = endless ? Infinity : poles[POLE_COUNT - 1].y;
+    course = { seed, centerAt, lineAt, poles, finishY, salt, titlePine, endless, lineEnd, extend };
+    if (endless) extend(0);
     snowRows.clear();            // cached rows belong to the previous slope
   }
 
@@ -279,6 +308,8 @@
 
   const scoreEl = document.getElementById('hud-score');
   const missEl = document.getElementById('hud-miss');
+  const missBoxEl = document.getElementById('hud-miss-box');
+  const missLabelEl = document.getElementById('hud-miss-label');
   const bestEl = document.getElementById('hud-best');
   const msgEl = document.getElementById('message');
   const overlayEl = document.getElementById('overlay');
@@ -301,6 +332,7 @@
   const skipBtnEl = document.getElementById('skip-btn');
   const submitStatusEl = document.getElementById('submit-status');
   const leaderboardListEl = document.getElementById('leaderboard-list');
+  const newTopEl = document.getElementById('new-top');
   const boardTitleEl = leaderboardEl.querySelector('h3');
   const againBtnEl = document.getElementById('again-btn');
   const titleCardEl = document.getElementById('title-card');
@@ -319,6 +351,7 @@
   let passed, missed, reds, clips, nextPole;
   let streak = 0, streaks = [], clipPoints = 0;   // the combo, see COMBO_CAP
   let burned = { pine: 0, tree: 0, fence: 0 };     // blown up on fire
+  let survived = { fox: 0, wolf: 0, bear: 0 };     // chases that gave up
   // The Konami code's god mode: on fire from the start of every run and
   // never going out, blue so it's never mistaken for the real thing.
   // Same rules otherwise, but fire not earned isn't ranked.
@@ -474,6 +507,43 @@
       o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.08);
     }
 
+    // You've made the top 10: a quick lift, before the initials.
+    function playQualify() {
+      if (!ac) return;
+      const t = ac.currentTime;
+      [659.25, 783.99, 1046.5, 1318.5].forEach((f, i) => note(f, t + i * 0.09, i === 3 ? 0.35 : 0.08, 0.1, 'square'));
+    }
+
+    // The end of an Endless run, however it ended: a climb, then a proper
+    // cadence, because getting this far deserves one.
+    function playRunOver() {
+      if (!ac) return;
+      const t = ac.currentTime;
+      [392, 523.25, 659.25, 783.99, 1046.5].forEach((f, i) => note(f, t + i * 0.11, 0.1, 0.12, 'square'));
+      const iv = t + 0.6, I = t + 0.95;
+      [349.23, 440, 698.46].forEach(f => note(f, iv, 0.32, 0.07, 'square'));
+      note(87.31, iv, 0.32, 0.16, 'triangle');
+      [392, 523.25, 659.25, 1046.5].forEach(f => note(f, I, 1.1, 0.07, 'square'));
+      note(130.81, I, 1.1, 0.18, 'triangle');
+    }
+
+    // A bear has seen you: a low growl, so you know before it arrives.
+    function playGrowl() {
+      if (!ac) return;
+      const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(95, t); o.frequency.exponentialRampToValueAtTime(55, t + 0.4);
+      g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+      o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.46);
+    }
+
+    // Endless, down to the last miss: blip blip blip, once.
+    function playBlips() {
+      if (!ac) return;
+      const t = ac.currentTime;
+      [0, 0.13, 0.26].forEach(d => note(1200, t + d, 0.08, 0.1, 'square'));
+    }
+
     // Catching fire: a whoosh, noise swelling as it rises, over a low roar.
     function playIgnite() {
       if (!ac) return;
@@ -611,7 +681,7 @@
       playExplosion: safe(playExplosion), playFanfare: safe(playFanfare), toggleMute: safe(toggleMute),
       playCoin: safe(playCoin), playCount: safe(playCount), playTick: safe(playTick), playDing: safe(playDing), playNoBonus: safe(playNoBonus),
       playStar: safe(playStar), playJingle: safe(playJingle),
-      playIgnite: safe(playIgnite), playDouse: safe(playDouse), playClack: safe(playClack),
+      playIgnite: safe(playIgnite), playDouse: safe(playDouse), playClack: safe(playClack), playBlips: safe(playBlips), playRunOver: safe(playRunOver), playQualify: safe(playQualify), playGrowl: safe(playGrowl),
     };
   })();
 
@@ -668,6 +738,7 @@
   const earned = () =>
     passed * POLE_POINTS + reds * RED_POINTS + clipPoints +
     burned.pine * BURN_POINTS.pine + burned.tree * BURN_POINTS.tree + burned.fence * BURN_POINTS.fence +
+    survived.fox * ANIMALS.fox.bonus + survived.wolf * ANIMALS.wolf.bonus + survived.bear * ANIMALS.bear.bonus +
     (state === 'finished' ? FINISH_POINTS : 0);
   const bonusCs = () => runCs() + missed * MISS_CS;
   const timeBonus = () =>
@@ -703,6 +774,7 @@
   // After a run, back to the title and the instructions, on a new course.
   function toTitle() {
     state = 'title';
+    ranOut = false;
     prepareRun();
     particles = [];
     hideOverlay();
@@ -713,6 +785,7 @@
     bonusEl.hidden = true;
     passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
     streak = 0; streaks = []; clipPoints = 0; burned = { pine: 0, tree: 0, fence: 0 };
+    survived = { fox: 0, wolf: 0, bear: 0 };
     msgEl.textContent = '';
     paintHud();
   }
@@ -730,13 +803,18 @@
     flash('GET READY');
     await prepared;
     runGod = sessionGod;
+    // Endless isn't ranked yet, so it leaves the title's session unused.
+    if (chosenMode() === 'endless') { buildCourse(course.seed, true); sessionId = null; }
     skierX = course.centerAt(0);
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     held = []; tapLeft = 0;
     hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = [];
+    animals = []; animalSlot = Math.ceil(START_PAD / ANIMAL_SLOT);
+    birds = []; birdIn = between(course.endless ? BIRD_EVERY_ENDLESS : BIRD_EVERY);
     passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
     streak = 0; streaks = []; clipPoints = 0; burned = { pine: 0, tree: 0, fence: 0 };
+    survived = { fox: 0, wolf: 0, bear: 0 };
     shownBonus = 0;
     runEnd = null;
     pausedMs = 0;
@@ -817,7 +895,7 @@
     state = 'crashed';
     mode = 'crash';
     runEnd = performance.now();
-    hitWhat = hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
+    hitWhat = hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
     SFX.stopSwoosh();
     if (hit.pine) SFX.playExplosion(); else SFX.playBreak();
     if (hit.pine) {
@@ -833,6 +911,13 @@
   // On fire: whatever was hit goes up like a pineapple, for points.
   // A pineapple just explodes; a tree or a fence explodes in flames.
   function burn(hit) {
+    if (hit.animal) {   // worth nothing; it just goes up
+      animals.splice(animals.indexOf(hit.a), 1);
+      const fire = fireColors(runGod);
+      SFX.playExplosion();
+      spawnExplosion(hit.x, hit.y - 3, [...fire, ...fire, ANIMALS[hit.kind].ink]);
+      return;
+    }
     const kind = hit.fence ? 'fence' : hit.pine ? 'pine' : 'tree';
     const key = hit.fence ? `f${hit.k},${hit.side}` : hit.i + ',' + hit.j;
     exploded.add(key);
@@ -848,6 +933,18 @@
       : kind === 'fence' ? [...fire, ...fire, ...FENCE_PIECES] : PIECE_COLORS);
     flash(`${{ pine: 'PINEAPPLE', tree: 'TREE', fence: 'FENCE' }[kind]} +${BURN_POINTS[kind]}`);
     paintHud();
+  }
+
+  // Endless, the last miss: no crash, the skier just coasts to a halt.
+  let ranOut = false;
+  function outOfMisses() {
+    state = 'crashed';
+    ranOut = true;
+    runEnd = performance.now();
+    SFX.stopSwoosh();
+    closeSession();
+    const id = runId;
+    setTimeout(() => { if (runId === id) showOverlay(false); }, 1400);
   }
 
   function finish() {
@@ -988,8 +1085,12 @@
       // and clacks, since on screen it looks a lot like a clip.
       if (clipped) SFX.playClack();
       const what = clipped ? 'FORK  MISS' : 'MISS';
-      // The time bonus is lost once, on the miss that loses it.
-      flash(missed === MISS_LIMIT + 1 ? `${what}  NO TIME BONUS` : `${what} +${fmt(MISS_CS)}`);
+      // The time bonus is lost once, on the miss that loses it. Endless
+      // has no clock for a miss to add to.
+      flash(course.endless ? what
+        : missed === MISS_LIMIT + 1 ? `${what}  NO TIME BONUS` : `${what} +${fmt(MISS_CS)}`);
+      if (course.endless && missed === ENDLESS_MISSES - 1) SFX.playBlips();
+      if (course.endless && missed >= ENDLESS_MISSES) outOfMisses();
     }
     nextPole++;
     paintHud();
@@ -1101,8 +1202,7 @@
   }
 
   // The title's three modes. Left and right move the highlight, which wraps
-  // so the Konami code's left-right-left-right ends where it began. Only
-  // Single is built so far.
+  // so the Konami code's left-right-left-right ends where it began.
   const MODE_TEXT = {
     single: 'TEST YOUR SLALOM SKILLS:<br>25 POLES, ONE MOUNTAIN, NO SECOND CHANCES.',
     championship: '12 LEGENDARY MOUNTAINS, ONE CHAMPION.<br>CAN YOU CONQUER THE NORTH FACE OF EVEREST?',
@@ -1115,10 +1215,12 @@
     modeIndex = (i + modeBtns.length) % modeBtns.length;
     modeBtns.forEach((b, k) => b.classList.toggle('chosen', k === modeIndex));
     modeTextEl.innerHTML = MODE_TEXT[modeBtns[modeIndex].dataset.mode];
+    paintHud();
   }
+  const chosenMode = () => modeBtns[modeIndex].dataset.mode;
   function startChosen() {
-    if (modeBtns[modeIndex].dataset.mode === 'single') startRun();
-    else flash('COMING SOON');
+    if (chosenMode() === 'championship') flash('COMING SOON');
+    else startRun();
   }
   modeBtns.forEach((btn, i) => btn.addEventListener('click', () => {
     btn.blur();
@@ -1126,7 +1228,6 @@
     chooseMode(i);
     startChosen();
   }));
-  chooseMode(0);
 
   // Space, or a tap on the screen: start, pause and resume, skip the tally.
   function spaceAction() {
@@ -1185,7 +1286,7 @@
     const steering = heading !== 'down';
     mode = heading;
 
-    const hit = hitTree(skierX, skierY) || hitFence(skierX, skierY);
+    const hit = hitTree(skierX, skierY) || hitFence(skierX, skierY) || hitAnimal(skierX, skierY);
     if (hit && onFire()) burn(hit);
     else if (hit) { crash(hit); return; }
 
@@ -1211,7 +1312,8 @@
 
     // A pole is cleared when the skier crosses its row with both skis on
     // the flag side. See SKIS and CLIP_REACH.
-    while (nextPole < POLE_COUNT && course.poles[nextPole].y <= skierY) {
+    if (course.endless) course.extend(skierY);
+    while (nextPole < course.poles.length && course.poles[nextPole].y <= skierY) {
       const p = course.poles[nextPole];
       const dx = (skierX - p.x) * p.pass;
       const through = dx > SKIS;
@@ -1316,7 +1418,7 @@
     // Nothing on the piste until past the first pole, nor in the run-in
     // after the last, where you run straight on from wherever that pole
     // left you.
-    if (!course || y < START_PAD + 30 || y > course.poles[POLE_COUNT - 1].y - 10) return false;
+    if (!course || y < START_PAD + 30 || y > course.lineEnd - 10) return false;
     if (Math.abs(x - course.lineAt(y)) < CLEAR_LINE) return false;
     for (const p of course.poles) {
       if (Math.abs(p.y - y) <= 12 && Math.abs(x - p.x) < CLEAR_POLE) return false;
@@ -1358,6 +1460,201 @@
     }
     const b = Math.max(0, Math.min(W - 1, a + side * len));
     return { y, x0: Math.min(a, b), x1: Math.max(a, b) };
+  }
+
+  // ------------------------------------------------------------- animals
+  // Wolves, foxes and bears at the forest edge. Where they stand comes from
+  // the course, like the trees; once in view they wander about their spot,
+  // and stop to watch the skier go by. Get close and one may give chase
+  // (odds, within radius), at a fraction of the skier's speed (pace), so it
+  // only catches a skier it can cut off, until its patience runs out. Only
+  // a bear can crash you that way; once one gives up it's harmless. Solid,
+  // unless the skier is on fire.
+  const ANIMALS = {
+    wolf: { ink: VIC.blue, reach: 5, tall: 6, odds: 0.15, radius: 36, pace: 0.85, patience: 2.5, bonus: 100,
+      stand: ['........XX', 'X......XXK', '.XXXXXXXX.', '.XXXXXXX..', '.X.X..X.X.', '.X.X..X.X.'],
+      walk: [['..........', 'X.......XX', '.XXXXXXXXK', '.XXXXXXX..', '.X..X.X..X', '.X..X.X..X'],
+             ['..........', 'X.......XX', '.XXXXXXXXK', '.XXXXXXX..', '..XX...XX.', '..XX...XX.']] },
+    fox: { ink: VIC.orange, reach: 4, tall: 5, odds: 0.3, radius: 36, pace: 0.8, patience: 2, bonus: 50,
+      stand: ['......XX', 'X.....XK', 'XX.XXXX.', '.XXXXX..', '..X..X..'],
+      walk: [['........', 'X.....XX', 'XX.XXXXK', '.XXXXX..', '.X....X.'],
+             ['........', 'X.....XX', 'XX.XXXXK', '.XXXXX..', '...XX...']] },
+    bear: { ink: VIC.red, reach: 7, tall: 7, odds: 0.8, radius: 42, pace: 0.95, patience: 9, bonus: 300,
+      stand: ['.........XX.', '..XXXXX.XXXX', '.XXXXXXXXXXK', 'XXXXXXXXXXX.', 'XXXXXXXXXX..', '.XX.XX.XX.XX', '.XX.XX.XX.XX'],
+      walk: [['............', '..XXXXX..XX.', '.XXXXXXXXXXX', 'XXXXXXXXXXXK', 'XXXXXXXXXX..', '.XX..XX.XX..', 'XX....XX.XX.'],
+             ['............', '..XXXXX..XX.', '.XXXXXXXXXXX', 'XXXXXXXXXXXK', 'XXXXXXXXXX..', '..XX.XX..XX.', '.XX.XX..XX..']] },
+  };
+  const ANIMAL_SLOT = 70;           // at most one per side per this many rows
+  const ANIMAL_ODDS = 0.005;        // chance per slot and side, extremely rare...
+  const ANIMAL_ODDS_ENDLESS = 0.024; // ...and more often here
+  const FOX_PAIR = 0.3;             // chance a fox has company
+  const ANIMAL_ROAM = 12;           // how far one wanders from its spot
+  const ANIMAL_WATCH = 70;          // the skier within this: stop and look
+  const BEAR_CATCH = 9;             // a chasing bear this close has you
+  let animals = [], animalSlot = 0;
+
+  // Who's in slot k on this side, if anyone. Never within wandering reach
+  // of the racing line.
+  function animalAt(k, side) {
+    const { salt, centerAt, endless } = course;
+    if (hash(k * 719 + salt, side + 83) >= (endless ? ANIMAL_ODDS_ENDLESS : ANIMAL_ODDS)) return null;
+    const y = k * ANIMAL_SLOT + Math.floor(hash(k * 41 + salt, side + 7) * (ANIMAL_SLOT - 20));
+    const x = Math.round(centerAt(y) + side * (PATH_HW + 6 + hash(k * 59 + salt, side + 19) * 14));
+    if (x < 10 || x > W - 10 || y > course.finishY - 40) return null;
+    if (Math.abs(x - course.lineAt(y)) < CLEAR_LINE + ANIMAL_ROAM) return null;
+    const roll = hash(k * 137 + salt, side + 53);
+    return { kind: roll < 0.67 ? 'fox' : roll < 0.92 ? 'wolf' : 'bear', x, y, homeX: x, homeY: y,
+      mode: 'pause', t: Math.random() * 2, face: side, toX: x, toY: y };
+  }
+
+  // Worth more the rarer the animal; also in slalom_submit.
+  function survivedChase(a) {
+    survived[a.kind]++;
+    flash(`SURVIVED ${a.kind.toUpperCase()} CHASE !!! +${ANIMALS[a.kind].bonus}`);
+    SFX.playDing();
+    paintHud();
+  }
+
+  function updateAnimals(dt) {
+    const camY = cameraTop();
+    for (; animalSlot * ANIMAL_SLOT < camY + H + 40; animalSlot++) {
+      for (const side of [-1, 1]) {
+        const a = animalAt(animalSlot, side);
+        if (!a) continue;
+        animals.push(a);
+        if (a.kind === 'fox' && hash(animalSlot * 311 + course.salt, side + 29) < FOX_PAIR) {
+          const x = a.x + side * 12, y = a.y + 6;   // further from the piste
+          animals.push({ ...a, x, y, homeX: x, homeY: y, toX: x, toY: y, t: a.t + 0.7 });
+        }
+      }
+    }
+    for (const a of animals) if (a.mode === 'chase' && a.y <= camY - 40 && state === 'running') survivedChase(a);
+    animals = animals.filter(a => a.y > camY - 40);
+    for (const a of animals) {
+      const k = ANIMALS[a.kind], dist = Math.hypot(a.x - skierX, a.y - skierY);
+      if (a.mode === 'chase') {
+        a.t -= dt;
+        if (state !== 'running' || a.t <= 0) {   // lost interest, right here
+          if (state === 'running') survivedChase(a);
+          a.mode = 'pause'; a.t = 1 + Math.random() * 2; a.tame = true;
+          a.homeX = a.x; a.homeY = a.y;
+        } else {
+          if (dist > 10 || a.kind === 'bear') {   // a wolf or fox only trails
+            const v = speed * k.pace;
+            // A bear runs at where you're going, so it can cut you off.
+            const lead = a.kind === 'bear' ? dist / Math.max(v, 1) : 0;
+            const tx = skierX + vx * lead - a.x, ty = skierY + speed * lead - a.y, len = Math.hypot(tx, ty) || 1;
+            a.x += tx / len * v * dt;
+            a.y += ty / len * v * dt;
+          }
+          a.face = skierX >= a.x ? 1 : -1;
+          continue;
+        }
+      }
+      if (!a.rolled && state === 'running' && dist < k.radius) {
+        a.rolled = true;
+        if (Math.random() < k.odds) {
+          a.mode = 'chase'; a.t = k.patience;
+          if (a.kind === 'bear') SFX.playGrowl();
+          continue;
+        }
+      }
+      if (Math.abs(a.y - skierY) < ANIMAL_WATCH && Math.abs(a.x - skierX) < ANIMAL_WATCH + 20) {
+        a.mode = 'watch';
+        a.face = skierX >= a.x ? 1 : -1;
+        continue;
+      }
+      if (a.mode === 'watch') { a.mode = 'pause'; a.t = 1 + Math.random() * 2; }
+      a.t -= dt;
+      if (a.t <= 0) {
+        if (a.mode === 'pause') {
+          a.mode = 'walk';
+          a.t = 1 + Math.random() * 2;
+          a.toX = a.homeX + (Math.random() * 2 - 1) * ANIMAL_ROAM;
+          a.toY = a.homeY + (Math.random() * 2 - 1) * ANIMAL_ROAM / 2;
+          a.face = a.toX >= a.x ? 1 : -1;
+        } else { a.mode = 'pause'; a.t = 1 + Math.random() * 2; }
+      }
+      if (a.mode === 'walk') {
+        const dx = a.toX - a.x, dy = a.toY - a.y, d = Math.hypot(dx, dy);
+        if (d < 1) { a.mode = 'pause'; a.t = 1 + Math.random() * 2; }
+        else { a.x += dx / d * 9 * dt; a.y += dy / d * 9 * dt; }
+      }
+    }
+  }
+
+  function hitAnimal(x, y) {
+    for (const a of animals) {
+      const k = ANIMALS[a.kind];
+      if (a.tame || (a.mode === 'chase' && a.kind !== 'bear')) continue;
+      const caught = a.mode === 'chase' && Math.hypot(x - a.x, y - a.y) <= BEAR_CATCH;
+      if (caught || (Math.abs(x - a.x) <= k.reach && y >= a.y - k.tall - 2 && y <= a.y + 2)) {
+        return { animal: true, kind: a.kind, x: a.x, y: a.y, a };
+      }
+    }
+    return null;
+  }
+
+  function drawAnimals(camY) {
+    for (const a of animals) {
+      const k = ANIMALS[a.kind];
+      const rows = a.mode === 'walk' || a.mode === 'chase'
+        ? k.walk[Math.floor(performance.now() / (a.mode === 'chase' ? 80 : 160)) % 2] : k.stand;
+      const flip = a.face < 0 ? rows.map(r => r.split('').reverse().join('')) : rows;
+      blit(flip, Math.round(a.x) - (rows[0].length >> 1), Math.round(a.y) - camY - rows.length + 1, k.ink);
+    }
+  }
+
+  // Birds crossing the screen overhead, side-on like everything else: small flocks of
+  // blackbirds and the odd bald eagle. Screen coordinates, so they cross at
+  // their own pace however fast the slope goes by. Nothing can hit them.
+  const BIRD = [
+    ['..X..', '.X.X.', 'X...X'],
+    ['X...X', '.X.X.', '..X..'],
+  ];
+  // Facing right: white head and tail, each edged so they show on snow.
+  const EAGLE = [
+    ['...XX.......', '..XXX...KK..', '..XXXX.KWWK.', 'WXXXXXXXWWYY', '.KXXXX..KK..'],
+    ['............', '........KK..', '.......KWWK.', 'WXXXXXXXWWYY', '.KXXXX..KK..', '..XXX.......', '...XX.......'],
+  ];
+  const BIRD_EVERY = [150, 300];       // seconds between sightings...
+  const BIRD_EVERY_ENDLESS = [40, 85]; // ...and in Endless
+  const EAGLE_ODDS = 0.15;
+  let birds = [], birdIn = 0;
+  const between = ([a, b]) => a + Math.random() * (b - a);
+
+  function spawnBirds() {
+    const dir = Math.random() < 0.5 ? 1 : -1, y = 10 + Math.random() * (H - 50);
+    if (Math.random() < EAGLE_ODDS) {
+      birds.push({ eagle: true, x: dir > 0 ? -14 : VW + 14, y, v: dir * (26 + Math.random() * 10), phase: Math.random() * 1000 });
+      return;
+    }
+    const n = 3 + Math.floor(Math.random() * 4), v = dir * (44 + Math.random() * 16);
+    for (let i = 0; i < n; i++) {
+      birds.push({ x: (dir > 0 ? -8 : VW + 8) - dir * (i * 9 + Math.random() * 4),
+        y: y + (Math.random() * 2 - 1) * (4 + i * 3), v, phase: Math.random() * 1000 });
+    }
+  }
+
+  function updateBirds(dt) {
+    birdIn -= dt;
+    if (birdIn <= 0) {
+      spawnBirds();
+      birdIn = between(course.endless ? BIRD_EVERY_ENDLESS : BIRD_EVERY);
+    }
+    for (const b of birds) b.x += b.v * dt;
+    birds = birds.filter(b => (b.v > 0 ? b.x < VW + 60 : b.x > -60));
+  }
+
+  function drawBirds() {
+    const now = performance.now();
+    for (const b of birds) {
+      // An eagle mostly glides, with a beat of the wings now and then.
+      const rows = b.eagle ? EAGLE[Math.floor((now + b.phase) / 140) % 9 === 0 ? 1 : 0]
+        : BIRD[Math.floor((now + b.phase) / 110) % 2];
+      const drawn = b.v < 0 ? rows.map(r => r.split('').reverse().join('')) : rows;
+      blit(drawn, Math.round(camX + b.x) - (rows[0].length >> 1), Math.round(b.y), b.eagle ? VIC.red : VIC.black);
+    }
   }
 
   // A fence occupies rows y-4..y; the skier is fenced in when any of the
@@ -1419,13 +1716,15 @@
       '..X.X..',
       '..X.X..',
     ],
-    // Turning: skis point the way the skier is heading.
+    // Turning: crouched, knees bent and hips back, skis pointing the way
+    // the skier is heading.
     left: [
-      '...X...',
+      '...XX..',
       '..XXX..',
-      '...X...',
-      '..XXXX.',
-      '.X.XX.X',
+      '.X.XXX.',
+      'X...XX.',
+      '..XXX..',
+      '..X.X..',
       '...X.X.',
       '..X.X..',
       '.X.X...',
@@ -1478,7 +1777,7 @@
 
   // X takes the ink passed in; the other letters are fixed colours.
   const INKS = { O: VIC.orange, G: VIC.green, Y: VIC.yellow, R: VIC.red,
-    B: VIC.lightBlue, C: VIC.cyan, V: VIC.blue };
+    B: VIC.lightBlue, C: VIC.cyan, V: VIC.blue, K: VIC.black, W: VIC.white };
 
   // The on-screen arrows, in the same blocky pixels as everything else.
   const ARROW = [
@@ -1853,6 +2152,7 @@
         }
       }
       if (state !== 'title') {
+        drawAnimals(camY);
         const s = SPRITES[mode] || SPRITES.down;
         // Sprites differ in height; they all stand on the same row.
         blit(s, Math.round(skierX) - 3, Math.round(skierY) - camY + 5 - s.length, VIC.black);
@@ -1875,6 +2175,7 @@
       }
     }
 
+    if (course && state !== 'title') drawBirds();
     if (tally && tally.dinged) drawStars(tally.starsShown);
 
     ctx.putImageData(img, 0, 0);
@@ -1931,19 +2232,31 @@
     flashUntil = performance.now() + ms;
   }
 
-  let best = 0;
-  try { best = parseInt(localStorage.getItem('slalom_best') || '0', 10) || 0; } catch (_) {}
+  // Each mode keeps its own BEST; the box shows the highlighted mode's on
+  // the title and the run's during it.
+  const BEST_KEYS = { single: 'slalom_best', endless: 'slalom_best_endless' };
+  const best = {};
+  for (const m in BEST_KEYS) {
+    best[m] = 0;
+    try { best[m] = parseInt(localStorage.getItem(BEST_KEYS[m]) || '0', 10) || 0; } catch (_) {}
+  }
+  const bestMode = () => (state === 'title' ? chosenMode() === 'endless' : course && course.endless) ? 'endless' : 'single';
 
   function paintHud() {
     const score = state === 'title' ? 0 : earned() + shownBonus;
     scoreEl.textContent = score;
-    missEl.textContent = missed || 0;
+    // Endless counts down what's left instead of up what's gone.
+    const endless = bestMode() === 'endless', left = ENDLESS_MISSES - (missed || 0);
+    missLabelEl.textContent = endless ? 'LEFT' : 'MISS';
+    missEl.textContent = endless ? left : missed || 0;
+    missBoxEl.classList.toggle('last-miss', endless && left === 1 && state !== 'title' && state !== 'crashed');
     // Like snake-bit, BEST climbs live once this run passes it.
-    if (score > best) {
-      best = score;
-      try { localStorage.setItem('slalom_best', best); } catch (_) {}
+    const m = bestMode();
+    if (score > best[m]) {
+      best[m] = score;
+      try { localStorage.setItem(BEST_KEYS[m], score); } catch (_) {}
     }
-    bestEl.textContent = best;
+    bestEl.textContent = best[m];
     placeHudButtons();
   }
 
@@ -1953,14 +2266,15 @@
   let lastSubmittedId = null;
 
   function showOverlay(finished) {
-    overlayWordEl.textContent = finished ? 'GAME OVER' : 'WIPEOUT';
+    if (course.endless) SFX.playRunOver();
+    overlayWordEl.textContent = finished || ranOut ? 'GAME OVER' : 'WIPEOUT';
     overlayTitleEl.className = 'bad';
     finalScoreEl.textContent = points();
     finalStarsEl.hidden = !finished;
     if (finished) paintCardStars(stars());
     // What happened on the run, never how it was scored: the arithmetic
     // stays in the server's check, not on screen as a recipe.
-    breakdownEl.textContent = finished ? `TIME ${fmt(runCs())}` : `INTO THE ${hitWhat}`;
+    breakdownEl.textContent = finished ? `TIME ${fmt(runCs())}` : ranOut ? 'OUT OF MISSES' : `INTO THE ${hitWhat}`;
     breakdownEl.hidden = false;
     lastSubmittedId = null;
     submitStatusEl.classList.remove('error');
@@ -1968,7 +2282,9 @@
     // save it, as in snake-bit. Anything else goes straight to the board.
     const canSave = !!(sessionId && points() > 0 && makesTop10(points(), runGod));
     submitFormEl.hidden = !canSave;
-    leaderboardEl.hidden = canSave;
+    leaderboardEl.hidden = canSave || course.endless;
+    newTopEl.hidden = !canSave;
+    if (canSave) SFX.playQualify();
     submitStatusEl.textContent = runGod ? 'GOD MODE RUN' : sessionId ? '' : 'UNRANKED RUN';
     try { initialsInputEl.value = localStorage.getItem('slalom_initials') || ''; } catch (_) {}
     overlayEl.hidden = false;
@@ -1979,6 +2295,7 @@
 
   function hideOverlay() {
     cardClosed = false;
+    newTopEl.hidden = true;
     if (document.activeElement === initialsInputEl) initialsInputEl.blur();
     overlayEl.classList.remove('visible');
     overlayEl.hidden = true;
@@ -2033,6 +2350,7 @@
   // Step two: the run folds down to its score and the board takes over.
   function showLeaderboard() {
     if (document.activeElement === initialsInputEl) initialsInputEl.blur();
+    newTopEl.hidden = true;
     submitFormEl.hidden = true;
     breakdownEl.hidden = true;
     leaderboardEl.hidden = false;
@@ -2108,6 +2426,7 @@
         passed, missed, reds, clips,
         streaks: streak ? [...streaks, streak] : streaks,
         burned,
+        survived,
         finished: state === 'finished',
       },
     });
@@ -2117,9 +2436,14 @@
       submitStatusEl.classList.add('error');
       return;
     }
-    submitStatusEl.textContent = '';
+    submitStatusEl.textContent = "YOU'RE ON THE BOARD!";
     lastSubmittedId = data || null;
     showLeaderboard();
+    // The big moment: your row lights up, to the three-star jingle.
+    SFX.playJingle();
+    const cx = camX + VW / 2, cy = cameraTop() + STAR_ROW, id = runId;
+    [[0, 0], [-VW / 4, 350], [VW / 4, 700]].forEach(([dx, ms]) =>
+      setTimeout(() => { if (runId === id) spawnSparkles(cx + dx, cy); }, ms));
   });
 
   skipBtnEl.addEventListener('click', showLeaderboard);
@@ -2193,12 +2517,16 @@
       while (acc >= STEP && state === 'running') { step(STEP); acc -= STEP; }
     } else {
       acc = 0;
-      if (state === 'finished') glide(Math.min(dt, 0.05));
+      if (state === 'finished' || (state === 'crashed' && ranOut)) glide(Math.min(dt, 0.05));
       if (tally) updateTally(Math.min(dt, 0.05));
     }
     if (state === 'running' && onFire()) spawnEmbers();
     if (state === 'running') {
       SFX.updateSwoosh(speed / DOWN_SPEED, snowDepth(skierX, course.centerAt(skierY), skierY), heading !== 'down');
+    }
+    if (course && state !== 'title' && state !== 'paused' && state !== 'starting') {
+      updateAnimals(Math.min(dt, 0.05));
+      updateBirds(Math.min(dt, 0.05));
     }
     if (particles.length) updateParticles(Math.min(dt, 0.05));
     if (state === 'running' || state === 'crashed' || state === 'finished') paintHud();
@@ -2208,7 +2536,7 @@
   }
 
   prepareRun();
-  paintHud();
+  chooseMode(0);
   fetchLeaderboard();
   if (juicer) setInterval(fetchLeaderboard, 60000);   // keeps makesTop10 current
   requestAnimationFrame(frame);
