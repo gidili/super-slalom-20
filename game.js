@@ -1913,14 +1913,14 @@
     '..Y.....',
     '........',
   ];
-  const RESTART_ICON = [      // snake's R, moved a column right to sit centred
+  const MENU_ICON = [         // three lines: back to the title
     '........',
-    '..YYYY..',
-    '..Y..Y..',
-    '..Y..Y..',
-    '..YYYY..',
-    '..Y.Y...',
-    '..Y..Y..',
+    '........',
+    '.YYYYYY.',
+    '........',
+    '.YYYYYY.',
+    '........',
+    '.YYYYYY.',
     '........',
   ];
   const CROWN = [
@@ -1934,7 +1934,7 @@
     '........',
   ];
   paintIcon(boardBtnEl, CROWN);
-  paintIcon(restartBtnEl, RESTART_ICON);
+  paintIcon(restartBtnEl, MENU_ICON);
   // The pause button shows play while paused; repainted only on a change.
   let pauseIconPlay = null;
   function paintPauseIcon() {
@@ -2646,7 +2646,18 @@
   boardBtnEl.addEventListener('click', () => { boardBtnEl.blur(); openBoard(); });
   // Pause is Space, restart is R. Blurred like the crown.
   pauseBtnEl.addEventListener('click', () => { pauseBtnEl.blur(); spaceAction(); });
-  restartBtnEl.addEventListener('click', () => { restartBtnEl.blur(); restart(); });
+  // The middle button goes back to the title to pick a mode; mid-run that
+  // drops the run, as R does. (R itself still restarts.)
+  restartBtnEl.addEventListener('click', () => {
+    restartBtnEl.blur();
+    if (boardView || state === 'title' || state === 'starting') return;
+    if (state === 'running' || state === 'paused') {
+      runEnd = performance.now();
+      SFX.stopSwoosh();
+      closeSession();
+    }
+    toTitle();
+  });
 
   // ----------------------------------------------------------------- loop
   // Physics runs on WALL time, in fixed substeps, never capped. The run
