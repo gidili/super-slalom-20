@@ -1262,11 +1262,13 @@
     if (chosenMode() === 'championship') flash('COMING SOON');
     else startRun();
   }
+  // The highlighted one starts; any other is highlighted first, so its
+  // explanation can be read.
   modeBtns.forEach((btn, i) => btn.addEventListener('click', () => {
     btn.blur();
     if (state !== 'title') return;
-    chooseMode(i);
-    startChosen();
+    if (i === modeIndex) startChosen();
+    else chooseMode(i);
   }));
 
   // Space, or a tap on the screen: start, pause and resume, skip the tally.
@@ -1305,6 +1307,8 @@
     btn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       SFX.unlock();
+      // On the title they browse the modes instead.
+      if (state === 'title' && !boardView) { chooseMode(modeIndex + (dir === 'left' ? -1 : 1)); return; }
       try { btn.setPointerCapture(e.pointerId); } catch (_) {}
       press(id, dir);
     });
