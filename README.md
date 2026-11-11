@@ -1,36 +1,31 @@
 # Super Slalom vs Pineapple
-A super slalom ski game inspired by an old VIC-20 game
+A super slalom ski game inspired by an old VIC-20 game lost in time
 
 <p align="center">
   <img src="cover-art/front.png" alt="Super Slalom vs Pineapple — front cover" height="550">
   <img src="cover-art/back.png" alt="Super Slalom vs Pineapple — back cover" height="550">
 </p>
 
-Downhill slalom in the spirit of the VIC-20: sixteen colours, chunky pixels, beeps and swooshes, and a skier made of about thirty pixels.
-
 **Play:** https://gidili.github.io/super-slalom-20/
 
-## The run
+## Modes
 
-- **25 poles, one mountain.** Each pole has a little flag pointing to the side you pass it on, and the sides alternate, so you weave down the hill. Miss one and it costs you.
-- **Some stretches are tight.** Poles bunch up close together, and only quick hands get through.
-- **Red poles are worth chasing**, and brushing a pole as you pass it is worth a little extra; a streak of them is worth a lot more.
-- **Stay on the piste.** The fresh snow on either side slows you down, more the further out you go. Out there are trees and wooden fences, and either one ends your run.
-- **Watch out for pineapples.**
-- **Fast and clean wins.** Finish quickly with few misses for a big bonus and up to three stars.
+- **Single:** one mountain, 25 poles, no second chances.
+- **Championship:** 12 legendary mountains, up to the North Face of Everest. *Coming soon.*
+- **Endless:** a slope that never ends. A crash or 4 misses and it's over.
+
+## On the slope
+
+- Pass each pole on the side its flag points to.
+- Brush the poles as you go: a streak of them is worth a lot.
+- Trees, fences, pineapples and the odd bear will end your run.
 
 ## Controls
 
-On a computer:
+- **Computer:** hold ← → (or A / L, or the Shifts) to turn. Space starts and pauses, R restarts, M mutes.
+- **Phone:** hold the arrows in the bottom corners to turn. Tap a mode to start, and the screen to pause.
+- **Controller:** d-pad or stick to turn, Start to start and pause.
 
-- Hold **A**, **Left Shift** or **←** to turn left, and **L**, **Right Shift** or **→** to turn right
-- Let go and the skier straightens up; the longer you hold a straight line, the faster you go
-- **S** or **↓** straightens right away
-- **Space** starts and pauses, **R** restarts, **M** mutes
+The **crown** shows the leaderboards.
 
-On a phone held upright:
-
-- Hold the arrow buttons in the bottom corners to turn
-- Tap a mode on the title screen to start, and tap the screen to pause
-
-The **crown** shows the top 10.
+Do you have what it takes to succeed?
