@@ -571,11 +571,11 @@
       o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.46);
     }
 
-    // Endless, down to the last miss: blip blip blip, once.
+    // Endless, down to the last miss: a quick alarm, high-low, once.
     function playBlips() {
       if (!ac) return;
       const t = ac.currentTime;
-      [0, 0.13, 0.26].forEach(d => note(1200, t + d, 0.08, 0.1, 'square'));
+      [1480, 1110, 1480, 1110, 1480, 1110].forEach((f, i) => note(f, t + i * 0.075, 0.06, 0.11, 'square'));
     }
 
     // Catching fire: a whoosh, noise swelling as it rises, over a low roar.
@@ -1291,10 +1291,12 @@
     return r.width > 0 && x > r.left - ARROW_SAFE && x < r.right + ARROW_SAFE
       && y > r.top - ARROW_SAFE && y < r.bottom + ARROW_SAFE;
   });
+  // A click is Space. A tap is too, except on the title, where you tap a
+  // mode, and near the arrows, which are for steering.
   canvas.addEventListener('pointerdown', (e) => {
-    if (e.pointerType === 'mouse') return;
     SFX.unlock();
-    if (nearArrow(e.clientX, e.clientY) || state === 'title') return;   // on the title, tap a mode
+    if (e.pointerType === 'mouse') { if (e.button === 0) spaceAction(); return; }
+    if (nearArrow(e.clientX, e.clientY) || state === 'title') return;
     spaceAction();
   });
   arrowBtns.forEach((btn) => {
@@ -2411,7 +2413,7 @@
   const currentBoard = () => boardOf(bestMode() === 'endless', godMode);
   const runBoard = () => boardOf(course.endless, runGod);
   const BOARD_TITLE = {
-    single: 'TOP 10', 'single:god': 'SECRET GOD MODE<br>TOP 10',
+    single: 'SINGLE TOP 10', 'single:god': 'SECRET GOD MODE<br>SINGLE TOP 10',
     endless: 'ENDLESS TOP 10', 'endless:god': 'SECRET GOD MODE<br>ENDLESS TOP 10',
   };
   const leaderboardCache = {};

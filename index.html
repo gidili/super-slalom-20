@@ -155,8 +155,12 @@
   #leaderboard-list li { display: flex; justify-content: space-between; padding: 2px 4px; }
   #leaderboard-list li.note { justify-content: center; }
   #leaderboard-list li.mine { animation: row-flash 1.6s ease-in-out infinite; }
-  /* Endless, on the last miss: the box blinks, in reverse video. */
-  #hud-miss-box.last-miss { animation: row-flash 0.6s step-end infinite; }
+  /* Endless, on the last miss: the box blinks red, like an alarm. */
+  #hud-miss-box.last-miss { animation: alarm-flash 0.5s step-end infinite; }
+  @keyframes alarm-flash {
+    0%, 100% { background: var(--vic-white); color: var(--vic-red); border-color: var(--vic-red); }
+    50%      { background: var(--vic-red); color: var(--vic-white); border-color: var(--vic-red); }
+  }
   @keyframes row-flash {
     0%, 100% { background: var(--vic-white); color: var(--vic-blue); }
     50%      { background: var(--vic-blue); color: var(--vic-white); }
