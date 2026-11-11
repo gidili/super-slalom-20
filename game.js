@@ -732,14 +732,15 @@
   // Switching on the title asks again; an answer to an older ask is
   // dropped, so the session is always the kind last asked for.
   let sessionGod = false, prepareSeq = 0;
-  async function openSession(seq) {
+  async function openSession(seq, endless = false) {
     sessionId = null;
     endPromise = null;
     edges = Promise.resolve();
     sessionGod = godMode;
     if (juicer) {
       try {
-        const { data, error } = await juicer.rpc(sessionGod ? 'slalom_start_god_game' : 'slalom_start_game');
+        const { data, error } = await (endless ? juicer.rpc('slalom_start_endless', { p_god: sessionGod })
+          : juicer.rpc(sessionGod ? 'slalom_start_god_game' : 'slalom_start_game'));
         if (seq !== prepareSeq) return 0;
         if (!error && data && data.session) {
           sessionId = data.session;
@@ -837,8 +838,12 @@
     flash('GET READY');
     await prepared;
     runGod = sessionGod;
-    // Endless isn't ranked yet, so it leaves the title's session unused.
-    if (chosenMode() === 'endless') { buildCourse(course.seed, true); sessionId = null; }
+    // Endless has its own kind of session, asked for now rather than on the
+    // title, and the slope that comes with it.
+    if (chosenMode() === 'endless') {
+      buildCourse(await openSession(prepareSeq, true), true);
+      runGod = sessionGod;
+    }
     skierX = course.centerAt(0);
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
@@ -1232,7 +1237,7 @@
     // it; after a run, going back to the title prepares the next one anyway.
     if (state === 'title') prepareRun();
     flash(godMode ? 'GOD MODE ON' : 'GOD MODE OFF');
-    fetchLeaderboard(godMode);   // so the next run knows what it must beat
+    fetchLeaderboard();   // so the next run knows what it must beat
   }
 
   // The title's three modes. Left and right move the highlight, which wraps
@@ -1250,6 +1255,7 @@
     modeBtns.forEach((b, k) => b.classList.toggle('chosen', k === modeIndex));
     modeTextEl.innerHTML = MODE_TEXT[modeBtns[modeIndex].dataset.mode];
     paintHud();
+    if (!leaderboardCache[currentBoard()]) fetchLeaderboard();
   }
   const chosenMode = () => modeBtns[modeIndex].dataset.mode;
   function startChosen() {
@@ -1508,15 +1514,15 @@
   // a bear can crash you that way; once one gives up it's harmless. Solid,
   // unless the skier is on fire.
   const ANIMALS = {
-    wolf: { ink: VIC.blue, reach: 5, tall: 6, odds: 0.15, radius: 36, pace: 0.85, patience: 2.5, bonus: 100,
+    wolf: { ink: VIC.blue, reach: 5, tall: 6, odds: 0.15, radius: 46, pace: 0.85, patience: 2.5, bonus: 100,
       stand: ['........XX', 'X......XXK', '.XXXXXXXX.', '.XXXXXXX..', '.X.X..X.X.', '.X.X..X.X.'],
       walk: [['..........', 'X.......XX', '.XXXXXXXXK', '.XXXXXXX..', '.X..X.X..X', '.X..X.X..X'],
              ['..........', 'X.......XX', '.XXXXXXXXK', '.XXXXXXX..', '..XX...XX.', '..XX...XX.']] },
-    fox: { ink: VIC.orange, reach: 4, tall: 5, odds: 0.3, radius: 36, pace: 0.8, patience: 2, bonus: 50,
+    fox: { ink: VIC.orange, reach: 4, tall: 5, odds: 0.3, radius: 46, pace: 0.8, patience: 2, bonus: 50,
       stand: ['......XX', 'X.....XK', 'XX.XXXX.', '.XXXXX..', '..X..X..'],
       walk: [['........', 'X.....XX', 'XX.XXXXK', '.XXXXX..', '.X....X.'],
              ['........', 'X.....XX', 'XX.XXXXK', '.XXXXX..', '...XX...']] },
-    bear: { ink: VIC.red, reach: 7, tall: 7, odds: 0.8, radius: 42, pace: 0.95, patience: 9, bonus: 300,
+    bear: { ink: VIC.red, reach: 7, tall: 7, odds: 0.8, radius: 52, pace: 0.95, patience: 9, bonus: 300,
       stand: ['.........XX.', '..XXXXX.XXXX', '.XXXXXXXXXXK', 'XXXXXXXXXXX.', 'XXXXXXXXXX..', '.XX.XX.XX.XX', '.XX.XX.XX.XX'],
       walk: [['............', '..XXXXX..XX.', '.XXXXXXXXXXX', 'XXXXXXXXXXXK', 'XXXXXXXXXX..', '.XX..XX.XX..', 'XX....XX.XX.'],
              ['............', '..XXXXX..XX.', '.XXXXXXXXXXX', 'XXXXXXXXXXXK', 'XXXXXXXXXX..', '..XX.XX..XX.', '.XX.XX..XX..']] },
@@ -2319,9 +2325,9 @@
     submitStatusEl.classList.remove('error');
     // A ranked run that would make the top 10, crashes included, gets to
     // save it, as in snake-bit. Anything else goes straight to the board.
-    const canSave = !!(sessionId && points() > 0 && makesTop10(points(), runGod));
+    const canSave = !!(sessionId && points() > 0 && makesTop10(points(), runBoard()));
     submitFormEl.hidden = !canSave;
-    leaderboardEl.hidden = canSave || course.endless;
+    leaderboardEl.hidden = canSave;
     newTopEl.hidden = !canSave;
     if (canSave) SFX.playQualify();
     submitStatusEl.textContent = runGod ? 'GOD MODE RUN' : sessionId ? '' : 'UNRANKED RUN';
@@ -2329,7 +2335,7 @@
     overlayEl.hidden = false;
     requestAnimationFrame(() => overlayEl.classList.add('visible'));
     if (canSave) setTimeout(() => { if (!overlayEl.hidden) initialsInputEl.focus(); }, 450);
-    else showBoard(runGod);
+    else showBoard(runBoard());
   }
 
   function hideOverlay() {
@@ -2363,7 +2369,7 @@
     setBoardView(true);
     overlayEl.hidden = false;
     requestAnimationFrame(() => overlayEl.classList.add('visible'));
-    showBoard(godMode);
+    showBoard(currentBoard());
   }
 
   function closeBoard() {
@@ -2393,7 +2399,7 @@
     submitFormEl.hidden = true;
     breakdownEl.hidden = true;
     leaderboardEl.hidden = false;
-    showBoard(runGod);
+    showBoard(runBoard());
   }
 
   const placeholder = (text) => `<li class="note">${text}</li>`;
@@ -2401,37 +2407,44 @@
   // The last top 10 seen of each board, kept to decide whether a run
   // qualifies. Unknown (offline, not loaded yet) qualifies, so a real top
   // score is never lost.
-  const leaderboardCache = { false: null, true: null };
-  function makesTop10(score, god) {
-    const top = leaderboardCache[god];
+  const boardOf = (endless, god) => (endless ? 'endless' : 'single') + (god ? ':god' : '');
+  const currentBoard = () => boardOf(bestMode() === 'endless', godMode);
+  const runBoard = () => boardOf(course.endless, runGod);
+  const BOARD_TITLE = {
+    single: 'TOP 10', 'single:god': 'SECRET GOD MODE<br>TOP 10',
+    endless: 'ENDLESS TOP 10', 'endless:god': 'SECRET GOD MODE<br>ENDLESS TOP 10',
+  };
+  const leaderboardCache = {};
+  function makesTop10(score, board) {
+    const top = leaderboardCache[board];
     if (!top || top.length < 10) return true;
     return score > top[9].score;
   }
 
   // Which board the list is showing: the run's on its card, the current
-  // mode's under the crown. The secret one says so in its header.
-  let shownGod = false;
-  function showBoard(god) {
-    if (god !== shownGod) leaderboardListEl.innerHTML = '';
-    shownGod = god;
-    boardTitleEl.innerHTML = god ? 'SECRET GOD MODE<br>TOP 10' : 'TOP 10';
-    boardTitleEl.classList.toggle('god', god);
-    fetchLeaderboard(god);
+  // mode's under the crown. The secret ones say so in their headers.
+  let shownBoard = 'single';
+  function showBoard(board) {
+    if (board !== shownBoard) leaderboardListEl.innerHTML = '';
+    shownBoard = board;
+    boardTitleEl.innerHTML = BOARD_TITLE[board];
+    boardTitleEl.classList.toggle('god', board.endsWith(':god'));
+    fetchLeaderboard(board);
   }
 
-  async function fetchLeaderboard(god = godMode) {
-    const render = god === shownGod;
+  async function fetchLeaderboard(board = currentBoard()) {
+    const render = board === shownBoard, endless = board.startsWith('endless'), god = board.endsWith(':god');
     if (!juicer) { if (render) leaderboardListEl.innerHTML = placeholder('OFFLINE'); return; }
     if (render && !leaderboardListEl.children.length) leaderboardListEl.innerHTML = placeholder('LOADING...');
-    const { data, error } = await juicer
-      .from(god ? 'slalom_god_scores' : 'slalom_scores')
-      .select('id, initials, score')
+    const table = juicer.from(endless ? 'slalom_mode_scores' : god ? 'slalom_god_scores' : 'slalom_scores')
+      .select('id, initials, score');
+    const { data, error } = await (endless ? table.eq('mode', 'endless').eq('god', god) : table)
       .order('score', { ascending: false })       // highest first
       .order('created_at', { ascending: true })
       .limit(10);
-    if (god !== shownGod) { if (!error) leaderboardCache[god] = data; return; }
+    if (board !== shownBoard) { if (!error) leaderboardCache[board] = data; return; }
     if (error) { leaderboardListEl.innerHTML = placeholder('UNAVAILABLE'); return; }
-    leaderboardCache[god] = data;
+    leaderboardCache[board] = data;
     if (!data.length) { leaderboardListEl.innerHTML = placeholder('NO SCORES YET'); return; }
     leaderboardListEl.innerHTML = data.map((row, i) => {
       const mine = row.id === lastSubmittedId ? ' class="mine"' : '';
@@ -2456,7 +2469,7 @@
     // ended_at, so wait for it rather than racing it.
     if (endPromise) await endPromise;
 
-    const { data, error } = await juicer.rpc(runGod ? 'slalom_submit_god_score' : 'slalom_submit_score', {
+    const { data, error } = await juicer.rpc(course.endless ? 'slalom_submit_endless' : runGod ? 'slalom_submit_god_score' : 'slalom_submit_score', {
       p_session: sessionId,
       p_payload: {
         initials: raw.padEnd(3, '-'),
@@ -2478,11 +2491,7 @@
     submitStatusEl.textContent = "YOU'RE ON THE BOARD!";
     lastSubmittedId = data || null;
     showLeaderboard();
-    // The big moment: your row lights up, to the three-star jingle.
-    SFX.playJingle();
-    const cx = camX + VW / 2, cy = cameraTop() + STAR_ROW, id = runId;
-    [[0, 0], [-VW / 4, 350], [VW / 4, 700]].forEach(([dx, ms]) =>
-      setTimeout(() => { if (runId === id) spawnSparkles(cx + dx, cy); }, ms));
+    SFX.playJingle();   // the big moment: your row lights up to this
   });
 
   skipBtnEl.addEventListener('click', showLeaderboard);
@@ -2576,7 +2585,6 @@
 
   prepareRun();
   chooseMode(0);
-  fetchLeaderboard();
   if (juicer) setInterval(fetchLeaderboard, 60000);   // keeps makesTop10 current
   requestAnimationFrame(frame);
 })();
