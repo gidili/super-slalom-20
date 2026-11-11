@@ -34,9 +34,10 @@
 -- fire pineapples, trees and fences blow up instead of ending the run:
 --   + burned pineapples * 50 + burned trees * 25 + burned fences * 25
 -- Nothing burns unless some streak reached 4, and at most 100 in a run.
--- A pineapple smashed on fire takes back a miss: missed is what counts,
--- forgiven how many were taken back, and missed + forgiven the poles that
--- really went by.
+-- A pineapple smashed on fire takes back a miss, or banks one: missed is
+-- what counts and can go below 0 (each takes 0.60s off the time),
+-- forgiven how many were taken back, missed + forgiven the poles really
+-- missed.
 -- A chase survived is worth more the rarer the animal, at most 20 a run:
 --   + survived foxes * 50 + survived wolves * 100 + survived bears * 300
 -- The payload says whether the run finished. A finish must account for
@@ -301,7 +302,7 @@ begin
 
   -- Every pole is cleared or missed at most once; all 25 on a finish.
   -- Only a pineapple can forgive a miss.
-  if v_passed < 0 or v_missed < 0 or v_forgiven < 0 then raise exception '%', v_msg; end if;
+  if v_passed < 0 or v_forgiven < 0 or v_missed + v_forgiven < 0 then raise exception '%', v_msg; end if;
   if v_forgiven > coalesce((p_payload#>>'{burned,pine}')::int, 0) then raise exception '%', v_msg; end if;
   if v_passed + v_missed + v_forgiven > 25 then raise exception '%', v_msg; end if;
   if v_finished and v_passed + v_missed + v_forgiven <> 25 then raise exception '%', v_msg; end if;
@@ -447,7 +448,7 @@ begin
   if length(coalesce(v_initials, '')) <> 3 then raise exception '%', v_msg; end if;
 
   -- Poles can't go by faster than the skier can reach them.
-  if v_passed < 0 or v_missed < 0 or v_missed > 4 then raise exception '%', v_msg; end if;
+  if v_passed < 0 or v_forgiven < 0 or v_missed + v_forgiven < 0 or v_missed > 4 then raise exception '%', v_msg; end if;
   if v_forgiven < 0 or v_forgiven > v_pine then raise exception '%', v_msg; end if;
   if v_passed + v_missed + v_forgiven > v_secs * 4 + 8 then raise exception '%', v_msg; end if;
   if v_reds < 0 or v_reds > v_passed then raise exception '%', v_msg; end if;

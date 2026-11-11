@@ -802,7 +802,7 @@
   const points = () => earned() + (state === 'finished' ? timeBonus() : 0);
   function stars() {
     if (state !== 'finished') return 0;
-    if (missed === 0 && runCs() <= STAR3_CS) return 3;
+    if (missed <= 0 && runCs() <= STAR3_CS) return 3;
     if (missed <= STAR2_MISSES && bonusCs() < PAR_CS) return 2;
     return 1;
   }
@@ -991,8 +991,9 @@
     SFX.playExplosion();
     spawnExplosion(hit.x, hit.y - 4, kind === 'tree' ? [...fire, ...fire, ...TREE_PIECES]
       : kind === 'fence' ? [...fire, ...fire, ...FENCE_PIECES] : PIECE_COLORS);
-    // A pineapple smashed on fire takes back a miss, if there's one to take.
-    const forgive = kind === 'pine' && missed > 0;
+    // A pineapple smashed on fire takes back a miss, or banks one: Endless
+    // can go above 4 LEFT, Single below 0 misses, which takes time off.
+    const forgive = kind === 'pine';
     if (forgive) { missed--; forgiven++; SFX.playForgiven(); }
     pop(`${{ pine: 'PINEAPPLE', tree: 'TREE', fence: 'FENCE' }[kind]} +${BURN_POINTS[kind]}${forgive ? '  MISS FORGIVEN' : ''}`);
     paintHud();
@@ -2311,21 +2312,26 @@
     flashUntil = performance.now() + ms;
   }
 
-  // The same for what the skier just did: shown right under them, where
-  // the player is looking, and kept inside the screen.
+  // The same for what the skier just did: written on the slope where it
+  // happened, beside the skier on whichever side has more room, and left
+  // behind as they ski on, gone after POP_MS.
+  const POP_MS = 1100, POP_GAP = 8;
   const popEl = document.getElementById('pop');
-  let popUntil = 0;
+  let popUntil = 0, popAt = { x: 0, y: 0, side: 1 };
   function pop(text) {
     popEl.textContent = text;
     popEl.hidden = false;
-    popUntil = performance.now() + 1100;
+    popUntil = performance.now() + POP_MS;
+    popAt = { x: skierX, y: skierY, side: skierX - camX < VW / 2 ? 1 : -1 };
     placePop();
   }
   function placePop() {
-    const tvW = popEl.parentElement.clientWidth, half = popEl.offsetWidth / 2 + 4;
-    const x = (skierX - camX) / VW * tvW;
-    popEl.style.left = Math.max(half, Math.min(tvW - half, x)) + 'px';
-    popEl.style.top = ((SKIER_Y + 12) / H * 100) + '%';
+    const tvW = popEl.parentElement.clientWidth, w = popEl.offsetWidth, scale = tvW / VW;
+    const x = (popAt.x - camX + popAt.side * POP_GAP) * scale;
+    const left = popAt.side > 0 ? Math.min(x, tvW - w - 4) : Math.max(x, w + 4);
+    popEl.style.left = left + 'px';
+    popEl.style.transform = popAt.side > 0 ? 'none' : 'translateX(-100%)';
+    popEl.style.top = ((popAt.y - cameraTop() - 6) / H * 100) + '%';
   }
 
   // Each mode keeps its own BEST; the box shows the highlighted mode's on
