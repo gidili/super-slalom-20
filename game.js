@@ -81,7 +81,12 @@
   const QUICK_GAP = 40;
   const QUICK_OFFSET = 5;
   const QUICK_FIRST = 4;       // the earliest pole a section can start on
-  const CLIP = 3;              // this close to a pole knocks it over
+  // Where a pole passes the skier, measured from the skier's centre toward
+  // the flag side. The skis sit a pixel either side of centre: a pole
+  // between them, or touching on the wrong side, is a fork; just outside
+  // them on the flag side, a clip. Both knock it over.
+  const SKIS = 1.5;            // between the skis
+  const CLIP_REACH = 5.5;      // the far edge of a touch, either side
   const LINE_WIDE = 6;         // the worn line passes this far outside a pole
   const LINE_HW = 3;           // ...and is this wide either side
   const START_PAD = 120;
@@ -186,8 +191,8 @@
     // The seed picks the first pole's side; after that they alternate, so
     // the line is a slalom, not a schuss. Each pole is passed on its
     // outside, away from the piste centre, which is what makes you weave.
-    // The first pole has no flag and counts on either side, so starting
-    // against the line is fine; the rest of the course doesn't change.
+    // The first pole too: every pole has a flag, so there's no free choice
+    // that the rest of the course would then ignore.
     const first = rnd() < 0.5 ? -1 : 1;
     const quick = pickQuickPoles(seed);
     const poles = [];
@@ -202,9 +207,9 @@
       const side = i % 2 === 0 ? first : -first;
       const off = quick.has(i) ? QUICK_OFFSET + rnd() * 2 : POLE_OFFSET + rnd() * 4;
       const x = Math.round(centerAt(y) + side * off);
-      // pass: side to pass on, 0 = either. fallen: 0 standing, else the
-      // direction it fell (-1 left, 1 right).
-      poles.push({ y, x, side, pass: i === 0 ? 0 : side, red: redPoles.has(i), result: null, fallen: 0 });
+      // pass: side to pass on. fallen: 0 standing, else the direction it
+      // fell (-1 left, 1 right).
+      poles.push({ y, x, side, pass: side, red: redPoles.has(i), result: null, fallen: 0 });
     }
     const finishY = y + FINISH_PAD;
 
@@ -455,6 +460,20 @@
       osc.connect(g); g.connect(master); osc.start(t); osc.stop(t + 0.26);
     }
 
+    // A fork: a hard wooden clack, skis on the wrong side of the pole.
+    function playClack() {
+      if (!ac) return;
+      const t = ac.currentTime;
+      const { src, g: ng } = noiseThrough('bandpass', 1800, 4, t);
+      ng.gain.setValueAtTime(0.5, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+      src.stop(t + 0.07);
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(700, t); o.frequency.exponentialRampToValueAtTime(300, t + 0.05);
+      g.gain.setValueAtTime(0.25, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+      o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.08);
+    }
+
     // Catching fire: a whoosh, noise swelling as it rises, over a low roar.
     function playIgnite() {
       if (!ac) return;
@@ -592,7 +611,7 @@
       playExplosion: safe(playExplosion), playFanfare: safe(playFanfare), toggleMute: safe(toggleMute),
       playCoin: safe(playCoin), playCount: safe(playCount), playTick: safe(playTick), playDing: safe(playDing), playNoBonus: safe(playNoBonus),
       playStar: safe(playStar), playJingle: safe(playJingle),
-      playIgnite: safe(playIgnite), playDouse: safe(playDouse),
+      playIgnite: safe(playIgnite), playDouse: safe(playDouse), playClack: safe(playClack),
     };
   })();
 
@@ -963,8 +982,12 @@
     } else {
       endStreak();
       missed++;
+      // Brushed on the wrong side is a fork: still a miss, but it says so,
+      // and clacks, since on screen it looks a lot like a clip.
+      if (clipped) SFX.playClack();
+      const what = clipped ? 'FORK  MISS' : 'MISS';
       // The time bonus is lost once, on the miss that loses it.
-      flash(missed === MISS_LIMIT + 1 ? 'MISS  NO TIME BONUS' : `MISS +${fmt(MISS_CS)}`);
+      flash(missed === MISS_LIMIT + 1 ? `${what}  NO TIME BONUS` : `${what} +${fmt(MISS_CS)}`);
     }
     nextPole++;
     paintHud();
@@ -1152,14 +1175,14 @@
     skierY += speed * dt;
     skierX = Math.max(2, Math.min(W - 3, skierX + vx * dt));
 
-    // A pole is cleared when the skier crosses its row on the flag side.
-    // Skis that brush it knock it over, which on the flag side is a clip
-    // and earns a little extra.
+    // A pole is cleared when the skier crosses its row with both skis on
+    // the flag side. See SKIS and CLIP_REACH.
     while (nextPole < POLE_COUNT && course.poles[nextPole].y <= skierY) {
       const p = course.poles[nextPole];
-      const brushed = Math.abs(skierX - p.x) <= CLIP;
+      const dx = (skierX - p.x) * p.pass;
+      const through = dx > SKIS;
+      const brushed = dx >= -CLIP_REACH && dx <= CLIP_REACH;
       if (brushed) p.fallen = skierX < p.x ? 1 : -1;
-      const through = (skierX - p.x) * p.pass >= 0;
       resolvePole(through, brushed);
       // Clipped on fire, it burns where it fell, then goes to ash.
       if (through && brushed && onFire()) p.burning = { at: performance.now(), god: runGod };
@@ -1256,9 +1279,9 @@
   // clear. The margin is generous because the line swings faster than a
   // skier can steer at speed, so anyone following it runs a little wide.
   function lineIsClear(x, y) {
-    // Nothing on the piste until past the first pole, which counts on
-    // either side, nor in the run-in after the last, where you run
-    // straight on from wherever that pole left you.
+    // Nothing on the piste until past the first pole, nor in the run-in
+    // after the last, where you run straight on from wherever that pole
+    // left you.
     if (!course || y < START_PAD + 30 || y > course.poles[POLE_COUNT - 1].y - 10) return false;
     if (Math.abs(x - course.lineAt(y)) < CLEAR_LINE) return false;
     for (const p of course.poles) {
