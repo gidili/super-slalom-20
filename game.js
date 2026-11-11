@@ -83,6 +83,14 @@
   // Endless: poles evenly spaced, about a mid-course gap, made this far
   // ahead of the skier and dropped this far behind (both off screen).
   const ENDLESS_GAP = 80;
+  // ...and how the slope gets harder: long calm stretches, then a storm.
+  // How long each lasts and how hard it hits can't be predicted, but the
+  // ceiling keeps rising, so sooner or later one is worse than any before.
+  const ENDLESS_CALM = [700, 2200];    // rows of calm
+  const ENDLESS_STORM = [500, 1600];   // rows of storm
+  const ENDLESS_TIGHTEN = 22;  // how much the gap shrinks at full difficulty
+  const ENDLESS_SWING = 6;     // how much further out the poles stand
+  const ENDLESS_QUICK = 0.3;   // chance per pole of a bunched-up stretch
   const ENDLESS_AHEAD = H + 200;
   const ENDLESS_BEHIND = 200;
   const ENDLESS_RED = 1 / 6;   // chance a pole is red
@@ -253,12 +261,38 @@
     // Endless never has the whole slope: called every step, this makes the
     // poles coming up and forgets those long gone, so only a few screens'
     // worth exist at once.
-    let made = 0, lastY = START_PAD - ENDLESS_GAP;
+    // How hard Endless is at a row, from 0 toward (never reaching) 1. From
+    // the course's seed alone, so the slope stays put once it's made.
+    const waves = [];
+    const addWave = () => {
+      const i = waves.length, start = i ? waves[i - 1].end : 0, roll = n => hash(i * 7919 + salt, n);
+      const span = ([a, b], r) => a + r * (b - a);
+      const stormAt = start + span(ENDLESS_CALM, roll(1)), end = stormAt + span(ENDLESS_STORM, roll(2));
+      const ceiling = 1 - 0.75 * Math.exp(-(i + 1) / 5);
+      const peak = roll(3) < 0.4 ? ceiling : ceiling * (0.55 + 0.4 * roll(4));
+      waves.push({ start, stormAt, end, peak, rest: 0.05 + 0.15 * (1 - Math.exp(-i / 10)) });
+    };
+    const levelAt = (wy) => {
+      const d = Math.max(0, wy - START_PAD);
+      while (!waves.length || waves[waves.length - 1].end <= d) addWave();
+      let k = waves.length - 1;
+      while (waves[k].start > d) k--;
+      const w = waves[k];
+      if (d < w.stormAt) return w.rest;
+      const t = (d - w.stormAt) / (w.end - w.stormAt);
+      return w.rest + (w.peak - w.rest) * Math.min(1, t / 0.25, (1 - t) / 0.2);
+    };
+
+    let made = 0, lastY = START_PAD - ENDLESS_GAP, bunched = 0;
     const extend = (at) => {
       while (lastY < at + ENDLESS_AHEAD) {
-        lastY += ENDLESS_GAP;
+        const level = levelAt(lastY);
+        if (bunched > 0) bunched--;
+        else if (made > 3 && rnd() < level * ENDLESS_QUICK) bunched = 3;
+        lastY += bunched > 0 ? QUICK_GAP : Math.round(ENDLESS_GAP - ENDLESS_TIGHTEN * level);
         const side = made % 2 === 0 ? first : -first;
-        const x = Math.round(centerAt(lastY) + side * (POLE_OFFSET + rnd() * 4));
+        const off = bunched > 0 ? QUICK_OFFSET + rnd() * 2 : POLE_OFFSET + rnd() * 4 + ENDLESS_SWING * level;
+        const x = Math.round(centerAt(lastY) + side * off);
         const p = { y: lastY, x, side, pass: side, red: made > 0 && rnd() < ENDLESS_RED, result: null, fallen: 0 };
         poles.push(p);
         pts.push({ y: p.y, x: p.x + side * LINE_WIDE });
@@ -271,7 +305,7 @@
       while (pts.length > 2 && pts[1].y < at - ENDLESS_BEHIND) pts.shift();
     };
     const lineEnd = endless ? Infinity : poles[POLE_COUNT - 1].y;
-    course = { seed, centerAt, lineAt, poles, finishY, salt, titlePine, endless, lineEnd, extend };
+    course = { seed, centerAt, lineAt, poles, finishY, salt, titlePine, endless, lineEnd, extend, levelAt };
     if (endless) extend(0);
     snowRows.clear();            // cached rows belong to the previous slope
   }
@@ -1390,7 +1424,9 @@
     const y = j * TREE_CELL + 2 + Math.floor(hash(i * 5 + salt, j * 11 + 7) * (TREE_CELL - 4));
     if (course && Math.abs(x - course.titlePine.x) < 10 && Math.abs(y - course.titlePine.y) < 12) return null;
     const depth = snowDepth(x, centerAt(y), y);
-    const pineChance = depth <= 0 ? PINE_CHANCE * PINE_PISTE : PINE_CHANCE;
+    // Endless puts more on the piste the harder it gets.
+    const crowd = course && course.endless ? 1 + 2 * course.levelAt(y) : 1;
+    const pineChance = depth <= 0 ? PINE_CHANCE * PINE_PISTE * crowd : PINE_CHANCE;
     const pine = hash(i * 48271 + salt, j * 13 + 5) < pineChance && pineIsFair(x, y);
     if (pine) {
       // Anywhere at all, so no tree chance to pass.
@@ -1448,7 +1484,8 @@
     const c = centerAt(y);
     const len = 16 + Math.floor(hash(k * 91 + salt, side + 13) * 22);
     let a;
-    if (course && hash(k * 17 + salt, side + 41) < INTRUDE_CHANCE) {
+    const intrude = INTRUDE_CHANCE * (course && course.endless ? 1 + course.levelAt(y) : 1);
+    if (course && hash(k * 17 + salt, side + 41) < intrude) {
       a = Math.round(c + side * (PATH_HW - 4 - hash(k * 23 + salt, side + 3) * (INTRUDE_MAX - 4)));
       // The line runs inside the piste edge, so backing out reaches clear.
       while (!lineIsClear(a, y) && Math.abs(a - c) < PATH_HW + EDGE_WOBBLE) a += side;
@@ -1612,10 +1649,11 @@
     ['..X..', '.X.X.', 'X...X'],
     ['X...X', '.X.X.', '..X..'],
   ];
-  // Facing right: white head and tail, each edged so they show on snow.
+  // A blackbird writ large, with a white head and yellow beak leading
+  // the way. Faces right; flipped when flying left.
   const EAGLE = [
-    ['...XX.......', '..XXX...KK..', '..XXXX.KWWK.', 'WXXXXXXXWWYY', '.KXXXX..KK..'],
-    ['............', '........KK..', '.......KWWK.', 'WXXXXXXXWWYY', '.KXXXX..KK..', '..XXX.......', '...XX.......'],
+    ['X.........X', '.X.......X.', '..X.....X..', '...X...X...', '....XXXWY..', '.......K...'],
+    ['.......K...', '....XXXWY..', '...X...X...', '..X.....X..', '.X.......X.', 'X.........X'],
   ];
   const BIRD_EVERY = [150, 300];       // seconds between sightings...
   const BIRD_EVERY_ENDLESS = [40, 85]; // ...and in Endless
@@ -1649,11 +1687,12 @@
   function drawBirds() {
     const now = performance.now();
     for (const b of birds) {
-      // An eagle mostly glides, with a beat of the wings now and then.
-      const rows = b.eagle ? EAGLE[Math.floor((now + b.phase) / 140) % 9 === 0 ? 1 : 0]
+      // An eagle mostly glides, with a few beats of the wings now and then.
+      const beat = (now + b.phase) % 1800;
+      const rows = b.eagle ? EAGLE[beat < 420 ? Math.floor(beat / 105) % 2 : 0]
         : BIRD[Math.floor((now + b.phase) / 110) % 2];
       const drawn = b.v < 0 ? rows.map(r => r.split('').reverse().join('')) : rows;
-      blit(drawn, Math.round(camX + b.x) - (rows[0].length >> 1), Math.round(b.y), b.eagle ? VIC.red : VIC.black);
+      blit(drawn, Math.round(camX + b.x) - (rows[0].length >> 1), Math.round(b.y), VIC.black);
     }
   }
 
