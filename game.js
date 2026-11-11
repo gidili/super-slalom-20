@@ -2330,9 +2330,10 @@
 
   // The same for what the skier just did: beside the skier, on whichever
   // side has more room and well clear of the poles. It rides along with
-  // the skier for POP_STAY, then floats up the screen, slower than the
-  // slope goes by and only half following, and blinks out at POP_MS.
-  const POP_MS = 1700, POP_STAY = 550, POP_GAP = 18, POP_RISE = 16, POP_FOLLOW = 0.5, POP_BLINK = 350;
+  // the skier for POP_STAY, then is left behind: it drifts up the screen at
+  // POP_DRIFT of the slope's speed, only half following, and blinks out at
+  // POP_MS.
+  const POP_MS = 1700, POP_STAY = 450, POP_GAP = 18, POP_DRIFT = 0.7, POP_FOLLOW = 0.5, POP_BLINK = 350;
   const popEl = document.getElementById('pop');
   let popUntil = 0, popFrom = { x: 0, side: 1 };
   function pop(text) {
@@ -2344,14 +2345,14 @@
   }
   function placePop() {
     const left = Math.max(0, popUntil - performance.now()), age = POP_MS - left;
-    const float = Math.max(0, (age - POP_STAY) / (POP_MS - POP_STAY));
-    if (!float) popFrom.x = skierX - camX;   // still riding along
+    const behind = Math.max(0, age - POP_STAY) / 1000;   // seconds since it let go
+    if (!behind) popFrom.x = skierX - camX;   // still riding along
     const tvW = popEl.parentElement.clientWidth, w = popEl.offsetWidth, scale = tvW / VW;
     const sx = popFrom.x + (skierX - camX - popFrom.x) * POP_FOLLOW;
     const x = (sx + popFrom.side * POP_GAP) * scale;
     popEl.style.left = (popFrom.side > 0 ? Math.min(x, tvW - w - 4) : Math.max(x, w + 4)) + 'px';
     popEl.style.transform = popFrom.side > 0 ? 'none' : 'translateX(-100%)';
-    popEl.style.top = ((SKIER_Y - 4 - POP_RISE * float) / H * 100) + '%';
+    popEl.style.top = ((SKIER_Y - 4 - speed * POP_DRIFT * behind) / H * 100) + '%';
     popEl.style.visibility = left < POP_BLINK && Math.floor(left / 75) % 2 ? 'hidden' : 'visible';
   }
 
