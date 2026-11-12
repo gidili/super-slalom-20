@@ -4551,10 +4551,8 @@
   const boardOf = (endless, god, classic = null) => (endless ? 'endless' : classic ? 'classic:' + classic : 'single') + (god ? ':god' : '');
   const currentBoard = () => boardOf(bestMode() === 'endless', godMode, state === 'title' ? classicPick() : runClassic);
   const runBoard = () => boardOf(course.endless, runGod, runClassic);
-  const BOARD_TITLE = {
-    single: 'SINGLE TOP 10', 'single:god': 'SECRET GOD MODE<br>SINGLE TOP 10',
-    endless: 'ENDLESS TOP 10', 'endless:god': 'SECRET GOD MODE<br>ENDLESS TOP 10',
-  };
+  // What sits above the TOP 10 bar on each board.
+  const BOARD_TITLE = { single: 'SINGLE', endless: 'ENDLESS' };
   const leaderboardCache = {};
   function makesTop10(score, board) {
     const top = leaderboardCache[board];
@@ -4569,15 +4567,23 @@
     if (board !== shownBoard) leaderboardListEl.innerHTML = '';
     shownBoard = board;
     const classic = board.startsWith('classic:') ? mountain(board.split(':')[1]) : null;
-    boardTitleEl.innerHTML = classic
-      ? (board.endsWith(':god') ? 'SECRET GOD MODE<br>' : '') + `SINGLE &middot; ${classic.short || classic.name.split(/ \(| "/)[0]} TOP&nbsp;10<br>`
-      : BOARD_TITLE[board];
+    // The board's name (and flags) on the card's white, then TOP 10
+    // alone in reverse video underneath.
+    const god = board.endsWith(':god');
+    const top = document.createElement('div');
+    top.className = 'board-name';
+    top.innerHTML = (god ? 'SECRET GOD MODE<br>' : '')
+      + (classic ? `SINGLE &middot; ${classic.short || classic.name.split(/ \(| "/)[0]}` : BOARD_TITLE[board.replace(':god', '')]);
     if (classic) {   // every flag the mountain flies, in a row
       const row = document.createElement('div');
       row.className = 'flag-row';
       row.append(...FLAGS_OF[classic.id].map(flagCanvas));
-      boardTitleEl.appendChild(row);
+      top.appendChild(row);
     }
+    const bar = document.createElement('div');
+    bar.className = 'board-bar';
+    bar.textContent = 'TOP 10';
+    boardTitleEl.replaceChildren(top, bar);
     boardTitleEl.classList.toggle('god', board.endsWith(':god'));
     fetchLeaderboard(board);
   }
