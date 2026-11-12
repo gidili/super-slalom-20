@@ -121,6 +121,11 @@
   #champ-list li.total { border-top: 2px solid var(--vic-blue); margin-top: 4px; padding-top: 4px; }
   #champ-prompt { font-size: 8px; opacity: 0.7; }
   #champ-go { line-height: 1.6; }
+  #champ-flags { display: flex; justify-content: center; align-items: flex-end; gap: 10px; margin: -4px 0 12px; }
+  #champ-flags[hidden] { display: none; }
+  #champ-flags .flag { height: 30px; width: auto; image-rendering: pixelated; image-rendering: crisp-edges;
+    outline: 2px solid var(--vic-blue); }
+  #champ-flags .flag.shaped { outline: none; }
   /* Venus, the morning star: a little pixel star that shimmers. */
   #champ-text .venus { display: inline-block; position: relative; width: 2px; height: 2px; margin: 0 8px; vertical-align: middle;
     background: var(--vic-blue); box-shadow: 0 -2px #bfce72, 0 2px #bfce72, -2px 0 #bfce72, 2px 0 #bfce72;
@@ -385,6 +390,7 @@
       <div id="champ" hidden>
         <h2 id="champ-head"></h2>
         <div id="champ-sub"></div>
+        <div id="champ-flags" hidden></div>
         <div class="btn-row" id="champ-pick">
           <button id="champ-prev" type="button" class="secondary">&lt;</button>
           <button id="champ-go" type="button"></button>

@@ -3769,7 +3769,7 @@
       fact: 'Italy\'s steepest piste: 76% at the Grand Muret, right after the start. The women\'s World Cup races here, on north-facing, rock-hard snow. It\'s dangerous for anyone but experts.' },
     { id: 'aoraki', name: 'AORAKI', country: 'NEW ZEALAND', height: '3,724 M', lon: 170.1, seed: 1404,
       unlocks: ['vinson', 'fuji'],
-      fact: 'To Ngai Tahu, Aoraki is an ancestor: he and his brothers were turned to stone on their stranded canoe, which became the South Island. The mountain was returned to Ngai Tahu in 1998, and they gifted it back to the nation. In 1991 a rock avalanche sheared 10 m off its summit, and by 2013 it had shrunk 30 m in all.' },
+      fact: 'To the Ngai Tahu, the Maori iwi of most of the South Island, Aoraki is an ancestor: he and his brothers were turned to stone on their stranded canoe, which became the South Island. The mountain was returned to Ngai Tahu in 1998, and they gifted it back to the nation. In 1991 a rock avalanche sheared 10 m off its summit, and by 2013 it had shrunk 30 m in all.' },
     { id: 'fuji', name: 'FUJI', country: 'JAPAN', height: '3,776 M', lon: 138.7, seed: 1505,
       unlocks: ['annapurna', 'kirinyaga'],
       fact: 'Fuji last erupted in 1707, and its ash fell on Edo, today\'s Tokyo, almost 100 km away. The mountain is sacred: from the 8th station up it belongs to a Shinto shrine, and women weren\'t allowed to climb it until 1872.' },
@@ -3802,6 +3802,105 @@
       fact: 'Named in 1865 after George Everest, a British surveyor who probably never saw it and objected to the honour. Only a handful have ever ridden down this face: in 2001 Marco Siffredi, 22, snowboarded the Norton Couloir from the summit, then vanished trying the Hornbein Couloir a year later. In 2025 Jim Morrison finally skied down that line, as you are about to.' },
   ];
   const CHAMP_COURSES = 10, FINALE = 'chomolungma';
+
+  // ----------------------------------------------------------------- flags
+  // Each mountain's flags, drawn as pixel art. A flag is a size and a
+  // function from a pixel to a colour key (null: see-through).
+  const FC = { r: VIC.crimson, w: VIC.white, b: VIC.blue, c: VIC.cyan, g: VIC.green, y: [236, 200, 60], k: VIC.black, o: VIC.orange };
+  const inCircle = (x, y, cx, cy, r2) => (x - cx) ** 2 + (y - cy) ** 2 <= r2;
+  // The Union Jack in a top-left canton (Australia, New Zealand).
+  const UNION_JACK = ['rwbwrwbwr', 'wrwwrwwrw', 'rrrrrrrrr', 'rrrrrrrrr', 'wrwwrwwrw', 'rwbwrwbwr'];
+  const unionJack = (x, y) => UNION_JACK[y][x];
+  const FLAG_ART = {
+    us: [18, 12, (x, y) => x < 8 && y < 6 ? (x % 2 && y % 2 ? 'w' : 'b') : y % 2 ? 'w' : 'r'],
+    alaska: [18, 12, (x, y) => {   // the Big Dipper and the North Star, gold on blue
+      const stars = ['2,8', '4,10', '6,9', '5,7', '8,6', '10,5', '12,5'];
+      if (stars.includes(x + ',' + y)) return 'y';
+      if ((x === 15 && y >= 1 && y <= 3) || (y === 2 && x >= 14 && x <= 16)) return 'y';
+      return 'b';
+    }],
+    aboriginal: [18, 12, (x, y) => inCircle(x, y, 8.5, 5.5, 10) ? 'y' : y < 6 ? 'k' : 'r'],
+    australia: [18, 12, (x, y) => {
+      if (x < 9 && y < 6) return unionJack(x, y);
+      if ((x === 4 && y >= 8 && y <= 10) || (y === 9 && x >= 3 && x <= 5)) return 'w';   // Commonwealth star
+      return ['13,2', '15,5', '11,5', '13,9', '14,7'].includes(x + ',' + y) ? 'w' : 'b';   // Southern Cross
+    }],
+    nz: [18, 12, (x, y) => {
+      if (x < 9 && y < 6) return unionJack(x, y);
+      // The Southern Cross: four red stars, two pixels square at this size.
+      for (const [sx, sy] of [[13, 1], [16, 5], [10, 5], [13, 9]]) if (x - sx >= 0 && x - sx <= 1 && y - sy >= 0 && y - sy <= 1) return 'r';
+      return 'b';
+    }],
+    maori: [18, 12, (x, y) => {   // Tino Rangatiratanga: black, white, red, and the koru
+      // The koru: a white fern frond curling over, red at its heart,
+      // its stem running into the white band.
+      const K = ['.........', '...www...', '..w...w..', '.w..rr.w.', '.w.r..w..', '.w.r.....'];
+      const ch = (K[y] || '')[x];
+      if (ch === 'w' || ch === 'r') return ch;
+      return y < 5 ? 'k' : y === 5 ? 'w' : 'r';
+    }],
+    italy: [18, 12, x => x < 6 ? 'g' : x < 12 ? 'w' : 'r'],
+    swiss: [12, 12, (x, y) => (x >= 5 && x <= 6 && y >= 2 && y <= 9) || (y >= 5 && y <= 6 && x >= 2 && x <= 9) ? 'w' : 'r'],
+    japan: [18, 12, (x, y) => inCircle(x, y, 8.5, 5.5, 12) ? 'r' : 'w'],
+    penguin: [18, 12, (x, y) => {   // Antarctica has no flag of its own; it gets a penguin
+      const P = ['.kk..', 'kwwko', 'kwwk.', 'kwwk.', '.kk..', 'o..o.'], ch = (P[y - 3] || '')[x - 7];
+      return ch && ch !== '.' ? ch : 'c';
+    }],
+    kenya: [18, 12, (x, y) => {
+      if (((x - 9) / 1.8) ** 2 + ((y - 5.5) / 4.2) ** 2 <= 1) return x === 9 ? (y === 4 || y === 7 ? 'w' : 'k') : 'r';   // the shield
+      return y < 3 ? 'k' : y === 3 || y === 8 ? 'w' : y < 8 ? 'r' : 'g';
+    }],
+    mexico: [18, 12, (x, y) => {
+      const e = { '8,4': 'o', '9,4': 'o', '8,5': 'k', '9,5': 'o', '8,6': 'o', '9,6': 'o', '8,7': 'g', '9,7': 'g' }[x + ',' + y];
+      return e || (x < 6 ? 'g' : x < 12 ? 'w' : 'r');
+    }],
+    tanzania: [18, 12, (x, y) => {
+      const d = y - (11 - x * 0.647);
+      return Math.abs(d) < 1.5 ? 'k' : Math.abs(d) < 2.5 ? 'y' : d < 0 ? 'g' : 'c';
+    }],
+    argentina: [18, 12, (x, y) => (inCircle(x, y, 8.5, 5.5, 2.5) ? 'y' : y < 4 || y >= 8 ? 'c' : 'w')],
+    nepal: [11, 14, (x, y) => {   // the only flag that isn't a rectangle
+      const R = ['b..........', 'bb.........', 'brb........', 'brrb.......', 'brwrb......', 'bwwwrb.....', 'brrrrrb....',
+        'brrrbbbb...', 'brrrrb.....', 'brrrrrb....', 'brrwrrrb...', 'brwwwrrrb..', 'brrwrrrrrb.', 'bbbbbbbbbbb'];
+      const ch = R[y][x];
+      return ch === '.' ? null : ch;
+    }],
+    pakistan: [18, 12, (x, y) => {
+      if (x < 4) return 'w';
+      if (['14,3', '13,4', '14,4', '15,4', '14,5'].includes(x + ',' + y)) return 'w';   // the star
+      return inCircle(x, y, 11, 6, 16) && !inCircle(x, y, 12.5, 5, 11) ? 'w' : 'g';   // the crescent
+    }],
+    tibet: [18, 12, (x, y) => {   // the snow mountain, the sun and its red and blue rays, a gold border
+      if (x === 0 || y === 0 || y === 11) return 'y';
+      if (y >= 8 && Math.abs(x - 9) <= (y - 7) * 2.5) return 'w';
+      if (inCircle(x, y, 9, 6, 4)) return 'y';
+      return Math.floor((Math.atan2(y - 7, x - 9) + Math.PI) / (Math.PI / 6)) % 2 ? 'r' : 'b';
+    }],
+    china: [18, 12, (x, y) => {
+      if ((x === 3 && y >= 2 && y <= 4) || (y === 3 && x >= 2 && x <= 4)) return 'y';
+      return ['6,1', '7,2', '7,4', '6,5'].includes(x + ',' + y) ? 'y' : 'r';
+    }],
+  };
+  const FLAGS_OF = {
+    alyeska: ['us', 'alaska'], kunama: ['australia', 'aboriginal'], pista3: ['italy'], aoraki: ['nz', 'maori'],
+    fuji: ['japan'], cervino: ['swiss', 'italy'], vinson: ['penguin'], kirinyaga: ['kenya'], iztactepetl: ['mexico'],
+    kilimanjaro: ['tanzania'], aconcagua: ['argentina'], annapurna: ['nepal'], k2: ['pakistan'], chomolungma: ['tibet', 'china'],
+  };
+  // A flag as a little canvas, scaled up in pixels.
+  function flagCanvas(id) {
+    const [w, h, px] = FLAG_ART[id], cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    cv.className = 'flag' + (id === 'nepal' ? ' shaped' : '');
+    const fx = cv.getContext('2d'), im = fx.createImageData(w, h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const c = FC[px(x, y)];
+      if (!c) continue;
+      const i = (y * w + x) * 4;
+      im.data[i] = c[0]; im.data[i + 1] = c[1]; im.data[i + 2] = c[2]; im.data[i + 3] = 255;
+    }
+    fx.putImageData(im, 0, 0);
+    return cv;
+  }
   const mountain = id => MOUNTAINS.find(m => m.id === id);
   // Names for tight spots: the pick button and result card, and the
   // course list. Most drop the bracket; the finale keeps its famous name.
@@ -3901,7 +4000,7 @@
   // (the mountain's card), 'run', 'result' (after a course), 'done'.
   let champ = null;
   const champEl = document.getElementById('champ');
-  const champParts = Object.fromEntries(['head', 'sub', 'pick', 'prev', 'go', 'next', 'text', 'list', 'prompt']
+  const champParts = Object.fromEntries(['head', 'sub', 'flags', 'pick', 'prev', 'go', 'next', 'text', 'list', 'prompt']
     .map(k => [k, document.getElementById('champ-' + k)]));
   const cardEl = champEl.parentElement;
   const champUp = () => !!champ && champ.stage !== 'run' && !overlayEl.hidden;
@@ -3944,6 +4043,7 @@
     cardEl.classList.add('champ-mode');
     champEl.hidden = false;
     P.pick.hidden = c.stage !== 'pick';
+    P.flags.hidden = c.stage !== 'intro';
     P.prev.hidden = P.next.hidden = c.stage !== 'pick' || champOptions().length < 2;
     P.list.innerHTML = c.stage === 'intro' ? '' : champListHtml();
     if (c.stage === 'pick') {
@@ -3962,6 +4062,7 @@
       const m = c.current;
       P.head.textContent = `COURSE ${n}: ${m.name}`;
       P.sub.textContent = `${m.country} · ${m.height}`;
+      P.flags.replaceChildren(...FLAGS_OF[m.id].map(flagCanvas));
       P.text.textContent = m.fact.toUpperCase();
       if (m.venus) {   // the morning star, shimmering by the story
         const star = document.createElement('span');
