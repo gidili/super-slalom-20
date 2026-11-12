@@ -604,6 +604,7 @@
   const restartBtnEl = document.getElementById('restart-btn');
   const breakdownEl = document.getElementById('breakdown');
   const runPisteEl = document.getElementById('run-piste');
+  let singleIntro = null;   // the Single mountain whose card is up, before its run
   const submitFormEl = document.getElementById('submit-form');
   const initialsInputEl = document.getElementById('initials-input');
   const submitBtnEl = document.getElementById('submit-btn');
@@ -1672,6 +1673,13 @@
       else if (e.key === 'm' || e.key === 'M') flash(SFX.toggleMute() ? 'SOUND OFF' : 'SOUND ON');
       return;
     }
+    // A Single mountain's card: Space (or R) skis it, Escape goes back.
+    if (introUp()) {
+      if (GO.has(e.key) || e.key === 'r' || e.key === 'R') { e.preventDefault(); introGo(); }
+      else if (e.key === 'Escape') toTitle();
+      else if (e.key === 'm' || e.key === 'M') flash(SFX.toggleMute() ? 'SOUND OFF' : 'SOUND ON');
+      return;
+    }
     if ((state === 'title' || state === 'crashed' || state === 'finished') && !boardView) konami(e.key);
     // With the board up, Space or Escape closes it and R restarts.
     if (boardView) {
@@ -1790,7 +1798,9 @@
     if (!leaderboardCache[currentBoard()]) fetchLeaderboard();
   }
   function startChosen() {
-    if (chosenMode() === 'championship') startChampionship();
+    if (singleIntro) introGo();
+    else if (chosenMode() === 'championship') startChampionship();
+    else if (classicPick()) showSingleIntro(mountain(classicPick()));
     else startRun();
   }
   // The highlighted one starts; any other is highlighted first, so its
@@ -4411,6 +4421,40 @@
   // A tap anywhere on the card moves things on, except on the pick screen,
   // where the name is the button.
   cardEl.addEventListener('click', (e) => { if (champUp() && champ.stage !== 'pick' && !e.target.closest('button')) champGo(); });
+  // Single on a mountain: its Championship card first (name, flags, the
+  // story), then Space or a tap skis it. RUN AGAIN and R skip the card.
+  // (singleIntro, the mountain on the card, is declared up top.)
+  const introUp = () => !!singleIntro && !overlayEl.hidden;
+  function showSingleIntro(m) {
+    const P = champParts;
+    singleIntro = m;
+    titleCardEl.hidden = true;
+    buildCourse(m.seed, false, shapeOf(m));   // its slope, behind the card
+    cardEl.classList.add('champ-mode');
+    champEl.hidden = false;
+    P.pick.hidden = true;
+    P.flags.hidden = false;
+    P.list.innerHTML = '';
+    P.head.textContent = m.name;
+    P.sub.textContent = `${m.country} · ${m.height}`;
+    P.flags.replaceChildren(...FLAGS_OF[m.id].map(flagCanvas));
+    P.text.textContent = m.fact.toUpperCase();
+    if (m.venus) {   // the morning star, shimmering by the story
+      const star = document.createElement('span');
+      star.className = 'venus';
+      P.text.appendChild(star);
+    }
+    P.text.style.textAlign = 'left';
+    P.prompt.textContent = NARROW ? 'TAP TO START' : 'PRESS SPACE TO START';
+    overlayEl.hidden = false;
+    requestAnimationFrame(() => overlayEl.classList.add('visible'));
+  }
+  function introGo() {
+    if (!introUp()) return;
+    startRun();   // hides the card and clears singleIntro
+  }
+  cardEl.addEventListener('click', (e) => { if (introUp() && !e.target.closest('button')) introGo(); });
+
   overlayEl.addEventListener('click', (e) => {
     if (!champUp()) return;
     if (champ.stage === 'fly') { champGo(); return; }   // a tap skips the flight
@@ -4472,6 +4516,7 @@
 
   function hideOverlay() {
     cardClosed = false;
+    singleIntro = null;
     hideChamp();
     newTopEl.hidden = true;
     if (document.activeElement === initialsInputEl) initialsInputEl.blur();
@@ -4700,14 +4745,14 @@
       release('gp');
       if (dir) press('gp', dir);
       if (dir && champUp()) champStep(dir === 'left' ? -1 : 1);
-      else if (dir && state === 'title') chooseMode(modeIndex + (dir === 'left' ? -1 : 1));
+      else if (dir && state === 'title' && !introUp()) chooseMode(modeIndex + (dir === 'left' ? -1 : 1));
       else if (dir && cardUp()) pickCard(cardPick + (dir === 'left' ? -1 : 1));
       gpDir = dir;
     }
     // Up and down on the pad pick Single's course on the title.
     const ay = pad.axes[1] || 0, vdir = pressed(12) || ay < -0.5 ? -1 : pressed(13) || ay > 0.5 ? 1 : 0;
     if (vdir !== gpV) {
-      if (vdir && state === 'title' && !boardView && !splashUp && chosenMode() === 'single') chooseCourse(singleIndex + vdir);
+      if (vdir && state === 'title' && !boardView && !splashUp && !introUp() && chosenMode() === 'single') chooseCourse(singleIndex + vdir);
       gpV = vdir;
     }
 
@@ -4715,6 +4760,9 @@
       if (justPressed(9) || justPressed(0)) dismissSplash();
     } else if (champUp()) {
       if (justPressed(9) || justPressed(0)) champGo();
+      else if (justPressed(1)) toTitle();
+    } else if (introUp()) {
+      if (justPressed(9) || justPressed(0)) introGo();
       else if (justPressed(1)) toTitle();
     } else if (typing) {
       if (justPressed(0)) submitFormEl.requestSubmit();
