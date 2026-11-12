@@ -31,6 +31,7 @@
     paleBlue: [184, 184, 255], // the steep-face tint only
     pink: [226, 150, 190],     // the VIC-20's pink, for cherry blossom
     netOrange: [236, 132, 48], // the VIC-20's light orange, for safety nets
+    crimson: [214, 40, 56],    // rātā flowers
   };
   const css = c => `rgb(${c[0]},${c[1]},${c[2]})`;
 
@@ -234,6 +235,7 @@
     heli: false,               // dropped off by helicopter at the start
     moths: false,              // Bogong moth swarms fluttering past
     cherry: 0,                 // share of trees that are cherries in bloom, or [[t, share], ...]
+    rata: 0,                   // share of trees that are southern rātā in flower, in clumps
     twist: 1,                  // how far the piste wanders
     sway: 1,                   // ...and how often: under 1 is longer, lazier bends
     crowd: 1,                  // trees and pineapples on the piste, times Single's
@@ -1815,7 +1817,10 @@
     // join up as the course's share of them rises.
     const cherry = !pine && !rock && course && course.cherryAt &&
       noise2(i / 3 + (salt % 89), j / 3 + 17) < course.cherryAt(y) * 1.1;
-    return { i, j, x, y, pine, rock, cherry };
+    // Rātā grow in clumps too: smaller patches of their own noise.
+    const rata = !pine && !rock && !cherry && course && course.shape && course.shape.rata > 0 &&
+      noise2(i / 2 + 300 + (salt % 61), j / 2 + 41) < course.shape.rata;
+    return { i, j, x, y, pine, rock, cherry, rata };
   }
 
   // True if something deadly at (x, y) leaves the racing line and the
@@ -2523,7 +2528,21 @@
     '....O....',
   ];
 
-  const INKS = { P: VIC.pink, O: VIC.orange, G: VIC.green, Y: VIC.yellow, R: VIC.red,
+  // A southern rātā in flower: a broad crimson crown with dark leaves
+  // showing through, on a trunk. Same footprint as a pine.
+  const RATA = [
+    '..QQGQQ..',
+    '.QQQQQGQ.',
+    'QGQQQQQQQ',
+    'QQQQGQQQQ',
+    'QQQQQQQGQ',
+    '.QGQQQQQ.',
+    '..QQQGQ..',
+    '....O....',
+    '....O....',
+  ];
+
+  const INKS = { Q: VIC.crimson, P: VIC.pink, O: VIC.orange, G: VIC.green, Y: VIC.yellow, R: VIC.red,
     B: VIC.lightBlue, C: VIC.cyan, V: VIC.blue, K: VIC.black, W: VIC.white };
 
   // The on-screen arrows, in the same blocky pixels as everything else.
@@ -2795,7 +2814,7 @@
       return;
     }
     const age = performance.now() - sc.at, frame = Math.floor(performance.now() / 90);
-    const colors = fireColors(sc.god), shape = tr.cherry ? CHERRY : TREE;
+    const colors = fireColors(sc.god), shape = tr.cherry ? CHERRY : tr.rata ? RATA : TREE;
     for (let r = 0; r < shape.length; r++) {
       for (let c = 0; c < shape[r].length; c++) {
         if (shape[r][c] === '.') continue;
@@ -2954,6 +2973,7 @@
         else if (exploded.has(i + ',' + j)) continue;
         else if (tr.rock) { const r = ROCKS[tr.rock - 1]; blit(r, tr.x - 4, tr.y - camY - r.length + 1); }
         else if (tr.cherry) blit(CHERRY, tr.x - 4, tr.y - camY - 8);
+        else if (tr.rata) blit(RATA, tr.x - 4, tr.y - camY - 8);
         else if (!tr.pine) blit(TREE, tr.x - 4, tr.y - camY - 8, VIC.green);
         else blit(PINEAPPLE, tr.x - 2, tr.y - camY - 6);
       }
@@ -3225,7 +3245,8 @@
     // In 1991 a rock avalanche sheared 10 m off the summit: a stretch of
     // boulders strewn across the piste high up, and rocks among the trees
     // all the way down.
-    aoraki: { rocks: 0.3, debris: [[0, 0], [0.1, 0], [0.13, 0.1], [0.3, 0.1], [0.34, 0]],
+    // Below it, clumps of southern rātā flowering crimson.
+    aoraki: { rocks: 0.3, rata: 0.4, debris: [[0, 0], [0.1, 0], [0.13, 0.1], [0.3, 0.1], [0.34, 0]],
       signs: [{ t: 0.1, lines: ['ROCKFALL'] }] },
     // Even as a metronome: same gap, same swing, no bunching.
     // ...and cherry trees in bloom down the lower half.
