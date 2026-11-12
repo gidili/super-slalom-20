@@ -1679,10 +1679,12 @@
       else if (e.key === 'm' || e.key === 'M') flash(SFX.toggleMute() ? 'SOUND OFF' : 'SOUND ON');
       return;
     }
-    // Up and down pick Single's course.
-    if (state === 'title' && chosenMode() === 'single' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    // Up and down (or W and S) pick Single's course. The Konami code's
+    // W W S S ends where it began, like its A D A D on the modes.
+    const vKey = e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' ? -1 : e.key === 'ArrowDown' || e.key === 's' || e.key === 'S' ? 1 : 0;
+    if (state === 'title' && !boardView && chosenMode() === 'single' && vKey) {
       e.preventDefault();
-      chooseCourse(singleIndex + (e.key === 'ArrowUp' ? -1 : 1));
+      if (!e.repeat) chooseCourse(singleIndex + vKey);
       return;
     }
     const titleDir = SHIFTS[e.code] || (LEFT.has(e.key) ? 'left' : RIGHT.has(e.key) ? 'right' : null);
