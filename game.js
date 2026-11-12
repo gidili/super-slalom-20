@@ -252,6 +252,8 @@
     icy: false,                // an ice field: blocks of ice for trees, glinting cyan edges...
     crevasses: false,          // ...and crevasses where fences would be
     wind: false,               // katabatic gusts that push you sideways
+    avalanche: null,           // { from, to }: an avalanche chases you from pole `from` to pole `to`
+    pines: 1,                  // pineapples, times Single's
     twist: 1,                  // how far the piste wanders
     sway: 1,                   // ...and how often: under 1 is longer, lazier bends
     crowd: 1,                  // trees and pineapples on the piste, times Single's
@@ -635,6 +637,7 @@
   let heli = null;             // the helicopter that drops you off, if there is one
   let crossed = 0;             // borders crossed so far this run
   let fellIn = false;          // swallowed by a crevasse: no skier left to draw
+  let slide = null;            // an avalanche on the way down, if there is one
   // Championship courses are fixed, so where the animals turn up is
   // shuffled per run instead; Single's come from its seed as ever.
   let animalSalt = 0;
@@ -729,6 +732,22 @@
       hiss.g.gain.setTargetAtTime(0.22 * level, t, 0.15);
       hiss.f.frequency.setTargetAtTime(500 + 1400 * level, t, 0.15);
       if (level <= 0) { const h = hiss; h.src.stop(t + 0.8); hiss = null; }
+    }
+
+    // An avalanche: a deep rumble that swells to a roar.
+    let roar = null;
+    function updateAvalanche(level) {
+      if (!ac) return;
+      const t = ac.currentTime;
+      if (level > 0 && !roar) {
+        roar = noiseThrough('lowpass', 140, 1.4, t);
+        roar.src.loop = true;
+        roar.g.gain.value = 0;
+      }
+      if (!roar) return;
+      roar.g.gain.setTargetAtTime(0.55 * level, t, 0.2);
+      roar.f.frequency.setTargetAtTime(110 + 380 * level, t, 0.2);
+      if (level <= 0) { const r = roar; r.src.stop(t + 1.2); roar = null; }
     }
 
     // Into a crevasse: a long falling whistle, then a faint, far-off thump.
@@ -1070,7 +1089,7 @@
     // must never be able to stop a run, so every entry point swallows it.
     const safe = f => (...a) => { try { return f(...a); } catch (_) { return undefined; } };
     return {
-      unlock: safe(unlock), playFall: safe(playFall), updateWind: safe(updateWind), playScrape: safe(playScrape), playBark: safe(playBark), updateSluff: safe(updateSluff), updateHeli: safe(updateHeli), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
+      unlock: safe(unlock), updateAvalanche: safe(updateAvalanche), playFall: safe(playFall), updateWind: safe(updateWind), playScrape: safe(playScrape), playBark: safe(playBark), updateSluff: safe(updateSluff), updateHeli: safe(updateHeli), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
       stopSwoosh: safe(stopSwoosh), playDash: safe(playDash), playBreak: safe(playBreak),
       playExplosion: safe(playExplosion), playFanfare: safe(playFanfare), toggleMute: safe(toggleMute),
       playCoin: safe(playCoin), playCount: safe(playCount), playTick: safe(playTick), playDing: safe(playDing), playNoBonus: safe(playNoBonus),
@@ -1214,7 +1233,7 @@
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     held = []; tapLeft = 0;
-    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null; crossed = 0; pan = 0; wind = null; gustLines = []; fellIn = false;
+    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null; crossed = 0; pan = 0; wind = null; gustLines = []; fellIn = false; slide = null;
     animalSalt = champ ? Math.floor(Math.random() * 999983) : 0;
     animals = []; animalSlot = Math.ceil(START_PAD / ANIMAL_SLOT);
     birds = []; birdIn = between(course.endless ? BIRD_EVERY_ENDLESS : BIRD_EVERY);
@@ -1310,7 +1329,7 @@
     state = 'crashed';
     mode = 'crash';
     runEnd = performance.now();
-    hitWhat = hit.crevasse ? 'CREVASSE' : hit.ice ? 'ICE' : hit.pen ? 'PENITENTES' : hit.sluff ? 'SLUFF' : hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.net ? 'NETS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
+    hitWhat = hit.avalanche ? 'AVALANCHE' : hit.crevasse ? 'CREVASSE' : hit.ice ? 'ICE' : hit.pen ? 'PENITENTES' : hit.sluff ? 'SLUFF' : hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.net ? 'NETS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
     SFX.stopSwoosh();
     if (hit.crevasse) {   // gone: a puff of snow and a long fall
       fellIn = true;
@@ -1791,6 +1810,7 @@
 
     if (onFire()) scorchPassed();
     if (course.couloir && moveSluff(dt)) { crash({ sluff: true }); return; }
+    if (course.shape.avalanche && moveAvalanche(dt)) { crash({ avalanche: true }); return; }
     if (crossed < course.borders.length && skierY >= course.borders[crossed]) { crossed++; flash(course.shape.welcome, 1800); }
     if (skierY >= course.finishY) finish();
   }
@@ -1867,6 +1887,33 @@
     sluff.y += sluff.v * dt;
     return !runGod && sluff.y >= skierY - 2;
   }
+
+  // The avalanche: as you pass pole `from` the mountain starts to rumble;
+  // a second later a wall of snow comes over the top of the screen, right
+  // across the slope, and holds on your tail like the sluff. Keep your
+  // speed. Past pole `to` it spreads out and stops.
+  const SLIDE_RUMBLE = 1.1, SLIDE_HOLD = 34, SLIDE_V = 64, SLIDE_STOP = 90;
+  function moveAvalanche(dt) {
+    const av = course.shape.avalanche, poles = course.poles;
+    if (!slide) {
+      if (skierY < poles[av.from].y) return false;
+      slide = { rumble: SLIDE_RUMBLE, y: null, v: 0, end: poles[Math.min(av.to, poles.length - 1)].y };
+    }
+    if (slide.rumble > 0) {
+      slide.rumble -= dt;
+      if (slide.rumble <= 0) { slide.y = cameraTop() - 6; slide.v = speed; }
+      return false;
+    }
+    if (slide.v <= 0) return false;
+    if (slide.y < slide.end) slide.v = Math.max(SLIDE_V, Math.min(280, speed + 3 * (skierY - slide.y - SLIDE_HOLD)));
+    else slide.v = Math.max(0, slide.v - SLIDE_STOP * dt);
+    slide.y += slide.v * dt;
+    return !runGod && slide.y >= skierY - 2;
+  }
+  // How loud and shaky it is, 0..1.
+  const slideLevel = () => !slide || state !== 'running' ? 0
+    : slide.rumble > 0 ? 0.3 + 0.5 * (1 - slide.rumble / SLIDE_RUMBLE)
+    : slide.v > 0 ? Math.max(0.5, Math.min(1, 1 - (skierY - slide.y - SLIDE_HOLD) / 80)) : 0;
 
   // On fire, a tree the skis have just gone past close by catches too.
   // Only once it's behind the skier, so it can't steal a hit. Scenery only.
@@ -1951,7 +1998,8 @@
     const depth = snowDepth(x, centerAt(y), y);
     // Endless puts more on the piste the harder it gets.
     const crowd = !course ? 1 : course.endless ? 1 + 2 * course.levelAt(y) : course.shape.crowd;
-    const pineChance = depth <= 0 ? PINE_CHANCE * PINE_PISTE * crowd : PINE_CHANCE;
+    const morePines = course && course.shape ? course.shape.pines : 1;
+    const pineChance = (depth <= 0 ? PINE_CHANCE * PINE_PISTE * crowd : PINE_CHANCE) * morePines;
     const pine = hash(i * 48271 + salt, j * 13 + 5) < pineChance && pineIsFair(x, y);
     let debris = 0;
     if (pine) {
@@ -2669,6 +2717,30 @@
   const heliLevel = () => !heli || state === 'paused' || state === 'title' ? 0
     : !heli.leftAt ? 1 : Math.max(0, 1 - (performance.now() - heli.leftAt) / 1800);
 
+  // The avalanche: churning snow from the top of the screen down to a
+  // ragged front, a powder cloud dithered over it, big lumps tumbling
+  // ahead. Once it stops, a still field of debris.
+  function drawAvalanche(camY) {
+    const now = performance.now(), live = slide.v > 0, tick = live ? Math.floor(now / 70) : 0;
+    const bottom = Math.min(H - 1, Math.ceil(slide.y) + 3 - camY);
+    for (let sy = 0; sy <= bottom; sy++) {
+      const wy = camY + sy;
+      for (let x = -MARGIN; x < W + MARGIN; x++) {
+        const front = slide.y - 4 * noise2(x / 6, tick / 3) - 2 * noise2(x / 2, tick);
+        if (wy > front) continue;
+        const h = hash(x * 7 + 3, wy + tick * 17), deep = front - wy;
+        put(x, sy, deep < 2 ? VIC.lightBlue : h < 0.22 ? VIC.lightBlue : h < 0.4 ? VIC.paleBlue : h < 0.46 && live ? VIC.cyan : VIC.white);
+      }
+    }
+    if (!live) return;
+    // Lumps rolling out ahead of the front.
+    for (let k = 0; k < 9; k++) {
+      const lx = Math.round(-MARGIN + hash(k + 3, Math.floor(now / 140)) * (W + 2 * MARGIN));
+      const ly = Math.round(slide.y + 2 + 5 * hash(k, Math.floor(now / 90))) - camY;
+      for (const [dx, dy, c] of [[0, 0, VIC.white], [1, 0, VIC.lightBlue], [-1, 0, VIC.white], [0, 1, VIC.lightBlue], [0, -1, VIC.white], [1, 1, VIC.blue]]) put(lx + dx, ly + dy, c);
+    }
+  }
+
   // The sluff: a churning white tongue filling the gully behind you, light
   // blue swirling through it, a ragged front with lumps tumbling ahead.
   // Once it stops it lies still.
@@ -3314,7 +3386,9 @@
   }
 
   function render() {
-    const camY = cameraTop();
+    // An avalanche shakes the whole mountain.
+    const shake = slideLevel() > 0 ? Math.round((Math.random() - 0.5) * 2.4 * slideLevel()) : 0;
+    const camY = cameraTop() + shake;
     camX = cameraLeft(camY);
     const centerAt = course ? course.centerAt : titleCenter;
 
@@ -3402,6 +3476,7 @@
           }
         }
       }
+      if (slide && slide.y !== null) drawAvalanche(camY);   // over the poles it buries
       if (state !== 'title') {
         drawAnimals(camY);
         const s = SPRITES[mode] || SPRITES.down;
@@ -3654,7 +3729,8 @@
     // A high, dry desert mountain: penitentes in fields, boulders and
     // tussock grass, no trees.
     aconcagua: { penitentes: 0.6, rocks: 1, forest: 0.4, tussock: true, dogs: 0.06 },
-    annapurna: { wildlife: { odds: 0.016, kinds: { leopard: 1 } } },
+    // Long the deadliest 8,000er, mostly to avalanches; and "full of food".
+    annapurna: { wildlife: { odds: 0.016, kinds: { leopard: 1 } }, avalanche: { from: 9, to: 17 }, pines: 1.6 },
     // The Savage Mountain: the most technical slalom of all.
     k2: { wildlife: { odds: 0.016, kinds: { leopard: 1 } }, quick: 3, offset: 15, offsetLast: 15, gapLast: 54 },
     // The Hornbein Couloir first: steep, narrow, zigzagging between rock
@@ -3846,7 +3922,7 @@
     if (finished) paintCardStars(stars());
     // What happened on the run, never how it was scored: the arithmetic
     // stays in the server's check, not on screen as a recipe.
-    breakdownEl.textContent = finished ? `TIME ${fmt(runCs())}` : ranOut ? 'OUT OF MISSES' : hitWhat === 'SLUFF' ? 'CAUGHT BY THE SLUFF' : `INTO THE ${hitWhat}`;
+    breakdownEl.textContent = finished ? `TIME ${fmt(runCs())}` : ranOut ? 'OUT OF MISSES' : hitWhat === 'SLUFF' ? 'CAUGHT BY THE SLUFF' : hitWhat === 'AVALANCHE' ? 'CAUGHT BY THE AVALANCHE' : `INTO THE ${hitWhat}`;
     breakdownEl.hidden = false;
     lastSubmittedId = null;
     submitStatusEl.classList.remove('error');
@@ -4138,6 +4214,7 @@
     if (state === 'running' && onFire()) spawnEmbers();
     SFX.updateHeli(heliLevel());
     SFX.updateWind(windLevel());
+    SFX.updateAvalanche(slideLevel());
     SFX.updateSluff(state === 'running' && sluff && sluff.v > 0 ? Math.max(0.15, Math.min(1, 1 - (skierY - sluff.y) / 120)) : 0);
     if (state === 'running') {
       SFX.updateSwoosh(speed / DOWN_SPEED, snowDepth(skierX, course.centerAt(skierY), skierY), heading !== 'down');
