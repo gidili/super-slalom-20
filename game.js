@@ -245,6 +245,10 @@
     groundsels: false,         // giant groundsels instead of pines
     darkRock: false,           // bare rock is dark blue-black, not brown
     dawn: false,               // first light: warm snow, long shadows
+    penitentes: 0,             // fields of snow blades, on the piste too: how much ground they cover (0..1)
+    tussock: false,            // yellow tussock grass off the piste
+    dogs: 0,                   // stray dogs: chance per slot and side that one's about
+    wildlife: null,            // this mountain's own animals: { odds, kinds: { kind: weight } }
     twist: 1,                  // how far the piste wanders
     sway: 1,                   // ...and how often: under 1 is longer, lazier bends
     crowd: 1,                  // trees and pineapples on the piste, times Single's
@@ -411,6 +415,9 @@
     const lineEnd = endless ? Infinity : poles[poles.length - 1].y;
     const baseWidth = alongCourse(S.width, finishY), baseSlope = alongCourse(S.slope, finishY);
     const cherryAt = alongCourse(S.cherry, finishY), debrisAt = alongCourse(S.debris, finishY);
+    // Penitentes grow in fields: patches of smooth noise, below the start.
+    const penField = !S.penitentes ? () => false
+      : (x, y) => y > START_PAD + 40 && noise2(x / 18 + 7, y / 18 + (salt % 37)) < 0.1 + 0.5 * S.penitentes;
     // Scree: patches of smooth noise where the snow has gone, all over the
     // slope. Ice cliffs: a band at each side, high up only.
     const screeAmt = alongCourse(S.scree, finishY), band = S.snowBand ? alongCourse(S.snowBand, finishY) : null;
@@ -529,7 +536,7 @@
       liftX = sum / n > W / 2 ? 18 : W - 18;
     }
     course = { seed, centerAt, lineAt, poles, finishY, salt, nets, liftX, titlePine, endless, lineEnd, extend, levelAt, widthAt, slopeAt, lips, borders, signs, arena, wall, rockDepth, inCouloir, camp, fans, fanZone,
-      couloir: K ? { c0, c1, c2 } : null, cherryAt, debrisAt, screeAt, iceAt, iceDepth, shape: S };
+      couloir: K ? { c0, c1, c2 } : null, cherryAt, debrisAt, screeAt, iceAt, iceDepth, penField, shape: S };
     if (endless) extend(0);
     snowRows.clear();            // cached rows belong to the previous slope
   }
@@ -624,6 +631,9 @@
   let sluff = null;            // the loose snow pouring down a couloir behind you
   let heli = null;             // the helicopter that drops you off, if there is one
   let crossed = 0;             // borders crossed so far this run
+  // Championship courses are fixed, so where the animals turn up is
+  // shuffled per run instead; Single's come from its seed as ever.
+  let animalSalt = 0;
   let exploded = new Set();    // pineapples already blown up, by cell
   // Trees and fences set alight on fire, by the same keys, each with when
   // and in which fire's colours. A tree hit is a stump; a tree passed burns
@@ -715,6 +725,22 @@
       hiss.g.gain.setTargetAtTime(0.22 * level, t, 0.15);
       hiss.f.frequency.setTargetAtTime(500 + 1400 * level, t, 0.15);
       if (level <= 0) { const h = hiss; h.src.stop(t + 0.8); hiss = null; }
+    }
+
+    // A dog's bark: two quick, rough yaps.
+    function playBark() {
+      if (!ac) return;
+      const t = ac.currentTime;
+      [0, 0.16].forEach(d => {
+        const o = ac.createOscillator(), g = ac.createGain();
+        o.type = 'square';
+        o.frequency.setValueAtTime(420, t + d);
+        o.frequency.exponentialRampToValueAtTime(240, t + d + 0.09);
+        g.gain.setValueAtTime(0.0001, t + d);
+        g.gain.exponentialRampToValueAtTime(0.12, t + d + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.1);
+        o.connect(g); g.connect(master); o.start(t + d); o.stop(t + d + 0.11);
+      });
     }
 
     // Skis on bare rock: a short, harsh scrape of high noise.
@@ -1005,7 +1031,7 @@
     // must never be able to stop a run, so every entry point swallows it.
     const safe = f => (...a) => { try { return f(...a); } catch (_) { return undefined; } };
     return {
-      unlock: safe(unlock), playScrape: safe(playScrape), updateSluff: safe(updateSluff), updateHeli: safe(updateHeli), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
+      unlock: safe(unlock), playScrape: safe(playScrape), playBark: safe(playBark), updateSluff: safe(updateSluff), updateHeli: safe(updateHeli), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
       stopSwoosh: safe(stopSwoosh), playDash: safe(playDash), playBreak: safe(playBreak),
       playExplosion: safe(playExplosion), playFanfare: safe(playFanfare), toggleMute: safe(toggleMute),
       playCoin: safe(playCoin), playCount: safe(playCount), playTick: safe(playTick), playDing: safe(playDing), playNoBonus: safe(playNoBonus),
@@ -1150,6 +1176,7 @@
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     held = []; tapLeft = 0;
     hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null; crossed = 0; pan = 0;
+    animalSalt = champ ? Math.floor(Math.random() * 999983) : 0;
     animals = []; animalSlot = Math.ceil(START_PAD / ANIMAL_SLOT);
     birds = []; birdIn = between(course.endless ? BIRD_EVERY_ENDLESS : BIRD_EVERY);
     moths = []; mothIn = 2; petals = [];
@@ -1244,7 +1271,7 @@
     state = 'crashed';
     mode = 'crash';
     runEnd = performance.now();
-    hitWhat = hit.sluff ? 'SLUFF' : hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.net ? 'NETS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
+    hitWhat = hit.pen ? 'PENITENTES' : hit.sluff ? 'SLUFF' : hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.net ? 'NETS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
     SFX.stopSwoosh();
     if (hit.pine) SFX.playExplosion(); else SFX.playBreak();
     if (hit.pine) {
@@ -1260,11 +1287,9 @@
   // On fire: whatever was hit goes up like a pineapple, for points.
   // A pineapple just explodes; a tree or a fence explodes in flames.
   function burn(hit) {
-    if (hit.animal) {   // worth nothing; it just goes up
-      animals.splice(animals.indexOf(hit.a), 1);
-      const fire = fireColors(runGod);
-      SFX.playExplosion();
-      spawnExplosion(hit.x, hit.y - 3, [...fire, ...fire, ANIMALS[hit.kind].ink]);
+    if (hit.animal) {   // no exploding animals: it yelps and bolts
+      dogLeaves(hit.a);
+      if (hit.kind === 'bear' || hit.kind === 'leopard') SFX.playGrowl(); else SFX.playBark();
       return;
     }
     // A tent goes up like a fence (its people are all outside).
@@ -1272,7 +1297,7 @@
     const key = hit.tent ? 'tent' + hit.n : hit.net ? 'e' + hit.k : hit.fence ? `f${hit.k},${hit.side}` : hit.i + ',' + hit.j;
     exploded.add(key);
     const fire = fireColors(runGod);
-    if (kind === 'tree' && !hit.rock) scorched.set(key, { at: performance.now(), god: runGod, hit: true });
+    if (kind === 'tree' && !hit.rock && !hit.pen) scorched.set(key, { at: performance.now(), god: runGod, hit: true });
     if (hit.tent) scorched.set(key, { at: performance.now(), god: runGod });
     else if (hit.net) {   // torn open where you went through
       const y = Math.round(hit.y);
@@ -1283,13 +1308,13 @@
     }
     burned[kind]++;
     SFX.playExplosion();
-    spawnExplosion(hit.x, hit.y - 4, hit.rock ? ROCK_PIECES : hit.tent ? [...fire, ...fire, VIC.orange, VIC.yellow] : kind === 'tree' ? [...fire, ...fire, ...TREE_PIECES]
+    spawnExplosion(hit.x, hit.y - 4, hit.pen ? PEN_PIECES : hit.rock ? ROCK_PIECES : hit.tent ? [...fire, ...fire, VIC.orange, VIC.yellow] : kind === 'tree' ? [...fire, ...fire, ...TREE_PIECES]
       : kind === 'fence' ? [...fire, ...fire, ...FENCE_PIECES] : PIECE_COLORS);
     // A pineapple smashed on fire takes back a miss, or banks one: Endless
     // can go above 4 LEFT, Single below 0 misses, which takes time off.
     const forgive = kind === 'pine';
     if (forgive) { missed--; forgiven++; SFX.playForgiven(); }
-    pop(`${hit.rock ? 'ROCK' : hit.tent ? 'TENT' : hit.net ? 'NET' : { pine: 'PINEAPPLE', tree: 'TREE', fence: 'FENCE' }[kind]} +${BURN_POINTS[kind]}${forgive ? '  MISS FORGIVEN' : ''}`);
+    pop(`${hit.pen ? 'PENITENTE' : hit.rock ? 'ROCK' : hit.tent ? 'TENT' : hit.net ? 'NET' : { pine: 'PINEAPPLE', tree: 'TREE', fence: 'FENCE' }[kind]} +${BURN_POINTS[kind]}${forgive ? '  MISS FORGIVEN' : ''}`);
     paintHud();
   }
 
@@ -1770,7 +1795,7 @@
         const key = i + ',' + j;
         if (scorched.has(key) || exploded.has(key)) continue;
         const tr = treeAt(i, j, salt, centerAt);
-        if (!tr || tr.pine || tr.rock) continue;
+        if (!tr || tr.pine || tr.rock || tr.pen) continue;
         if (Math.abs(skierX - tr.x) <= SCORCH_REACH && skierY > tr.y + 2 && skierY <= tr.y + 10) {
           scorched.set(key, { at: performance.now(), god: runGod, hit: false });
         }
@@ -1850,10 +1875,11 @@
       // The odd tree on the piste itself, never on the racing line.
       const more = course && !course.endless ? course.shape.crowd : 1;
       // A rockfall leaves boulders all over the piste, though never on the line.
-      debris = course && course.debrisAt ? course.debrisAt(y) : 0;
+      debris = (course && course.debrisAt ? course.debrisAt(y) : 0) + (course && course.penField && course.penField(x, y) ? 0.3 : 0);
       if (hash(i * 92821 + salt, j) >= PISTE_TREE * more + debris || !lineIsClear(x, y)) return null;
     } else {
-      const chance = (TREE_EDGE + (TREE_MAX - TREE_EDGE) * depth) * (course && course.shape ? course.shape.forest : 1);
+      let chance = (TREE_EDGE + (TREE_MAX - TREE_EDGE) * depth) * (course && course.shape ? course.shape.forest : 1);
+      if (course && course.penField && course.penField(x, y)) chance = Math.max(chance, 0.6);   // a field is packed
       if (hash(i * 92821 + salt, j) >= chance) return null;
     }
     if (!pine && course && course.iceAt && course.iceAt(x, y)) return null;
@@ -1864,7 +1890,9 @@
       if (f && Math.abs(y - f.y) <= 10 && x >= f.x0 - 5 && x <= f.x1 + 5) return null;
     }
     // Some mountains swap trees for boulders: one of three shapes.
-    const rock = !pine && course && course.shape && (debris > 0 || hash(i * 3571 + salt, j * 7 + 2) < course.shape.rocks)
+    // In a penitente field, whatever stands there is a cluster of blades.
+    const pen = !pine && !!(course && course.penField && course.penField(x, y));
+    const rock = !pine && !pen && course && course.shape && (debris > 0 || hash(i * 3571 + salt, j * 7 + 2) < course.shape.rocks)
       ? 1 + Math.floor(hash(i * 911 + salt, j * 5 + 3) * ROCKS.length) : 0;
     // Cherries grow in groves: patches of smooth noise, which spread and
     // join up as the course's share of them rises.
@@ -1875,7 +1903,7 @@
       noise2(i / 2 + 300 + (salt % 61), j / 2 + 41) < course.shape.rata;
     const bush = !pine && !rock && !cherry && !rata && !!(course && course.shape && course.shape.bushes);
     const groundsel = !pine && !rock && !cherry && !rata && !!(course && course.shape && course.shape.groundsels);
-    return { i, j, x, y, pine, rock, cherry, rata, bush, groundsel };
+    return { i, j, x, y, pine, rock, cherry, rata, bush: bush && !pen, groundsel: groundsel && !pen, pen };
   }
 
   // True if something deadly at (x, y) leaves the racing line and the
@@ -1960,6 +1988,26 @@
       walk: [['............', '..XXXXX..XX.', '.XXXXXXXXXXX', 'XXXXXXXXXXXK', 'XXXXXXXXXX..', '.XX..XX.XX..', 'XX....XX.XX.'],
              ['............', '..XXXXX..XX.', '.XXXXXXXXXXX', 'XXXXXXXXXXXK', 'XXXXXXXXXX..', '..XX.XX..XX.', '.XX.XX..XX..']] },
   };
+  // Stray dogs (Aconcagua): they run out and trot along beside you for a
+  // while, then wander off. Friendly, but solid.
+  ANIMALS.dog = { ink: VIC.black, reach: 4, tall: 5, odds: 0.85, radius: 55, patience: 5, bonus: 0,
+    stand: ['X......XX', 'X.....XXK', '.XXXXXXX.', '.XXXXXX..', '.X.X.X.X.'],
+    walk: [['X.......X', 'X.....XXX', '.XXXXXXXK', '.XXXXXX..', 'X..X.X..X'],
+           ['X.......X', 'X.....XXX', '.XXXXXXXK', '.XXXXXX..', '.XX...XX.']] };
+  const DOG_INKS = [VIC.black, VIC.black, VIC.orange, VIC.red];
+  ANIMALS.dog.escort = true;
+  // Kea (Aoraki): the cheeky alpine parrot, green with an orange flash
+  // under the wings. Like a dog, it tags along for a bit.
+  // It flies, so it's never in the way.
+  ANIMALS.kea = { ink: VIC.green, reach: 3, tall: 4, odds: 0.85, radius: 50, patience: 4, bonus: 0, escort: true, flies: true,
+    stand: ['..XXK', '.XXX.', 'XXXX.', '.O.O.'],
+    walk: [['O.XXK', '.XXXO', 'XXXX.', '.O.O.'], ['..XXK', 'OXXX.', 'XXXXO', '.O.O.']] };
+  // Snow leopards (the Himalaya and Karakoram): pale, spotted, very shy.
+  // They watch; they never chase.
+  ANIMALS.leopard = { ink: VIC.lightBlue, reach: 5, tall: 5, odds: 0, radius: 46, patience: 0, bonus: 0,
+    stand: ['.........XX', 'X......XXXK', 'XXXKXXKXXX.', '.XKXXXXKX..', '.X.X...X.X.'],
+    walk: [['...........', 'X.......XXX', 'XXXKXXKXXXK', '.XKXXXXKX..', 'X..X.X..X..'],
+           ['...........', 'X.......XXX', 'XXXKXXKXXXK', '.XKXXXXKX..', '.XX...XX...']] };
   const ANIMAL_SLOT = 70;           // at most one per side per this many rows
   const ANIMAL_ODDS = 0.005;        // chance per slot and side, extremely rare...
   const ANIMAL_ODDS_ENDLESS = 0.024; // ...and more often here
@@ -1972,16 +2020,24 @@
   // Who's in slot k on this side, if anyone. Never within wandering reach
   // of the racing line.
   function animalAt(k, side) {
-    const { salt, centerAt, endless } = course;
-    if (hash(k * 719 + salt, side + 83) >= (endless ? ANIMAL_ODDS_ENDLESS : ANIMAL_ODDS)) return null;
+    const { centerAt, endless } = course, salt = course.salt + animalSalt;
+    const dogs = course.shape.dogs, wild = course.shape.wildlife;
+    if (hash(k * 719 + salt, side + 83) >= (dogs || (wild && wild.odds) || (endless ? ANIMAL_ODDS_ENDLESS : ANIMAL_ODDS))) return null;
     const y = k * ANIMAL_SLOT + Math.floor(hash(k * 41 + salt, side + 7) * (ANIMAL_SLOT - 20));
     const x = Math.round(centerAt(y) + side * (pisteHW(y) + 6 + hash(k * 59 + salt, side + 19) * 14));
     if (x < 10 || x > W - 10 || y > course.finishY - 40) return null;
     if (course.inCouloir && course.inCouloir(y + 20)) return null;
     if (Math.abs(x - course.lineAt(y)) < CLEAR_LINE + ANIMAL_ROAM) return null;
     const roll = hash(k * 137 + salt, side + 53);
-    return { kind: roll < 0.67 ? 'fox' : roll < 0.92 ? 'wolf' : 'bear', x, y, homeX: x, homeY: y,
-      mode: 'pause', t: Math.random() * 2, face: side, toX: x, toY: y };
+    let kind = dogs ? 'dog' : roll < 0.67 ? 'fox' : roll < 0.92 ? 'wolf' : 'bear';
+    if (wild && !dogs) {   // this mountain's own, by weight
+      const ks = Object.entries(wild.kinds), total = ks.reduce((t, [, w]) => t + w, 0);
+      let r = roll * total;
+      kind = ks.find(([, w]) => (r -= w) < 0)[0];
+    }
+    return { kind, x, y, homeX: x, homeY: y,
+      mode: 'pause', t: Math.random() * 2, face: side, toX: x, toY: y, side,
+      ink: dogs ? DOG_INKS[Math.floor(roll * DOG_INKS.length)] : null };
   }
 
   // Worth more the rarer the animal; also in slalom_submit.
@@ -2009,6 +2065,23 @@
     animals = animals.filter(a => a.y > camY - 40);
     for (const a of animals) {
       const k = ANIMALS[a.kind], dist = Math.hypot(a.x - skierX, a.y - skierY);
+      if (a.mode === 'escort') {   // a dog trotting along beside you
+        a.t -= dt;
+        if (state !== 'running' || a.t <= 0) { dogLeaves(a); continue; }
+        const tx = skierX + a.side * 14 - a.x, ty = skierY + 3 - a.y, d = Math.hypot(tx, ty) || 1;
+        const v = Math.min(d * 6, Math.max(speed * 1.2, 50));
+        a.x += tx / d * v * dt; a.y += ty / d * v * dt;
+        a.face = Math.abs(tx) > 3 ? Math.sign(tx) : a.face;
+        continue;
+      }
+      if (a.mode === 'leave') {    // off it goes, back up the side
+        a.x += a.side * 40 * dt; a.y -= 10 * dt; a.face = a.side;
+        continue;
+      }
+      if (k.escort && !a.rolled && state === 'running' && dist < k.radius) {
+        a.rolled = true;
+        if (Math.random() < k.odds) { a.mode = 'escort'; a.t = k.patience + Math.random() * 3; SFX.playBark(); continue; }
+      }
       if (a.mode === 'chase') {
         a.t -= dt;
         if (state !== 'running' || a.t <= 0) {   // lost interest, right here
@@ -2060,10 +2133,19 @@
     }
   }
 
+  // An animal (any kind) heads off up the side of the slope, away from
+  // the piste, and leaves you be.
+  function dogLeaves(a) {
+    a.mode = 'leave'; a.tame = true;
+    a.side = a.x < course.centerAt(a.y) ? -1 : 1;
+  }
+
   function hitAnimal(x, y) {
     for (const a of animals) {
       const k = ANIMALS[a.kind];
-      if (a.tame || (a.mode === 'chase' && a.kind !== 'bear')) continue;
+      if (a.tame || k.flies || (a.mode === 'chase' && a.kind !== 'bear')) continue;
+      // A dog alongside only counts if you steer into it, not it into you.
+      if (a.mode === 'escort' && Math.sign(vx) !== Math.sign(a.x - x)) continue;
       const caught = a.mode === 'chase' && Math.hypot(x - a.x, y - a.y) <= BEAR_CATCH;
       if (caught || (Math.abs(x - a.x) <= k.reach && y >= a.y - k.tall - 2 && y <= a.y + 2)) {
         return { animal: true, kind: a.kind, x: a.x, y: a.y, a };
@@ -2075,10 +2157,10 @@
   function drawAnimals(camY) {
     for (const a of animals) {
       const k = ANIMALS[a.kind];
-      const rows = a.mode === 'walk' || a.mode === 'chase'
+      const rows = a.mode === 'walk' || a.mode === 'chase' || a.mode === 'escort' || a.mode === 'leave'
         ? k.walk[Math.floor(performance.now() / (a.mode === 'chase' ? 80 : 160)) % 2] : k.stand;
       const flip = a.face < 0 ? rows.map(r => r.split('').reverse().join('')) : rows;
-      blit(flip, Math.round(a.x) - (rows[0].length >> 1), Math.round(a.y) - camY - rows.length + 1, k.ink);
+      blit(flip, Math.round(a.x) - (rows[0].length >> 1), Math.round(a.y) - camY - rows.length + 1, a.ink || k.ink);
     }
   }
 
@@ -2253,7 +2335,7 @@
         const tr = treeAt(i, j, salt, centerAt);
         if (!tr || exploded.has(i + ',' + j) || scorched.has(i + ',' + j)) continue;
         // A pineapple is two pixels shorter and four narrower than a tree.
-        const reach = tr.pine ? 3 : 5, top = tr.pine ? 8 : tr.rock ? ROCKS[tr.rock - 1].length + 1 : tr.bush ? 6 : tr.groundsel ? GROUNDSEL.length + 1 : 10;
+        const reach = tr.pine ? 3 : 5, top = tr.pine ? 8 : tr.rock ? ROCKS[tr.rock - 1].length + 1 : tr.bush ? 6 : tr.groundsel ? GROUNDSEL.length + 1 : tr.pen ? PENITENTE.length + 1 : 10;
         if (Math.abs(x - tr.x) <= reach && y >= tr.y - top && y <= tr.y + 2) return tr;
       }
     }
@@ -2623,6 +2705,22 @@
     '...OOO...',
   ];
 
+  // Penitentes: a cluster of tall blades of hard snow, all leaning the
+  // same way, outlined so they show against the snow, a shadow at the foot.
+  const PENITENTE = [
+    '.V...V...',
+    '.CV..CV.V',
+    '.WCV.WCVC',
+    'VWCCVWCCV',
+    'VWCCVWCCV',
+    'VCCCVCCCV',
+    'VCCCVCCCV',
+    'BBBBBBBBB',
+  ];
+  const PEN_PIECES = [VIC.white, VIC.white, VIC.cyan, VIC.lightBlue];
+  // A tuft of tussock grass, drawn into the snow itself.
+  const TUFT = ['Y.Y.Y', 'YYYYY', '.OYO.'];
+
   const INKS = { Q: VIC.crimson, P: VIC.pink, O: VIC.orange, G: VIC.green, Y: VIC.yellow, R: VIC.red,
     B: VIC.lightBlue, C: VIC.cyan, V: VIC.blue, K: VIC.black, W: VIC.white };
 
@@ -2982,7 +3080,7 @@
       for (let i = iMin; i < iMax; i++) {
         const tr = treeAt(i, j, salt, centerAt);
         if (!tr || exploded.has(i + ',' + j) || scorched.has(i + ',' + j)) continue;
-        const rows = tr.pine ? PINEAPPLE : tr.rock ? ROCKS[tr.rock - 1] : tr.cherry ? CHERRY : tr.rata ? RATA
+        const rows = tr.pine ? PINEAPPLE : tr.pen ? PENITENTE : tr.rock ? ROCKS[tr.rock - 1] : tr.cherry ? CHERRY : tr.rata ? RATA
           : tr.bush ? BUSH : tr.groundsel ? GROUNDSEL : TREE;
         shadowOf(rows, tr.x - (tr.pine ? 2 : 4), tr.y - camY - rows.length + 1);
       }
@@ -3079,6 +3177,14 @@
       }
       // A border: a dashed red line straight across.
       for (const b of borders) if (wy - b >= 0 && wy - b <= 1 && ((sx + 64) >> 2) % 2) col = VIC.red;
+      // Tussock grass: little yellow tufts out in the fresh snow.
+      if (course && course.shape.tussock && depth > 0.15) {
+        const cx = Math.floor(sx / 7), cy = Math.floor(wy / 7);
+        if (hash(cx * 31 + 7, cy + 401) < 0.22) {
+          const ch = (TUFT[wy - cy * 7 - 2] || '')[sx - cx * 7 - 1];
+          if (ch === 'Y') col = VIC.yellow; else if (ch === 'O') col = VIC.orange;
+        }
+      }
       if (col === VIC.white && course && course.shape.dawn) col = VIC.dawn;
       const i = (sx + MARGIN) * 4;
       row[i] = col[0]; row[i + 1] = col[1]; row[i + 2] = col[2]; row[i + 3] = 255;
@@ -3113,6 +3219,7 @@
         const sc = scorched.get(i + ',' + j);
         if (sc) drawScorchedTree(tr, sc, camY);
         else if (exploded.has(i + ',' + j)) continue;
+        else if (tr.pen) blit(PENITENTE, tr.x - 4, tr.y - camY - PENITENTE.length + 1);
         else if (tr.rock) { const r = ROCKS[tr.rock - 1]; blit(r, tr.x - 4, tr.y - camY - r.length + 1); }
         else if (tr.cherry) blit(CHERRY, tr.x - 4, tr.y - camY - 8);
         else if (tr.rata) blit(RATA, tr.x - 4, tr.y - camY - 8);
@@ -3378,7 +3485,7 @@
   function metres(id) { return +mountain(id).height.replace(/[^0-9]/g, ''); }
   const CHARACTER = {
     // A narrow chute near the bottom: the trees close in, no way out.
-    alyeska: { fans: 120, cameras: 45, heli: true, edgeNets: 0.5, lift: true, arena: true, width: [[0, 44], [0.7, 44], [0.76, 27], [0.94, 27], [1, 36]] },
+    alyeska: { wildlife: { odds: 0.02, kinds: { bear: 1, wolf: 1 } }, fans: 120, cameras: 45, heli: true, edgeNets: 0.5, lift: true, arena: true, width: [[0, 44], [0.7, 44], [0.76, 27], [0.94, 27], [1, 36]] },
     // Broad and gentle: long lazy bends, little on the piste.
     kunama: { fans: 120, cameras: 45, moths: true, edgeNets: 0.5, lift: true, arena: true, width: 50, sway: 0.55, twist: 1.2, crowd: 0.3, quick: 0 },
     // The Grand Muret: 76%, right after the start. The slope drops away,
@@ -3390,7 +3497,7 @@
     // boulders strewn across the piste high up, and rocks among the trees
     // all the way down.
     // Below it, clumps of southern rātā flowering crimson.
-    aoraki: { rocks: 0.3, rata: 0.4, debris: [[0, 0], [0.1, 0], [0.13, 0.1], [0.3, 0.1], [0.34, 0]],
+    aoraki: { wildlife: { odds: 0.025, kinds: { kea: 1 } }, rocks: 0.3, rata: 0.4, debris: [[0, 0], [0.1, 0], [0.13, 0.1], [0.3, 0.1], [0.34, 0]],
       signs: [{ t: 0.1, lines: ['ROCKFALL'] }] },
     // Even as a metronome: same gap, same swing, no bunching.
     // ...and cherry trees in bloom down the lower half.
@@ -3416,10 +3523,12 @@
     // trees, and ice cliffs of the last glaciers up top.
     kilimanjaro: { scree: [[0, 0], [0.3, 0.05], [1, 0.3]], snowBand: [[0, 140], [0.75, 30], [1, 22]],
       rocks: 0.75, forest: 0.45, bushes: true, poles: 35, reds: 6, gapFirst: 86, gapLast: 74, jitter: 2, quick: 1 },
-    aconcagua: {},
-    annapurna: {},
+    // A high, dry desert mountain: penitentes in fields, boulders and
+    // tussock grass, no trees.
+    aconcagua: { penitentes: 0.6, rocks: 1, forest: 0.4, tussock: true, dogs: 0.06 },
+    annapurna: { wildlife: { odds: 0.016, kinds: { leopard: 1 } } },
     // The Savage Mountain: the most technical slalom of all.
-    k2: { quick: 3, offset: 15, offsetLast: 15, gapLast: 54 },
+    k2: { wildlife: { odds: 0.016, kinds: { leopard: 1 } }, quick: 3, offset: 15, offsetLast: 15, gapLast: 54 },
     // The Hornbein Couloir first: steep, narrow, zigzagging between rock
     // walls, no poles; then out onto the North Face.
     chomolungma: { rocks: 1, fences: 0, camp: true, heli: true, couloir: { start: 100, rows: 1200, open: 90, hw: 15, slope: 1.6,
