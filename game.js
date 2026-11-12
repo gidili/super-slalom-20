@@ -835,13 +835,15 @@
   }
 
   // After a run, back to the title and the instructions, on a new course.
-  function toTitle() {
+  // keep: between Championship courses, where no title or new session is
+  // wanted, only a clean slate for the next run.
+  function toTitle(keep = false) {
     state = 'title';
     ranOut = false;
-    prepareRun();
+    if (!keep) { champ = null; prepareRun(); }
     particles = [];
     hideOverlay();
-    titleCardEl.hidden = false;
+    titleCardEl.hidden = keep;
     countdownEl.hidden = true;
     tally = null;
     shownBonus = 0;
@@ -871,6 +873,10 @@
     if (chosenMode() === 'endless') {
       buildCourse(await openSession(prepareSeq, true), true);
       runGod = sessionGod;
+    } else if (champ) {   // unranked for now
+      buildCourse(champ.current.seed);
+      sessionId = null;
+      runGod = godMode;
     }
     skierX = course.centerAt(0);
     skierY = 0;
@@ -929,6 +935,12 @@
   // seed is spent with its session, so it can't be the same course.
   function restart() {
     if (state === 'starting') return;
+    if (champ) {   // R restarts the whole Championship
+      if (state === 'running' || state === 'paused') { runEnd = performance.now(); SFX.stopSwoosh(); closeSession(); }
+      toTitle(true);
+      startChampionship();
+      return;
+    }
     if (state === 'title') { startChosen(); return; }   // already a fresh course
     if (state === 'running' || state === 'paused') {
       runEnd = performance.now();
@@ -1225,6 +1237,17 @@
       return;
     }
     if (document.activeElement === initialsInputEl) return;
+    // The Championship's screens: left and right choose, Space goes on,
+    // Escape leaves for the menu, R starts the Championship over.
+    if (champUp()) {
+      const dir = SHIFTS[e.code] || (LEFT.has(e.key) ? 'left' : RIGHT.has(e.key) ? 'right' : null);
+      if (GO.has(e.key)) { e.preventDefault(); champGo(); }
+      else if (dir) { e.preventDefault(); if (!e.repeat) champStep(dir === 'left' ? -1 : 1); }
+      else if (e.key === 'Escape') toTitle();
+      else if (e.key === 'r' || e.key === 'R') restart();
+      else if (e.key === 'm' || e.key === 'M') flash(SFX.toggleMute() ? 'SOUND OFF' : 'SOUND ON');
+      return;
+    }
     if ((state === 'title' || state === 'crashed' || state === 'finished') && !boardView) konami(e.key);
     // With the board up, Space or Escape closes it and R restarts.
     if (boardView) {
@@ -1293,7 +1316,7 @@
   }
   const chosenMode = () => modeBtns[modeIndex].dataset.mode;
   function startChosen() {
-    if (chosenMode() === 'championship') flash('COMING SOON');
+    if (chosenMode() === 'championship') startChampionship();
     else startRun();
   }
   // The highlighted one starts; any other is highlighted first, so its
@@ -2358,13 +2381,16 @@
 
   // Each mode keeps its own BEST; the box shows the highlighted mode's on
   // the title and the run's during it.
-  const BEST_KEYS = { single: 'slalom_best', endless: 'slalom_best_endless' };
+  const BEST_KEYS = { single: 'slalom_best', endless: 'slalom_best_endless', championship: 'slalom_best_championship' };
   const best = {};
   for (const m in BEST_KEYS) {
     best[m] = 0;
     try { best[m] = parseInt(localStorage.getItem(BEST_KEYS[m]) || '0', 10) || 0; } catch (_) {}
   }
-  const bestMode = () => (state === 'title' ? chosenMode() === 'endless' : course && course.endless) ? 'endless' : 'single';
+  // The Championship's best is a total, set when one ends; its courses
+  // leave the others alone.
+  const bestMode = () => state === 'title' && !champ ? (chosenMode() === 'endless' ? 'endless' : chosenMode() === 'championship' ? 'championship' : 'single')
+    : champ ? 'championship' : course && course.endless ? 'endless' : 'single';
 
   function paintHud() {
     const score = state === 'title' ? 0 : earned() + shownBonus;
@@ -2376,7 +2402,7 @@
     missBoxEl.classList.toggle('last-miss', endless && left === 1 && state !== 'title' && state !== 'crashed');
     // Like snake-bit, BEST climbs live once this run passes it.
     const m = bestMode();
-    if (score > best[m]) {
+    if (score > best[m] && m !== 'championship') {
       best[m] = score;
       try { localStorage.setItem(BEST_KEYS[m], score); } catch (_) {}
     }
@@ -2384,12 +2410,196 @@
     placeHudButtons();
   }
 
+  // ------------------------------------------------------------ championship
+  // Ten courses out of these fourteen, lowest to highest. Two are open at
+  // the start; finishing a course opens all of its `unlocks`, a crash only
+  // the first. Each can be skied once per Championship, and Chomolungma
+  // opens only after nine. `lon` orders the choices west to east, as they
+  // sit on the map. Seeds are placeholders until the courses are tuned.
+  const MOUNTAINS = [
+    { id: 'alyeska', name: 'ALYESKA', country: 'ALASKA, USA', height: '1,200 M', lon: -149.1, seed: 1101,
+      unlocks: ['aoraki', 'pista3'],
+      fact: 'Its name is the Aleut word that gave Alaska its name: Alaxsxaq, "the mainland". Its North Face claims to be North America\'s longest double-black-diamond run, a rating that means experts only: steep, ungroomed slopes, narrow chutes, rocks and cliffs, and no easy way out once you\'re in.' },
+    { id: 'kunama', name: 'KUNAMA NAMADGI (KOSCIUSZKO)', country: 'AUSTRALIA', height: '2,228 M', lon: 148.3, seed: 1202,
+      unlocks: ['aoraki', 'fuji'],
+      fact: 'Every summer for thousands of years, Aboriginal clans met on these peaks to trade, hold initiations and feast on Bogong moths. In 1840 two Aboriginal guides, Charley Tarra and Jackey, led a Polish explorer up here, and Tarra\'s hunting kept the party from starving. The explorer "named" it. A dual Aboriginal name, Kunama Namadgi ("snow mountain"), was proposed in 2019 and is still debated.' },
+    { id: 'pista3', name: 'PISTA 3 "FRANCO BERTHOD"', country: 'LA THUILE, ITALY', height: '~2,500 M', lon: 6.95, seed: 1303,
+      unlocks: ['cervino'],
+      fact: 'Italy\'s steepest piste: 76% at the Grand Muret, right after the start. The women\'s World Cup races here, on north-facing, rock-hard snow. It\'s dangerous for anyone but experts.' },
+    { id: 'aoraki', name: 'AORAKI', country: 'NEW ZEALAND', height: '3,724 M', lon: 170.1, seed: 1404,
+      unlocks: ['vinson', 'fuji'],
+      fact: 'To Ngai Tahu, Aoraki is an ancestor: he and his brothers were turned to stone on their stranded canoe, which became the South Island. The mountain was returned to Ngai Tahu in 1998, and they gifted it back to the nation. In 1991 a rock avalanche sheared 10 m off its summit, and by 2013 it had shrunk 30 m in all.' },
+    { id: 'fuji', name: 'FUJI', country: 'JAPAN', height: '3,776 M', lon: 138.7, seed: 1505,
+      unlocks: ['annapurna', 'kirinyaga'],
+      fact: 'Fuji last erupted in 1707, and its ash fell on Edo, today\'s Tokyo, almost 100 km away. The mountain is sacred: from the 8th station up it belongs to a Shinto shrine, and women weren\'t allowed to climb it until 1872.' },
+    { id: 'cervino', name: 'CERVINO (MATTERHORN)', country: 'SWITZERLAND - ITALY', height: '4,478 M', lon: 7.66, seed: 1606,
+      unlocks: ['kirinyaga', 'kilimanjaro'],
+      fact: 'Valley legends told of spirits and a ruined city on its summit. Local guide Jean-Antoine Carrel tried for years from Italy, but in 1865 a British-led party from Zermatt beat him to the top, and four of its seven men died coming down. Carrel summited three days later. Below it you can ski from Switzerland into Italy, 20 km in one run. Its steep east side was first skied only in 1975, by Toni Valeruz. Few have dared since.' },
+    { id: 'vinson', name: 'VINSON', country: 'ANTARCTICA', height: '4,892 M', lon: -85.6, seed: 1707,
+      unlocks: ['aconcagua'],
+      fact: 'No one saw it until 1958, from a US Navy plane, and the Americans named it after one of their congressmen. Chile counts it as part of its own Antarctic territory, but under the 1959 treaty no country\'s claim is recognised: Antarctica is kept for peace and science. Only about 150 climbers a season reach the top, with nights down to -40 C.' },
+    { id: 'kirinyaga', name: 'KIRINYAGA (MOUNT KENYA)', country: 'KENYA', height: '5,199 M', lon: 37.3, seed: 1808,
+      unlocks: ['kilimanjaro'],
+      fact: 'To the Kikuyu people, Kirinyaga is home to the god Ngai, so they traditionally built their houses with the door facing the mountain. The country\'s name, Kenya, comes from how the British heard "Kirinyaga". Its summits honour the Maasai leader Mbatian, his brother and his son. Its glaciers, 16 km from the equator, may be gone by 2030.' },
+    { id: 'iztactepetl', name: 'IZTACTEPETL (PICO DE ORIZABA)', country: 'MEXICO', height: '5,636 M', lon: -97.3, seed: 1909,
+      unlocks: ['aconcagua'],
+      fact: 'Locals call it Iztactepetl, the White Mountain. Legend says Quetzalcoatl, the Feathered Serpent god worshipped by the Toltecs and Aztecs, bade farewell to his followers within sight of it, and that Venus, the morning star he became, can be seen settling into its crater. It is Mexico\'s highest peak and a dormant volcano: it last erupted in 1846...' },
+    { id: 'kilimanjaro', name: 'KILIMANJARO', country: 'TANZANIA', height: '5,895 M', lon: 37.4, seed: 2010,
+      unlocks: ['iztactepetl', 'aconcagua'],
+      fact: 'The first recorded summit, in 1889, is credited to some German guy, but he was guided by Yohani Kinyala Lauwo, a young Chagga man who later said he had already climbed it many times. Most climbers take 5 to 8 days to summit. Tanzanian Simon Mtuy ran up and back down in 9 hours 19 minutes, a Guinness World Record.' },
+    { id: 'aconcagua', name: 'ACONCAGUA', country: 'ARGENTINA', height: '6,961 M', lon: -70.0, seed: 2111,
+      unlocks: ['annapurna', 'k2'],
+      fact: 'The highest peak outside Asia, and stray dogs climb it. Several have tagged along with expeditions all the way to the summit, one napped on top before heading down, and climbers still argue over which dog got there first.' },
+    { id: 'annapurna', name: 'ANNAPURNA', country: 'NEPAL', height: '8,091 M', lon: 83.8, seed: 2212,
+      unlocks: ['k2'],
+      fact: 'Its name means "full of food", after the Hindu goddess of nourishment. For decades it was the deadliest of the world\'s 8,000 m peaks: by 2010, one climber had died for every three who reached the top.' },
+    { id: 'k2', name: 'K2', country: 'PAKISTAN', height: '8,611 M', lon: 76.5, seed: 2313,
+      unlocks: [],
+      fact: 'The 1954 first recorded ascent made two Italians national heroes. Amir Mehdi, a porter from Hunza, had carried their oxygen high up the mountain, then was forced to spend the night at about 8,100 m in a snow hole with no tent or sleeping bag. He lost all his toes, and his story was buried for decades.' },
+    { id: 'chomolungma', name: 'CHOMOLUNGMA (EVEREST) NORTH FACE', country: 'TIBET - CHINA (CONTESTED TERRITORY)', height: '8,849 M', lon: 86.9, seed: 2414,
+      unlocks: [],
+      fact: 'Named in 1865 after George Everest, a British surveyor who probably never saw it and objected to the honour. Only a handful have ever ridden down this face: in 2001 Marco Siffredi, 22, snowboarded the Norton Couloir from the summit, then vanished trying the Hornbein Couloir a year later. In 2025 Jim Morrison finally skied down that line, as you are about to.' },
+  ];
+  const CHAMP_COURSES = 10, FINALE = 'chomolungma';
+  const mountain = id => MOUNTAINS.find(m => m.id === id);
+
+  // champ: null outside a Championship. stage: 'pick' (where next), 'intro'
+  // (the mountain's card), 'run', 'result' (after a course), 'done'.
+  let champ = null;
+  const champEl = document.getElementById('champ');
+  const champParts = Object.fromEntries(['head', 'sub', 'pick', 'prev', 'go', 'next', 'text', 'list', 'prompt']
+    .map(k => [k, document.getElementById('champ-' + k)]));
+  const cardEl = champEl.parentElement;
+  const champUp = () => !!champ && champ.stage !== 'run' && !overlayEl.hidden;
+
+  function startChampionship() {
+    titleCardEl.hidden = true;
+    champ = { played: [], open: new Set(['alyeska', 'kunama']), pick: 0, current: null, stage: 'pick' };
+    showChamp();
+  }
+
+  // What can be picked now: open and not yet skied, west to east; only the
+  // finale once nine are done. If crashes have left nothing open, the two
+  // lowest not yet skied open up, so every Championship reaches the end.
+  const skied = id => champ.played.some(p => p.id === id);
+  function champOptions() {
+    if (champ.played.length === CHAMP_COURSES - 1) return [mountain(FINALE)];
+    const left = () => MOUNTAINS.filter(m => m.id !== FINALE && champ.open.has(m.id) && !skied(m.id));
+    if (!left().length) MOUNTAINS.filter(m => m.id !== FINALE && !skied(m.id)).slice(0, 2).forEach(m => champ.open.add(m.id));
+    return left().sort((a, b) => a.lon - b.lon);
+  }
+
+  const champTotal = () => champ.played.reduce((t, p) => t + p.points, 0);
+  function champListHtml() {
+    if (!champ.played.length) return '';
+    return champ.played.map((p, i) => `<li><span>${i + 1} ${mountain(p.id).name.split(' (')[0]}</span><span>${p.finished ? '*'.repeat(p.stars) : 'X'} ${p.points}</span></li>`).join('')
+      + `<li class="total"><span>TOTAL</span><span>${champTotal()}</span></li>`;
+  }
+
+  function showChamp() {
+    const c = champ, P = champParts, n = c.played.length + (c.stage === 'result' || c.stage === 'done' ? 0 : 1);
+    cardEl.classList.add('champ-mode');
+    champEl.hidden = false;
+    P.pick.hidden = c.stage !== 'pick';
+    P.prev.hidden = P.next.hidden = c.stage !== 'pick' || champOptions().length < 2;
+    P.list.innerHTML = c.stage === 'intro' ? '' : champListHtml();
+    if (c.stage === 'pick') {
+      const opts = champOptions(), m = opts[c.pick % opts.length];
+      P.head.textContent = `COURSE ${n} OF ${CHAMP_COURSES}`;
+      P.sub.textContent = n === 1 ? 'A WORLD TOUR ON SKIS. WHERE TO FIRST?' : 'WHERE NEXT?';
+      P.go.textContent = m.name.split(' (')[0];
+      const next = m.unlocks.filter(id => !c.open.has(id) && !skied(id));
+      P.text.textContent = `${m.country} · ${m.height}` + (m.id === FINALE ? ' · THE FINALE'
+        : next.length ? ` · FINISH TO UNLOCK: ${next.map(id => mountain(id).name.split(' (')[0]).join(', ')}` : '');
+      P.text.style.textAlign = 'center';
+      P.prompt.textContent = NARROW ? 'ARROWS TO CHOOSE · TAP THE NAME TO GO' : 'LEFT / RIGHT CHOOSES · SPACE GOES';
+    } else if (c.stage === 'intro') {
+      const m = c.current;
+      P.head.textContent = `COURSE ${n}: ${m.name}`;
+      P.sub.textContent = `${m.country} · ${m.height}`;
+      P.text.textContent = m.fact.toUpperCase();
+      P.text.style.textAlign = 'left';
+      P.prompt.textContent = NARROW ? 'TAP TO START' : 'PRESS SPACE TO START';
+    } else if (c.stage === 'result') {
+      const p = c.played[c.played.length - 1];
+      P.head.textContent = p.finished ? 'FINISHED' : 'WIPEOUT';
+      P.sub.textContent = `${mountain(p.id).name.split(' (')[0]} +${p.points}`;
+      P.text.textContent = '';
+      P.prompt.textContent = (NARROW ? 'TAP' : 'SPACE') + (c.played.length === CHAMP_COURSES ? ' TO SEE HOW YOU DID' : ' FOR THE NEXT MOUNTAIN');
+    } else {
+      P.head.textContent = 'CHAMPIONSHIP OVER';
+      P.sub.textContent = `TOTAL ${champTotal()}`;
+      P.text.textContent = '';
+      P.prompt.textContent = (NARROW ? 'TAP' : 'SPACE') + ' FOR THE MENU';
+    }
+    overlayEl.hidden = false;
+    requestAnimationFrame(() => overlayEl.classList.add('visible'));
+  }
+
+  function hideChamp() {
+    cardEl.classList.remove('champ-mode');
+    champEl.hidden = true;
+  }
+
+  // Space, Enter, A, Start or a tap: whatever the screen is waiting for.
+  function champGo() {
+    const c = champ;
+    if (c.stage === 'pick') {
+      const opts = champOptions();
+      c.current = opts[c.pick % opts.length];
+      c.stage = 'intro';
+      buildCourse(c.current.seed);   // its slope, behind the card
+      showChamp();
+    } else if (c.stage === 'intro') {
+      c.stage = 'run';
+      hideChamp();
+      startRun();
+    } else if (c.stage === 'result') {
+      c.stage = c.played.length === CHAMP_COURSES ? 'done' : 'pick';
+      c.pick = 0;
+      if (c.stage === 'pick') toTitle(true);
+      showChamp();
+    } else {
+      const total = champTotal();
+      if (total > best.championship) {
+        best.championship = total;
+        try { localStorage.setItem(BEST_KEYS.championship, total); } catch (_) {}
+      }
+      toTitle();
+    }
+  }
+  function champStep(d) {
+    if (champ.stage !== 'pick') return;
+    const n = champOptions().length;
+    champ.pick = (champ.pick + d + n) % n;
+    showChamp();
+  }
+
+  // A course is over: keep its points, open what it earned, show the tally.
+  function champCourseOver(finished) {
+    const c = champ, m = c.current;
+    c.played.push({ id: m.id, points: points(), stars: finished ? stars() : 0, finished });
+    // A crash opens just one: the first neighbour not already open.
+    const fresh = m.unlocks.filter(id => !c.open.has(id) && !skied(id));
+    (finished ? fresh : fresh.slice(0, 1)).forEach(id => c.open.add(id));
+    c.stage = 'result';
+    showChamp();
+  }
+
+  champParts.prev.addEventListener('click', (e) => { e.currentTarget.blur(); champStep(-1); });
+  champParts.next.addEventListener('click', (e) => { e.currentTarget.blur(); champStep(1); });
+  champParts.go.addEventListener('click', (e) => { e.currentTarget.blur(); champGo(); });
+  // A tap anywhere on the card moves things on, except on the pick screen,
+  // where the name is the button.
+  cardEl.addEventListener('click', (e) => { if (champUp() && champ.stage !== 'pick' && !e.target.closest('button')) champGo(); });
+
   // -------------------------------------------------------------- overlay
   // Two steps, like snake-bit: the run's breakdown and the initials first,
   // then, once saved or skipped, the top 10 with the new entry flashing.
   let lastSubmittedId = null;
 
   function showOverlay(finished) {
+    if (champ) { champCourseOver(finished); return; }
     if (course.endless) SFX.playRunOver();
     overlayWordEl.textContent = finished || ranOut ? 'GAME OVER' : 'WIPEOUT';
     overlayTitleEl.className = 'bad';
@@ -2420,6 +2630,7 @@
 
   function hideOverlay() {
     cardClosed = false;
+    hideChamp();
     newTopEl.hidden = true;
     if (document.activeElement === initialsInputEl) initialsInputEl.blur();
     overlayEl.classList.remove('visible');
@@ -2621,13 +2832,17 @@
     if (dir !== gpDir) {
       release('gp');
       if (dir) press('gp', dir);
-      if (dir && state === 'title') chooseMode(modeIndex + (dir === 'left' ? -1 : 1));
+      if (dir && champUp()) champStep(dir === 'left' ? -1 : 1);
+      else if (dir && state === 'title') chooseMode(modeIndex + (dir === 'left' ? -1 : 1));
       else if (dir && cardUp()) pickCard(cardPick + (dir === 'left' ? -1 : 1));
       gpDir = dir;
     }
 
     if (splashUp) {
       if (justPressed(9) || justPressed(0)) dismissSplash();
+    } else if (champUp()) {
+      if (justPressed(9) || justPressed(0)) champGo();
+      else if (justPressed(1)) toTitle();
     } else if (typing) {
       if (justPressed(0)) submitFormEl.requestSubmit();
       else if (justPressed(1)) showLeaderboard();

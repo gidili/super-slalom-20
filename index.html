@@ -101,6 +101,15 @@
     opacity: 0; pointer-events: none; transition: opacity 0.45s ease;
   }
   #overlay.visible { opacity: 1; pointer-events: auto; }
+  /* The Championship's own screens take the card over. */
+  #overlay .card.champ-mode > :not(#champ) { display: none !important; }
+  #champ-head { font-size: 13px; margin: 0 0 8px; line-height: 1.5; }
+  #champ-sub { font-size: 8px; margin-bottom: 12px; opacity: 0.8; line-height: 1.6; }
+  #champ-text { font-size: 8px; line-height: 1.8; text-align: left; margin: 0 0 12px; }
+  #champ-list { list-style: none; padding: 0; margin: 0 0 12px; font-size: 8px; line-height: 1.9; }
+  #champ-list li { display: flex; justify-content: space-between; gap: 8px; }
+  #champ-list li.total { border-top: 2px solid var(--vic-blue); margin-top: 4px; padding-top: 4px; }
+  #champ-prompt { font-size: 8px; opacity: 0.7; }
   #overlay .card {
     background: var(--vic-white); border: 2px solid var(--vic-blue);
     padding: 20px; width: 100%; max-width: 320px; margin: auto;
@@ -353,6 +362,18 @@
 
   <div id="overlay" hidden>
     <div class="card">
+      <div id="champ" hidden>
+        <h2 id="champ-head"></h2>
+        <div id="champ-sub"></div>
+        <div class="btn-row" id="champ-pick">
+          <button id="champ-prev" type="button" class="secondary">&lt;</button>
+          <button id="champ-go" type="button"></button>
+          <button id="champ-next" type="button" class="secondary">&gt;</button>
+        </div>
+        <p id="champ-text"></p>
+        <ol id="champ-list"></ol>
+        <div id="champ-prompt"></div>
+      </div>
       <h2 id="overlay-title"><span id="overlay-word">FINISH</span><canvas class="pine-icon" width="5" height="7"></canvas></h2>
       <div id="final-score">SCORE <b id="final-score-val">0</b></div>
       <canvas id="final-stars" width="41" height="11"></canvas>
