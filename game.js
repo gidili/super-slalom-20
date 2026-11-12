@@ -30,6 +30,7 @@
     yellow: [191, 206, 114],
     paleBlue: [184, 184, 255], // the steep-face tint only
     pink: [226, 150, 190],     // the VIC-20's pink, for cherry blossom
+    netOrange: [236, 132, 48], // the VIC-20's light orange, for safety nets
   };
   const css = c => `rgb(${c[0]},${c[1]},${c[2]})`;
 
@@ -220,6 +221,9 @@
     signs: [],                 // boards by the piste: [{ t, lines: [...], flag }]
     borders: [],               // a national border across the slope, at these t
     welcome: '',               // ...and what flashes up as you cross it
+    edgeNets: 0,               // a resort: orange safety nets on the outside of this share of the bends
+    lift: false,               // ...and a chairlift running up one side
+    arena: false,              // ...and the crowd in a ring behind a barrier past the finish
     couloir: null,             // a pole-less gully between rock walls at the top (see buildCourse)
     rocks: 0,                  // the share of trees that are boulders instead
     fences: 1,                 // fences, times Single's (0: none)
@@ -434,7 +438,33 @@
     // the line, in columns outward when there are lots. Scenery only.
     const fans = [];
     const FAN_ROWS = [9, 18, 0, 27, 36, -9, 45, -18];
-    for (let k = 0; !endless && k < S.fans; k++) {
+    // An arena: half an ellipse of barrier hanging below the finish line
+    // from its two ends, the crowd in rows behind it.
+    let arena = null;
+    if (S.arena && !endless) {
+      const cx = centerAt(finishY), rx = baseWidth(finishY) + 8, ry = ARENA_RY;
+      arena = { cx, rx, ry, y: finishY };
+      // A jostling crowd, not rows: each person somewhere in a band behind
+      // the barrier, as long as they're not standing on someone else.
+      // Most press up near the barrier in clumps of friends; some hang
+      // back; a few wander off on their own.
+      const rnd2 = mulberry32((seed % 4294967296) ^ 0xFA25);
+      const clumps = Array.from({ length: 9 }, () => 0.1 + rnd2() * (Math.PI - 0.2));
+      for (let k = 0, tries = 0; k < S.fans && tries < S.fans * 60; tries++) {
+        const r = rnd2(), stray = r < 0.08, inClump = r > 0.35;
+        const th = stray ? -0.5 + rnd2() * (Math.PI + 1)
+          : inClump ? clumps[Math.floor(rnd2() * clumps.length)] + (rnd2() + rnd2() - 1) * 0.28
+          : 0.04 + rnd2() * (Math.PI - 0.08);
+        const d = stray ? 30 + rnd2() * 40 : 5 + (-Math.log(1 - rnd2() * 0.95)) * 9;
+        const x = Math.round(cx + (rx + d) * Math.cos(th)), y = Math.round(finishY + (ry + d) * Math.sin(th)) + 4;
+        if (fans.some(f => Math.abs(f.x - x) < 5 && Math.abs(f.y - y) < 6)) continue;
+        fans.push({ x, y, ink: FAN_INKS[Math.floor(rnd2() * FAN_INKS.length)], phase: Math.floor(rnd2() * 8),
+          camera: k < S.cameras });
+        k++;
+      }
+      fans.sort((a, b) => a.y - b.y);   // nearer the bottom of the screen draws on top
+    }
+    for (let k = 0; !endless && !arena && k < S.fans; k++) {
       const side = k % 2 ? 1 : -1, m = k >> 1;
       const col = Math.floor(m / FAN_ROWS.length), fy = finishY + FAN_ROWS[m % FAN_ROWS.length] + (col % 2) * 3;
       const jit = hash(k * 131 + salt, 7) * 2;
@@ -443,9 +473,31 @@
         camera: k < S.cameras });
     }
     const fanCols = Math.ceil(S.fans / 2 / FAN_ROWS.length);
-    const fanZone = (x, y) => fans.length > 0 && y > finishY - 28 && y < finishY + 56 &&
-      Math.abs(x - centerAt(y)) < widthAt(y) + 15 + fanCols * 7;
-    course = { seed, centerAt, lineAt, poles, finishY, salt, titlePine, endless, lineEnd, extend, levelAt, widthAt, slopeAt, lips, borders, signs, wall, rockDepth, inCouloir, camp, fans, fanZone,
+    const fanZone = (x, y) => arena ? y > finishY - 40 && y < finishY + arena.ry + 80 && Math.abs(x - arena.cx) < arena.rx + 76
+      : fans.length > 0 && y > finishY - 28 && y < finishY + 56 && Math.abs(x - centerAt(y)) < widthAt(y) + 15 + fanCols * 7;
+    // Safety nets on the outside of the sharpest bends: the share of
+    // slots that bend most, a run of net following the edge through each.
+    const nets = [];
+    if (S.edgeNets && !endless) {
+      const bend = y => centerAt(y + 30) - 2 * centerAt(y) + centerAt(y - 30);
+      const slots = [];
+      for (let y = START_PAD; y + NET_LEN < finishY - 40; y += NET_LEN + 20) {
+        let best = 0, at = y;
+        for (let yy = y; yy < y + NET_LEN; yy += 5) if (Math.abs(bend(yy)) > Math.abs(best)) { best = bend(yy); at = yy; }
+        slots.push({ y0: y, y1: y + NET_LEN, side: best > 0 ? -1 : 1, bend: Math.abs(best) });
+      }
+      slots.sort((a, b) => b.bend - a.bend).slice(0, Math.round(slots.length * S.edgeNets))
+        .forEach(n => nets.push(n));
+    }
+    // The chairlift runs dead straight up whichever side the piste leaves
+    // more room on.
+    let liftX = null;
+    if (S.lift && !endless) {
+      let sum = 0, n = 0;
+      for (let y = 0; y < finishY; y += 40) { sum += centerAt(y); n++; }
+      liftX = sum / n > W / 2 ? 18 : W - 18;
+    }
+    course = { seed, centerAt, lineAt, poles, finishY, salt, nets, liftX, titlePine, endless, lineEnd, extend, levelAt, widthAt, slopeAt, lips, borders, signs, arena, wall, rockDepth, inCouloir, camp, fans, fanZone,
       couloir: K ? { c0, c1, c2 } : null, cherryAt, shape: S };
     if (endless) extend(0);
     snowRows.clear();            // cached rows belong to the previous slope
@@ -1057,7 +1109,7 @@
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     held = []; tapLeft = 0;
-    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null; crossed = 0;
+    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null; crossed = 0; pan = 0;
     animals = []; animalSlot = Math.ceil(START_PAD / ANIMAL_SLOT);
     birds = []; birdIn = between(course.endless ? BIRD_EVERY_ENDLESS : BIRD_EVERY);
     moths = []; mothIn = 2; petals = [];
@@ -1152,7 +1204,7 @@
     state = 'crashed';
     mode = 'crash';
     runEnd = performance.now();
-    hitWhat = hit.sluff ? 'SLUFF' : hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
+    hitWhat = hit.sluff ? 'SLUFF' : hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.net ? 'NETS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
     SFX.stopSwoosh();
     if (hit.pine) SFX.playExplosion(); else SFX.playBreak();
     if (hit.pine) {
@@ -1177,12 +1229,15 @@
     }
     // A tent goes up like a fence (its people are all outside).
     const kind = hit.fence || hit.tent ? 'fence' : hit.pine ? 'pine' : 'tree';
-    const key = hit.tent ? 'tent' + hit.n : hit.fence ? `f${hit.k},${hit.side}` : hit.i + ',' + hit.j;
+    const key = hit.tent ? 'tent' + hit.n : hit.net ? 'e' + hit.k : hit.fence ? `f${hit.k},${hit.side}` : hit.i + ',' + hit.j;
     exploded.add(key);
     const fire = fireColors(runGod);
     if (kind === 'tree' && !hit.rock) scorched.set(key, { at: performance.now(), god: runGod, hit: true });
     if (hit.tent) scorched.set(key, { at: performance.now(), god: runGod });
-    else if (kind === 'fence') {
+    else if (hit.net) {   // torn open where you went through
+      const y = Math.round(hit.y);
+      scorched.set(key, { at: performance.now(), god: runGod, gapY0: y - 5, gapY1: y + 5 });
+    } else if (kind === 'fence') {
       const x = Math.round(hit.x);
       scorched.set(key, { at: performance.now(), god: runGod, gap0: x - 3, gap1: x + 3 });
     }
@@ -1194,7 +1249,7 @@
     // can go above 4 LEFT, Single below 0 misses, which takes time off.
     const forgive = kind === 'pine';
     if (forgive) { missed--; forgiven++; SFX.playForgiven(); }
-    pop(`${hit.rock ? 'ROCK' : hit.tent ? 'TENT' : { pine: 'PINEAPPLE', tree: 'TREE', fence: 'FENCE' }[kind]} +${BURN_POINTS[kind]}${forgive ? '  MISS FORGIVEN' : ''}`);
+    pop(`${hit.rock ? 'ROCK' : hit.tent ? 'TENT' : hit.net ? 'NET' : { pine: 'PINEAPPLE', tree: 'TREE', fence: 'FENCE' }[kind]} +${BURN_POINTS[kind]}${forgive ? '  MISS FORGIVEN' : ''}`);
     paintHud();
   }
 
@@ -1297,7 +1352,8 @@
   function glide(dt) {
     const k = Math.exp(-6 * dt);
     speed *= k; vx *= k;
-    skierY = Math.min(skierY + speed * dt, course.finishY + 12);
+    skierY = Math.min(skierY + speed * dt, course.finishY + (course.arena ? course.arena.ry * 0.5 : 12));
+    panToArena(dt);
     skierX = Math.max(2, Math.min(W - 3, skierX + vx * dt));
   }
 
@@ -1305,7 +1361,14 @@
   // the screen, then holds still and lets the skier run down to it.
   function cameraTop() {
     if (!course) return -SKIER_Y;
-    return Math.floor(Math.min(skierY - SKIER_Y, course.finishY - FINISH_ROW));
+    return Math.floor(Math.min(skierY - SKIER_Y, course.finishY - FINISH_ROW) + pan);
+  }
+  // Past the line at an arena, the view slides down to take in the crowd.
+  let pan = 0;
+  function panToArena(dt) {
+    if (!course.arena || state !== 'finished') return;
+    const target = Math.max(0, course.arena.ry + 50 - H + FINISH_ROW);
+    pan += (target - pan) * Math.min(1, dt * 1.8);
   }
 
   // The narrow window's left edge, in world x: centred on the piste a
@@ -1573,7 +1636,7 @@
 
     // The couloir's walls: no fire gets through rock. Only a god does.
     if (course.wall(skierX, skierY) && !runGod) { crash({ wall: true }); return; }
-    const hit = hitTree(skierX, skierY) || hitFence(skierX, skierY) || hitTent(skierX, skierY) || hitAnimal(skierX, skierY);
+    const hit = hitTree(skierX, skierY) || hitFence(skierX, skierY) || hitEdgeNet(skierX, skierY) || hitTent(skierX, skierY) || hitAnimal(skierX, skierY);
     if (hit && onFire()) burn(hit);
     else if (hit) { crash(hit); return; }
 
@@ -1698,8 +1761,22 @@
   // you can see is exactly a tree you can hit. Now and then a cell holds a
   // pineapple instead, which is just as solid and a lot louder.
   function treeAt(i, j, salt, centerAt) {
-    const x = i * TREE_CELL + 2 + Math.floor(hash(i * 7 + salt, j * 3 + 1) * (TREE_CELL - 4));
+    let x = i * TREE_CELL + 2 + Math.floor(hash(i * 7 + salt, j * 3 + 1) * (TREE_CELL - 4));
     const y = j * TREE_CELL + 2 + Math.floor(hash(i * 5 + salt, j * 11 + 7) * (TREE_CELL - 4));
+    // Nothing grows through a safety net: step it aside, staying on the
+    // side of the net it was on.
+    if (course && course.nets) {
+      for (const n of course.nets) {
+        if (y < n.y0 || y - 8 > n.y1) continue;
+        // Where the net runs over the tree's rows, both strands.
+        let lo = Infinity, hi = -Infinity;
+        for (let r = Math.max(y - 8, n.y0); r <= Math.min(y, n.y1); r++) {
+          const nx = netX(r, n.side);
+          lo = Math.min(lo, nx, nx + n.side); hi = Math.max(hi, nx, nx + n.side);
+        }
+        if (x + 5 >= lo && x - 5 <= hi) x = x >= (lo + hi) / 2 ? hi + 6 : lo - 6;
+      }
+    }
     if (course && Math.abs(x - course.titlePine.x) < 10 && Math.abs(y - course.titlePine.y) < 12) return null;
     if (course && course.inCouloir && course.inCouloir(y)) return null;   // nothing grows on the rock
     if (course && course.fanZone && course.fanZone(x, y)) return null;
@@ -1789,7 +1866,12 @@
       a = Math.round(edge + side * (4 + Math.floor(hash(k * 53 + salt, side + 29) * (room - len - 4))));
     }
     const b = Math.max(0, Math.min(W - 1, a + side * len));
-    return { y, x0: Math.min(a, b), x1: Math.max(a, b) };
+    const x0 = Math.min(a, b), x1 = Math.max(a, b);
+    // Never in a crowd, nor across a safety net: such a fence just isn't there.
+    if (course && course.fanZone && course.fanZone((x0 + x1) / 2, y)) return null;
+    if (course && course.nets && course.nets.some(n => y >= n.y0 - 6 && y <= n.y1 + 6 &&
+      netX(y, n.side) >= x0 - 3 && netX(y, n.side) <= x1 + 3)) return null;
+    return { y, x0, x1 };
   }
 
   // ------------------------------------------------------------- animals
@@ -2049,6 +2131,36 @@
     }
   }
 
+  // Edge nets: runs of orange safety net just outside the piste's edge,
+  // following it (placed in buildCourse, on the outside of bends).
+  const NET_LEN = 70;
+  const netX = (y, side) => Math.round(course.centerAt(y) + side * (course.widthAt(y) + 3));
+  function hitEdgeNet(x, y) {
+    const nets = course.nets || [];
+    for (let k = 0; k < nets.length; k++) {
+      const n = nets[k];
+      if (y < n.y0 || y > n.y1) continue;
+      const sc = scorched.get('e' + k);
+      if (sc && y >= sc.gapY0 && y <= sc.gapY1) continue;
+      if (Math.abs(x - netX(y, n.side)) <= 1.5) return { fence: true, net: true, k, x, y };
+    }
+    return null;
+  }
+  function drawEdgeNets(camY) {
+    course.nets.forEach((n, k) => {
+      if (n.y1 < camY || n.y0 > camY + H) return;
+      const sc = scorched.get('e' + k), side = n.side;
+      for (let y = Math.max(n.y0, camY); y <= Math.min(n.y1, camY + H); y++) {
+        if (sc && y >= sc.gapY0 && y <= sc.gapY1) continue;
+        const x = netX(y, side), sy = y - camY;
+        // Two pixels deep: a solid strand and a mesh, black posts.
+        if ((y - n.y0) % 8 === 0) { put(x, sy, VIC.black); put(x + side, sy, VIC.black); continue; }
+        put(x, sy, VIC.netOrange);
+        if (y % 2 === 0) put(x + side, sy, VIC.netOrange);
+      }
+    });
+  }
+
   // A fence occupies rows y-4..y; the skier is fenced in when any of the
   // skier's rows meet it, give or take a pixel.
   function hitFence(x, y) {
@@ -2249,6 +2361,34 @@
     }
   }
 
+  // A chairlift seen from above: two cables, a pylon with its crossarm
+  // every LIFT_GAP rows, chairs going up one side and down the other, some
+  // with a skier aboard.
+  const LIFT_GAP = 110, CHAIR_GAP = 30, CHAIR_SPEED = 7;
+  const CHAIR_FULL = ['..K..', '.XXX.', 'KXXXK', 'K...K'];
+  const CHAIR_EMPTY = ['KKKKK', 'K...K'];
+  function drawLift(camY) {
+    const x = course.liftX, now = performance.now() / 1000;
+    for (let sy = 0; sy < H; sy++) {
+      const wy = camY + sy;
+      if ((wy & 1) === 0) { put(x - 3, sy, VIC.black); put(x + 3, sy, VIC.black); }
+    }
+    for (let p = Math.floor(camY / LIFT_GAP); p * LIFT_GAP < camY + H + 4; p++) {
+      const sy = p * LIFT_GAP - camY;
+      for (let dx = -5; dx <= 5; dx++) put(x + dx, sy, VIC.black);
+      put(x, sy - 1, VIC.blue); put(x, sy + 1, VIC.blue); put(x - 1, sy, VIC.blue); put(x + 1, sy, VIC.blue);
+    }
+    for (const [cx, dir] of [[x - 3, -1], [x + 3, 1]]) {
+      const shift = (now * CHAIR_SPEED * dir) % CHAIR_GAP;
+      for (let wy = Math.floor(camY / CHAIR_GAP) * CHAIR_GAP - CHAIR_GAP; wy < camY + H + CHAIR_GAP; wy += CHAIR_GAP) {
+        const y = Math.round(wy + shift) - camY, k = Math.round(wy / CHAIR_GAP);
+        if (hash(k * 31 + (dir > 0 ? 5 : 0), 77) < 0.55) {   // someone riding, in a bright jacket
+          blit(CHAIR_FULL, cx - 2, y - 2, FAN_INKS[Math.floor(hash(k * 17, dir + 9) * FAN_INKS.length)]);
+        } else blit(CHAIR_EMPTY, cx - 2, y);
+      }
+    }
+  }
+
   // The helicopter, from above: nose up, red cabin with a cyan canopy,
   // skids, a tail boom down towards the skier, and a rotor that's a blur
   // of spinning blades. It hovers through the countdown, then on GO pulls
@@ -2338,7 +2478,19 @@
       for (const [dx, dy] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) put(fx + dx, fy + dy, VIC.white);
     }
   }
+  // The arena's barrier: advertising boards, blue and red, two pixels deep.
+  const ARENA_RY = 46;
+  function drawBarrier(camY) {
+    const { cx, rx, ry, y } = course.arena;
+    if (y - camY > H || y + ry + 2 - camY < 0) return;
+    const steps = Math.ceil(Math.PI * (rx + ry));
+    for (let i = 0; i <= steps; i++) {
+      const th = i / steps * Math.PI, board = Math.floor(i / 6) % 2 ? VIC.blue : VIC.red;
+      for (const d of [0, 1]) put(Math.round(cx + (rx + d) * Math.cos(th)), Math.round(y + (ry + d) * Math.sin(th)) - camY, board);
+    }
+  }
   function drawFans(camY) {
+    if (course.arena) drawBarrier(camY);
     const now = performance.now();
     for (const f of course.fans) {
       const sy = f.y - camY;
@@ -2714,7 +2866,8 @@
     if (row) return row;
     row = new Uint8ClampedArray((W + 2 * MARGIN) * 4);
     const c = centerAt(wy);
-    const line = lineAt ? lineAt(wy) : null;
+    // The worn line stops where an arena's skiers stop.
+    const line = lineAt && !(course && course.arena && wy > course.arena.y + course.arena.ry * 0.5 + 4) ? lineAt(wy) : null;
     // Steep pitches look it: the piste's speckle thickens with the slope.
     const steep = course && course.slopeAt ? 0.3 * Math.max(0, course.slopeAt(wy) - 1) : 0;
     const lips = (course && course.lips) || [], borders = (course && course.borders) || [];
@@ -2827,6 +2980,7 @@
       }
     }
 
+    if (course && course.nets && course.nets.length) drawEdgeNets(camY);
     if (course) for (const g of course.signs) drawSign(g, camY);
     if (course && course.camp) drawCamp(course.camp, camY);
     if (course && course.fans) drawFans(camY);
@@ -2859,6 +3013,7 @@
           blit(fl, Math.round(skierX) - 3, Math.round(skierY) - camY + 5 - s.length - 3);
         }
       }
+      if (course.liftX !== null) drawLift(camY);
       if (heli) drawHeli(camY);
       for (const p of particles) {
         const px = Math.round(p.x), py = Math.round(p.y - camY);
@@ -3055,13 +3210,13 @@
   function metres(id) { return +mountain(id).height.replace(/[^0-9]/g, ''); }
   const CHARACTER = {
     // A narrow chute near the bottom: the trees close in, no way out.
-    alyeska: { fans: 34, heli: true, width: [[0, 44], [0.7, 44], [0.76, 27], [0.94, 27], [1, 36]] },
+    alyeska: { fans: 120, cameras: 45, heli: true, edgeNets: 0.5, lift: true, arena: true, width: [[0, 44], [0.7, 44], [0.76, 27], [0.94, 27], [1, 36]] },
     // Broad and gentle: long lazy bends, little on the piste.
-    kunama: { fans: 34, moths: true, width: 50, sway: 0.55, twist: 1.2, crowd: 0.3, quick: 0 },
+    kunama: { fans: 120, cameras: 45, moths: true, edgeNets: 0.5, lift: true, arena: true, width: 50, sway: 0.55, twist: 1.2, crowd: 0.3, quick: 0 },
     // The Grand Muret: 76%, right after the start. The slope drops away,
     // you fly for a few poles, then it eases.
     // Room to tuck on the pitch, then the poles close in below it.
-    pista3: { fans: 40, gaps: [[0, 170], [0.42, 160], [0.57, 75], [1, 64]], quick: 0, slope: [[0, 1], [0.05, 1], [0.08, 1.5], [0.6, 1.5], [0.66, 1]],
+    pista3: { fans: 160, cameras: 60, edgeNets: 0.8, lift: true, arena: true, gaps: [[0, 170], [0.42, 160], [0.57, 75], [1, 64]], quick: 0, slope: [[0, 1], [0.05, 1], [0.08, 1.5], [0.6, 1.5], [0.66, 1]],
       signs: [{ t: 0.05, lines: ['GRAND MURET', '76%'] }] },
     aoraki: {},
     // Even as a metronome: same gap, same swing, no bunching.
@@ -3070,7 +3225,7 @@
     // the finish it's nearly all blossom. Photographers at the bottom.
     fuji: { cherry: [[0, 0], [0.25, 0], [0.45, 0.25], [0.75, 0.55], [0.95, 0.95]], fans: 8, cameras: 5, gapFirst: 82, gapLast: 82, offset: 13, offsetLast: 13, jitter: 0, quick: 0, twist: 0.5 },
     // Swiss top tight and technical; Italian bottom opens into long turns.
-    cervino: { fans: 34, borders: [0.5], signs: [{ t: 0.5, lines: ['ITALIA'], flag: 'it' }],
+    cervino: { fans: 120, cameras: 45, edgeNets: 0.5, lift: true, arena: true, borders: [0.5], signs: [{ t: 0.5, lines: ['ITALIA'], flag: 'it' }],
       welcome: 'BENVENUTI IN ITALIA !!!', gapFirst: 62, gapLast: 92, offset: 15, offsetLast: 11,
       width: [[0, 34], [0.47, 34], [0.53, 48], [1, 48]] },
     vinson: {},
