@@ -236,6 +236,11 @@
     moths: false,              // Bogong moth swarms fluttering past
     cherry: 0,                 // share of trees that are cherries in bloom, or [[t, share], ...]
     rata: 0,                   // share of trees that are southern rātā in flower, in clumps
+    scree: 0,                  // bare volcanic scree showing through the snow: how much (0..1), or [[t, x], ...]
+    snowBand: null,            // ...and past this far beyond the piste, [[t, px], ...], bare all over
+    forest: 1,                 // trees off the piste, times Single's
+    ice: 0,                    // ice cliffs at the sides down to this t
+    bushes: false,             // low scrub instead of pines
     twist: 1,                  // how far the piste wanders
     sway: 1,                   // ...and how often: under 1 is longer, lazier bends
     crowd: 1,                  // trees and pineapples on the piste, times Single's
@@ -402,6 +407,24 @@
     const lineEnd = endless ? Infinity : poles[poles.length - 1].y;
     const baseWidth = alongCourse(S.width, finishY), baseSlope = alongCourse(S.slope, finishY);
     const cherryAt = alongCourse(S.cherry, finishY), debrisAt = alongCourse(S.debris, finishY);
+    // Scree: patches of smooth noise where the snow has gone, all over the
+    // slope. Ice cliffs: a band at each side, high up only.
+    const screeAmt = alongCourse(S.scree, finishY), band = S.snowBand ? alongCourse(S.snowBand, finishY) : null;
+    const screeAt = !S.scree ? () => false : (x, y) => {
+      if (y < START_PAD - 40) return false;
+      const n = noise2(x / 16 + 50, y / 16 + (salt % 53)) + 0.12 * noise2(x / 4, y / 4);
+      if (band) {
+        // The snow shrinks back towards the piste down the mountain, its
+        // edge ragged; beyond it, bare rock with the odd snow patch left.
+        const c = centerAt(y), edge = baseWidth(y) + band(y) + 18 * (noise2(y / 30, x < c ? 3.5 : 8.5) - 0.5);
+        if (Math.abs(x - c) > edge) return n < 0.9;
+      }
+      return n < 0.12 + 0.55 * screeAmt(y);
+    };
+    // How far into the ice (x, y) is, past the cliff's face; 0 or less is not ice.
+    const iceDepth = !S.ice ? () => -99 : (x, y) => y >= S.ice * finishY ? -99
+      : Math.abs(x - centerAt(y)) - (baseWidth(y) + 30 + 6 * noise2(y / 15, 9)) - Math.max(0, y - (S.ice - 0.05) * finishY) * 2;
+    const iceAt = (x, y) => iceDepth(x, y) > 0;
     const widthAt = !K ? baseWidth : y =>
       y < c0 || y > c2 ? baseWidth(y)
         : y <= c1 ? K.hw : K.hw + (baseWidth(y) - K.hw) * smooth((y - c1) / K.open);
@@ -501,7 +524,7 @@
       liftX = sum / n > W / 2 ? 18 : W - 18;
     }
     course = { seed, centerAt, lineAt, poles, finishY, salt, nets, liftX, titlePine, endless, lineEnd, extend, levelAt, widthAt, slopeAt, lips, borders, signs, arena, wall, rockDepth, inCouloir, camp, fans, fanZone,
-      couloir: K ? { c0, c1, c2 } : null, cherryAt, debrisAt, shape: S };
+      couloir: K ? { c0, c1, c2 } : null, cherryAt, debrisAt, screeAt, iceAt, iceDepth, shape: S };
     if (endless) extend(0);
     snowRows.clear();            // cached rows belong to the previous slope
   }
@@ -687,6 +710,15 @@
       hiss.g.gain.setTargetAtTime(0.22 * level, t, 0.15);
       hiss.f.frequency.setTargetAtTime(500 + 1400 * level, t, 0.15);
       if (level <= 0) { const h = hiss; h.src.stop(t + 0.8); hiss = null; }
+    }
+
+    // Skis on bare rock: a short, harsh scrape of high noise.
+    function playScrape(level) {
+      if (!ac) return;
+      const t = ac.currentTime, n = noiseThrough('highpass', 2400 + Math.random() * 1500, 0.8, t);
+      n.g.gain.setValueAtTime(0.12 * (0.4 + 0.6 * level), t);
+      n.g.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+      n.src.stop(t + 0.09);
     }
 
     // A helicopter: low noise chopped by a square wave, thup-thup-thup,
@@ -968,7 +1000,7 @@
     // must never be able to stop a run, so every entry point swallows it.
     const safe = f => (...a) => { try { return f(...a); } catch (_) { return undefined; } };
     return {
-      unlock: safe(unlock), updateSluff: safe(updateSluff), updateHeli: safe(updateHeli), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
+      unlock: safe(unlock), playScrape: safe(playScrape), updateSluff: safe(updateSluff), updateHeli: safe(updateHeli), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
       stopSwoosh: safe(stopSwoosh), playDash: safe(playDash), playBreak: safe(playBreak),
       playExplosion: safe(playExplosion), playFanfare: safe(playFanfare), toggleMute: safe(toggleMute),
       playCoin: safe(playCoin), playCount: safe(playCount), playTick: safe(playTick), playDing: safe(playDing), playNoBonus: safe(playNoBonus),
@@ -1653,7 +1685,10 @@
 
     // Fresh snow: drag grows with depth, the same depth the speckle shows.
     const depth = snowDepth(skierX, course.centerAt(skierY), skierY);
-    const target = DOWN_SPEED * course.slopeAt(skierY) * tuck * (1 - DEEP_SNOW_DRAG * depth);
+    // Bare scree grabs the skis: a hard slowdown, a scrape and sparks.
+    const onScree = course.screeAt(skierX, skierY);
+    if (onScree) scrape(dt);
+    const target = DOWN_SPEED * course.slopeAt(skierY) * tuck * (1 - DEEP_SNOW_DRAG * depth) * (onScree ? SCREE_DRAG : 1);
     const rate = target > speed ? ACCEL_RATE : DECEL_RATE;
     speed += (target - speed) * Math.min(1, dt * rate);
 
@@ -1681,6 +1716,18 @@
     if (course.couloir && moveSluff(dt)) { crash({ sluff: true }); return; }
     if (crossed < course.borders.length && skierY >= course.borders[crossed]) { crossed++; flash(course.shape.welcome, 1800); }
     if (skierY >= course.finishY) finish();
+  }
+
+  // Grinding over scree: a scrape every so often, sparks off the skis.
+  const SCREE_DRAG = 0.5;
+  let scrapeIn = 0;
+  function scrape(dt) {
+    scrapeIn -= dt;
+    if (scrapeIn <= 0) { scrapeIn = 0.09; SFX.playScrape(Math.min(1, speed / DOWN_SPEED)); }
+    if (Math.random() < 0.6) {
+      particles.push({ x: skierX + (Math.random() - 0.5) * 4, y: skierY + 3, vx: (Math.random() - 0.5) * 40, vy: -20 - Math.random() * 30,
+        g: 200, life: 0.15 + Math.random() * 0.15, size: 1, color: Math.random() < 0.5 ? VIC.yellow : VIC.white });
+    }
   }
 
   // Sluff: ski a steep gully and the snow you knock loose pours down
@@ -1801,9 +1848,10 @@
       debris = course && course.debrisAt ? course.debrisAt(y) : 0;
       if (hash(i * 92821 + salt, j) >= PISTE_TREE * more + debris || !lineIsClear(x, y)) return null;
     } else {
-      const chance = TREE_EDGE + (TREE_MAX - TREE_EDGE) * depth;
+      const chance = (TREE_EDGE + (TREE_MAX - TREE_EDGE) * depth) * (course && course.shape ? course.shape.forest : 1);
       if (hash(i * 92821 + salt, j) >= chance) return null;
     }
+    if (!pine && course && course.iceAt && course.iceAt(x, y)) return null;
     // Keep clear of fences, so the two never overlap.
     const side = x < centerAt(y) ? -1 : 1, k = Math.floor(y / FENCE_SLOT);
     for (let kk = k - 1; kk <= k + 1; kk++) {
@@ -1820,7 +1868,8 @@
     // Rātā grow in clumps too: smaller patches of their own noise.
     const rata = !pine && !rock && !cherry && course && course.shape && course.shape.rata > 0 &&
       noise2(i / 2 + 300 + (salt % 61), j / 2 + 41) < course.shape.rata;
-    return { i, j, x, y, pine, rock, cherry, rata };
+    const bush = !pine && !rock && !cherry && !rata && !!(course && course.shape && course.shape.bushes);
+    return { i, j, x, y, pine, rock, cherry, rata, bush };
   }
 
   // True if something deadly at (x, y) leaves the racing line and the
@@ -2198,7 +2247,7 @@
         const tr = treeAt(i, j, salt, centerAt);
         if (!tr || exploded.has(i + ',' + j) || scorched.has(i + ',' + j)) continue;
         // A pineapple is two pixels shorter and four narrower than a tree.
-        const reach = tr.pine ? 3 : 5, top = tr.pine ? 8 : tr.rock ? ROCKS[tr.rock - 1].length + 1 : 10;
+        const reach = tr.pine ? 3 : 5, top = tr.pine ? 8 : tr.rock ? ROCKS[tr.rock - 1].length + 1 : tr.bush ? 6 : 10;
         if (Math.abs(x - tr.x) <= reach && y >= tr.y - top && y <= tr.y + 2) return tr;
       }
     }
@@ -2542,6 +2591,15 @@
     '....O....',
   ];
 
+  // Low scrub, wide and squat, darker twigs showing.
+  const BUSH = [
+    '...GGG...',
+    '.GGGGGGG.',
+    'GGGKGGGGG',
+    'GGGGGGKGG',
+    '.GGGGGGG.',
+  ];
+
   const INKS = { Q: VIC.crimson, P: VIC.pink, O: VIC.orange, G: VIC.green, Y: VIC.yellow, R: VIC.red,
     B: VIC.lightBlue, C: VIC.cyan, V: VIC.blue, K: VIC.black, W: VIC.white };
 
@@ -2807,14 +2865,15 @@
   // above, for POLE_BURN_MS; then a charred black skeleton. A tree that
   // was hit leaves only a stump.
   function drawScorchedTree(tr, sc, camY) {
-    const x0 = tr.x - 4, y0 = tr.y - camY - 8;
+    const shape = tr.cherry ? CHERRY : tr.rata ? RATA : tr.bush ? BUSH : TREE;
+    const x0 = tr.x - 4, y0 = tr.y - camY - (shape.length - 1), base = tr.y - camY;
     if (sc.hit) {
-      put(tr.x, y0 + 8, VIC.black); put(tr.x, y0 + 7, VIC.black);
-      put(tr.x - 1, y0 + 8, VIC.black); put(tr.x + 1, y0 + 8, VIC.black);
+      put(tr.x, base, VIC.black); put(tr.x, base - 1, VIC.black);
+      put(tr.x - 1, base, VIC.black); put(tr.x + 1, base, VIC.black);
       return;
     }
     const age = performance.now() - sc.at, frame = Math.floor(performance.now() / 90);
-    const colors = fireColors(sc.god), shape = tr.cherry ? CHERRY : tr.rata ? RATA : TREE;
+    const colors = fireColors(sc.god);
     for (let r = 0; r < shape.length; r++) {
       for (let c = 0; c < shape[r].length; c++) {
         if (shape[r][c] === '.') continue;
@@ -2931,6 +2990,17 @@
       } else if (hash(sx + 5113, wy + 29) < steep) {
         col = VIC.paleBlue;    // a steep face, faintly shaded
       }
+      const ice = course && course.iceDepth ? course.iceDepth(sx, wy) : -99;
+      if (ice > -2 && ice <= 0 && course.shape.ice) {
+        col = VIC.blue;   // the cliff's shadow on the snow
+      } else if (ice > 0) {
+        // A glacier's cliff from above: a bright white lip along the face,
+        // pale blue ice beyond, the odd cyan crack running back.
+        col = ice <= 2 ? VIC.white : hash(sx * 3 + 1, Math.floor(wy / 5)) < 0.08 ? VIC.cyan : VIC.paleBlue;
+      } else if (course && course.screeAt && course.screeAt(sx, wy) && (off > LINE_HW || line === null)) {
+        // Scree: dark volcanic grit, brown and black.
+        col = hash(sx + 5, wy + 11) < 0.2 ? VIC.black : VIC.orange;
+      }
       // The lip where a steep pitch drops away: a broken dark line right
       // across the slope.
       for (const lip of lips) {
@@ -2974,6 +3044,7 @@
         else if (tr.rock) { const r = ROCKS[tr.rock - 1]; blit(r, tr.x - 4, tr.y - camY - r.length + 1); }
         else if (tr.cherry) blit(CHERRY, tr.x - 4, tr.y - camY - 8);
         else if (tr.rata) blit(RATA, tr.x - 4, tr.y - camY - 8);
+        else if (tr.bush) blit(BUSH, tr.x - 4, tr.y - camY - 4);
         else if (!tr.pine) blit(TREE, tr.x - 4, tr.y - camY - 8, VIC.green);
         else blit(PINEAPPLE, tr.x - 2, tr.y - camY - 6);
       }
@@ -3263,7 +3334,10 @@
     // The serpent: the twistiest piste, long S-bends.
     iztactepetl: { twist: 1.8, sway: 0.6 },
     // The long one: steady, not tricky.
-    kilimanjaro: { poles: 35, reds: 6, gapFirst: 86, gapLast: 74, jitter: 2, quick: 1 },
+    // Mostly bare volcanic rock now: scree patches all over, boulders, few
+    // trees, and ice cliffs of the last glaciers up top.
+    kilimanjaro: { scree: [[0, 0], [0.3, 0.05], [1, 0.3]], snowBand: [[0, 140], [0.75, 30], [1, 22]],
+      rocks: 0.75, forest: 0.45, bushes: true, poles: 35, reds: 6, gapFirst: 86, gapLast: 74, jitter: 2, quick: 1 },
     aconcagua: {},
     annapurna: {},
     // The Savage Mountain: the most technical slalom of all.
@@ -3281,7 +3355,7 @@
   const PAR = {
     alyeska: [3468, 3342], kunama: [3620, 3489], pista3: [3887, 3746], aoraki: [3371, 3249],
     fuji: [3481, 3355], cervino: [2860, 2756], vinson: [3046, 2935], kirinyaga: [3057, 2947],
-    iztactepetl: [3017, 2907], kilimanjaro: [4505, 4342], aconcagua: [2703, 2605],
+    iztactepetl: [3017, 2907], kilimanjaro: [4597, 4430], aconcagua: [2703, 2605],
     annapurna: [2716, 2617], k2: [2702, 2604], chomolungma: [4170, 4018],
   };
   function shapeOf(m) {
