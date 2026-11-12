@@ -217,6 +217,7 @@
     width: PATH_HW,            // piste half width, or [[t, hw], ...] down the course (t 0..1)
     slope: 1,                  // how steep: speed times this, or [[t, x], ...] like width
     signs: [],                 // boards by the piste: [{ t, lines: [...] }]
+    couloir: null,             // a pole-less gully between rock walls at the top (see buildCourse)
     twist: 1,                  // how far the piste wanders
     sway: 1,                   // ...and how often: under 1 is longer, lazier bends
     crowd: 1,                  // trees and pineapples on the piste, times Single's
@@ -246,7 +247,20 @@
     const rnd = mulberry32(seed % 4294967296);
     const f1 = (0.006 + rnd() * 0.004) * S.sway, p1 = rnd() * Math.PI * 2;
     const f2 = (0.017 + rnd() * 0.008) * S.sway, p2 = rnd() * Math.PI * 2;
-    const centerAt = y => W / 2 + S.twist * 18 * Math.sin(y * f1 + p1) + S.twist * 10 * Math.sin(y * f2 + p2);
+    const baseCenter = y => W / 2 + S.twist * 18 * Math.sin(y * f1 + p1) + S.twist * 10 * Math.sin(y * f2 + p2);
+
+    // A couloir: from row K.start, K.rows of narrow gully between rock
+    // walls, zigzagging K.amp either side (whole periods, so it ends where
+    // it began), steep, no poles. Then it opens out over K.open rows onto
+    // the slope proper.
+    const K = S.couloir;
+    const c0 = K ? K.start : 0, c1 = K ? K.start + K.rows : 0, c2 = K ? c1 + K.open : 0;
+    const smooth = t => t * t * (3 - 2 * t);
+    const zig = y => K.amp * Math.asin(0.97 * Math.sin(2 * Math.PI * (y - c0) / K.period)) / Math.asin(0.97);
+    const centerAt = !K ? baseCenter : y =>
+      y < c0 ? baseCenter(y)
+        : y <= c1 ? baseCenter(c0) + zig(y)
+        : baseCenter(c0) + (baseCenter(y) - baseCenter(c0)) * smooth(Math.min(1, (y - c1) / K.open));
 
     // The seed picks the first pole's side; after that they alternate, so
     // the line is a slalom, not a schuss. Each pole is passed on its
@@ -257,7 +271,7 @@
     const quick = pickQuickPoles(seed, S.poles, S.quick);
     const gapAt = S.gaps ? alongCourse(S.gaps, 1) : null;
     const poles = [];
-    let y = START_PAD;
+    let y = K ? c2 + START_PAD - 60 : START_PAD;
     for (let i = 0; i < (endless ? 0 : S.poles); i++) {
       const t = (i - 1) / (S.poles - 2);
       if (i > 0) {
@@ -281,10 +295,12 @@
     // just outside it, end mid-piste at the finish. Drawn as a worn track
     // in the snow.
     const pts = [{ y: 0, x: centerAt(0) }]
+      .concat(K ? [c0, c1, c2].map(cy => ({ y: cy, x: centerAt(cy) })) : [])
       .concat(poles.map(p => ({ y: p.y, x: p.x + p.side * LINE_WIDE })))
       .concat(endless ? [] : [{ y: finishY, x: centerAt(finishY) }]);
     const lineAt = (wy) => {
       if (wy <= 0) return pts[0].x;
+      if (K && wy >= c0 && wy <= c1) return centerAt(wy);   // down the middle of the gully
       for (let k = 1; k < pts.length; k++) {
         if (wy <= pts[k].y) {
           const a = pts[k - 1], b = pts[k];
@@ -305,7 +321,7 @@
     const titlePine = {
       i: 't', j: 't', pine: true,
       x: 4 + Math.floor(prnd() * (W - 8)),
-      y: 64 + Math.floor(prnd() * 40),
+      y: (K ? 24 : 64) + Math.floor(prnd() * 40),   // above a couloir, if there is one
     };
     // Endless never has the whole slope: called every step, this makes the
     // poles coming up and forgets those long gone, so only a few screens'
@@ -354,13 +370,25 @@
       while (pts.length > 2 && pts[1].y < at - ENDLESS_BEHIND) pts.shift();
     };
     const lineEnd = endless ? Infinity : poles[poles.length - 1].y;
-    const widthAt = alongCourse(S.width, finishY), slopeAt = alongCourse(S.slope, finishY);
+    const baseWidth = alongCourse(S.width, finishY), baseSlope = alongCourse(S.slope, finishY);
+    const widthAt = !K ? baseWidth : y =>
+      y < c0 || y > c2 ? baseWidth(y)
+        : y <= c1 ? K.hw : K.hw + (baseWidth(y) - K.hw) * smooth((y - c1) / K.open);
+    const slopeAt = !K ? baseSlope : y => (y >= c0 && y <= c1 ? K.slope : baseSlope(y));
+    // Rock: past the gully's edge, which is a little ragged.
+    const inCouloir = y => !!K && y >= c0 - 12 && y <= c2;
+    // How far into the rock (x, y) is; 0 or less is the gully.
+    const rockDepth = (x, y) => !K || y < c0 || y > c2 ? -1
+      : Math.abs(x - centerAt(y)) - widthAt(y) - 3 * noise2(y / 6, x < centerAt(y) ? 21.5 : 37.5);
+    const wall = (x, y) => rockDepth(x, y) > 0;
     // Where the slope breaks away: the start of each climb in steepness.
     const lips = typeof S.slope === 'number' ? [] : S.slope.slice(1)
       .filter((pt, k) => S.slope[k][1] <= 1 && pt[1] > 1)
-      .map(pt => Math.round(S.slope[S.slope.indexOf(pt) - 1][0] * finishY));
-    const signs = S.signs.map(g => ({ y: Math.round(g.t * finishY), lines: g.lines }));
-    course = { seed, centerAt, lineAt, poles, finishY, salt, titlePine, endless, lineEnd, extend, levelAt, widthAt, slopeAt, lips, signs, shape: S };
+      .map(pt => Math.round(S.slope[S.slope.indexOf(pt) - 1][0] * finishY))
+      .concat(K ? [c0] : []);
+    const signs = S.signs.map(g => ({ y: Math.round(g.t * finishY), lines: g.lines }))
+      .concat(K && K.sign ? [{ y: c0, lines: K.sign }] : []);
+    course = { seed, centerAt, lineAt, poles, finishY, salt, titlePine, endless, lineEnd, extend, levelAt, widthAt, slopeAt, lips, signs, wall, rockDepth, inCouloir, shape: S };
     if (endless) extend(0);
     snowRows.clear();            // cached rows belong to the previous slope
   }
@@ -1022,7 +1050,7 @@
     state = 'crashed';
     mode = 'crash';
     runEnd = performance.now();
-    hitWhat = hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
+    hitWhat = hit.wall ? 'ROCKS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
     SFX.stopSwoosh();
     if (hit.pine) SFX.playExplosion(); else SFX.playBreak();
     if (hit.pine) {
@@ -1439,6 +1467,8 @@
     const steering = heading !== 'down';
     mode = heading;
 
+    // The couloir's walls: no fire gets through rock. Only a god does.
+    if (course.wall(skierX, skierY) && !runGod) { crash({ wall: true }); return; }
     const hit = hitTree(skierX, skierY) || hitFence(skierX, skierY) || hitAnimal(skierX, skierY);
     if (hit && onFire()) burn(hit);
     else if (hit) { crash(hit); return; }
@@ -1542,6 +1572,7 @@
     const x = i * TREE_CELL + 2 + Math.floor(hash(i * 7 + salt, j * 3 + 1) * (TREE_CELL - 4));
     const y = j * TREE_CELL + 2 + Math.floor(hash(i * 5 + salt, j * 11 + 7) * (TREE_CELL - 4));
     if (course && Math.abs(x - course.titlePine.x) < 10 && Math.abs(y - course.titlePine.y) < 12) return null;
+    if (course && course.inCouloir && course.inCouloir(y)) return null;   // nothing grows on the rock
     const depth = snowDepth(x, centerAt(y), y);
     // Endless puts more on the piste the harder it gets.
     const crowd = !course ? 1 : course.endless ? 1 + 2 * course.levelAt(y) : course.shape.crowd;
@@ -1601,6 +1632,7 @@
   function fenceAt(k, side, salt, centerAt) {
     if (hash(k * 613 + salt, side + 71) >= FENCE_CHANCE) return null;
     const y = k * FENCE_SLOT + Math.floor(hash(k * 37 + salt, side + 5) * (FENCE_SLOT - 8));
+    if (course && course.inCouloir && course.inCouloir(y)) return null;
     const c = centerAt(y);
     const len = 16 + Math.floor(hash(k * 91 + salt, side + 13) * 22);
     let a;
@@ -1659,6 +1691,7 @@
     const y = k * ANIMAL_SLOT + Math.floor(hash(k * 41 + salt, side + 7) * (ANIMAL_SLOT - 20));
     const x = Math.round(centerAt(y) + side * (pisteHW(y) + 6 + hash(k * 59 + salt, side + 19) * 14));
     if (x < 10 || x > W - 10 || y > course.finishY - 40) return null;
+    if (course.inCouloir && course.inCouloir(y + 20)) return null;
     if (Math.abs(x - course.lineAt(y)) < CLEAR_LINE + ANIMAL_ROAM) return null;
     const roll = hash(k * 137 + salt, side + 53);
     return { kind: roll < 0.67 ? 'fox' : roll < 0.92 ? 'wolf' : 'bear', x, y, homeX: x, homeY: y,
@@ -2290,6 +2323,15 @@
         row[i] = col[0]; row[i + 1] = col[1]; row[i + 2] = col[2]; row[i + 3] = 255;
         continue;
       }
+      const rock = course && course.rockDepth ? course.rockDepth(sx, wy) : -1;
+      if (rock > 0) {
+        // Rock: dark blue, cracked with black, the odd icy glint.
+        const n = noise2(sx / 4, wy / 4) + 0.35 * hash(sx + 71, wy + 3);
+        col = n < 0.45 ? VIC.black : n > 1.15 ? VIC.lightBlue : VIC.blue;
+        const i = (sx + MARGIN) * 4;
+        row[i] = col[0]; row[i + 1] = col[1]; row[i + 2] = col[2]; row[i + 3] = 255;
+        continue;
+      }
       const depth = snowDepth(sx, c, wy);
       // The worn line: packed snow along the racing line, speckled cyan
       // (the VIC-20 has no grey), densest in the middle of the track.
@@ -2625,7 +2667,10 @@
     annapurna: {},
     // The Savage Mountain: the most technical slalom of all.
     k2: { quick: 3, offset: 15, offsetLast: 15, gapLast: 54 },
-    chomolungma: {},
+    // The Hornbein Couloir first: steep, narrow, zigzagging between rock
+    // walls, no poles; then out onto the North Face.
+    chomolungma: { couloir: { start: 100, rows: 600, open: 90, hw: 15, amp: 26, period: 300, slope: 1.6,
+      sign: ['HORNBEIN', 'COULOIR'] } },
   };
   // Par and three-star times (cs), scaled from Single's by how long the
   // autopilot takes on each. Re-run when a course changes.
@@ -2633,7 +2678,7 @@
     alyeska: [3468, 3342], kunama: [3620, 3489], pista3: [3887, 3746], aoraki: [3371, 3249],
     fuji: [3481, 3355], cervino: [2860, 2756], vinson: [3046, 2935], kirinyaga: [3057, 2947],
     iztactepetl: [3017, 2907], kilimanjaro: [4505, 4342], aconcagua: [2703, 2605],
-    annapurna: [2716, 2617], k2: [2702, 2604], chomolungma: [2721, 2622],
+    annapurna: [2716, 2617], k2: [2702, 2604], chomolungma: [3508, 3381],
   };
   function shapeOf(m) {
     const d = BY_HEIGHT.indexOf(m.id) / (BY_HEIGHT.length - 1);
