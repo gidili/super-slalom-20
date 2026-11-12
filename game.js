@@ -671,6 +671,7 @@
   let crossed = 0;             // borders crossed so far this run
   let fellIn = false;          // swallowed by a crevasse: no skier left to draw
   let slide = null;            // an avalanche on the way down, if there is one
+  let snowballs = [];          // ...and what it breaks up into near the end: rolling, then lumps
   let icefall = [], iceIn = 0; // chunks off a serac, sliding across the piste
   // Championship courses are fixed, so where the animals turn up is
   // shuffled per run instead; Single's come from its seed as ever.
@@ -1259,7 +1260,7 @@
     state = 'title';
     ranOut = false;
     // The last run's weather and wildlife go with it.
-    sluff = null; slide = null; heli = null; icefall = []; wind = null; gustLines = []; fellIn = false; pan = 0;
+    sluff = null; slide = null; snowballs = []; heli = null; icefall = []; wind = null; gustLines = []; fellIn = false; pan = 0;
     if (!keep) { champ = null; prepareRun(); }
     particles = [];
     hideOverlay();
@@ -1311,7 +1312,7 @@
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     held = []; tapLeft = 0;
-    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null; crossed = 0; pan = 0; wind = null; gustLines = []; fellIn = false; slide = null; icefall = []; iceIn = 0.5;
+    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null; crossed = 0; pan = 0; wind = null; gustLines = []; fellIn = false; slide = null; snowballs = []; icefall = []; iceIn = 0.5;
     animalSalt = champ || runClassic ? Math.floor(Math.random() * 999983) : 0;
     animals = []; animalSlot = Math.ceil(START_PAD / ANIMAL_SLOT);
     birds = []; birdIn = between(course.endless ? BIRD_EVERY_ENDLESS : BIRD_EVERY);
@@ -1409,7 +1410,13 @@
     runEnd = performance.now();
     hitWhat = hit.icefall ? 'ICEFALL' : hit.avalanche ? 'AVALANCHE' : hit.crevasse ? 'CREVASSE' : hit.ice ? 'ICE' : hit.pen ? 'PENITENTES' : hit.sluff ? 'SLUFF' : hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.net ? 'NETS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
     SFX.stopSwoosh();
-    if (hit.crevasse) {   // gone: a puff of snow and a long fall
+    if (hit.avalanche) {   // swallowed: the snow rolls on over you
+      fellIn = true;
+      slide.y = skierY + 6;
+      for (let k = 0; k < 18; k++) particles.push({ x: skierX + (Math.random() - 0.5) * 10, y: skierY, vx: (Math.random() - 0.5) * 60,
+        vy: -20 - Math.random() * 40, g: 120, life: 0.4 + Math.random() * 0.4, size: 1, color: Math.random() < 0.6 ? VIC.white : VIC.lightBlue });
+      SFX.playBreak();
+    } else if (hit.crevasse) {   // gone: a puff of snow and a long fall
       fellIn = true;
       SFX.playFall();
       for (let k = 0; k < 14; k++) particles.push({ x: skierX + (Math.random() - 0.5) * 6, y: skierY - 2, vx: (Math.random() - 0.5) * 50,
@@ -1948,6 +1955,7 @@
     if (onFire()) scorchPassed();
     if (course.couloir && moveSluff(dt)) { crash({ sluff: true }); return; }
     if (course.shape.avalanche && moveAvalanche(dt)) { crash({ avalanche: true }); return; }
+    if (snowballs.length) { const b = moveSnowballs(dt); if (b) knockedBySnowball(b); }
     if (course.shape.serac) {
       // A chunk knocks you back, it doesn't end the run: it shatters and
       // you lose most of your speed. On fire you smash it for points.
@@ -2035,13 +2043,17 @@
   // The avalanche: as you pass pole `from` the mountain starts to rumble;
   // a second later a wall of snow comes over the top of the screen, right
   // across the slope, and holds on your tail like the sluff. Keep your
-  // speed. Past pole `to` it spreads out and stops.
+  // speed. At pole `to` the wall stops, everything behind it buried, and
+  // breaks up into big snowballs that roll on, some faster than you, and
+  // come to rest as lumps: a patchy stretch on to the finish. A snowball
+  // or a lump knocks you back; the wall itself swallows you.
   const SLIDE_RUMBLE = 1.1, SLIDE_HOLD = 34, SLIDE_V = 64, SLIDE_STOP = 90;
+  const SNOWBALLS = 18;
   function moveAvalanche(dt) {
     const av = course.shape.avalanche, poles = course.poles;
     if (!slide) {
       if (skierY < poles[av.from].y) return false;
-      slide = { rumble: SLIDE_RUMBLE, y: null, v: 0, end: poles[Math.min(av.to, poles.length - 1)].y };
+      slide = { rumble: SLIDE_RUMBLE, y: null, v: 0, end: poles[Math.min(av.to, poles.length - 1)].y, hold: av.hold || SLIDE_HOLD };
     }
     if (slide.rumble > 0) {
       slide.rumble -= dt;
@@ -2049,10 +2061,48 @@
       return false;
     }
     if (slide.v <= 0) return false;
-    if (slide.y < slide.end) slide.v = Math.max(SLIDE_V, Math.min(280, speed + 3 * (skierY - slide.y - SLIDE_HOLD)));
+    if (slide.y < slide.end) slide.v = Math.max(av.minV || SLIDE_V, Math.min(280, speed + 3 * (skierY - slide.y - slide.hold)));
+    else if (av.breakUp) { breakUp(); return false; }
     else slide.v = Math.max(0, slide.v - SLIDE_STOP * dt);
     slide.y += slide.v * dt;
     return !runGod && slide.y >= skierY - 2;
+  }
+  function breakUp() {
+    slide.v = 0;
+    const c = course, finishY = c.finishY;
+    for (let k = 0; k < SNOWBALLS; k++) {
+      // A third or so on the piste, the rest anywhere across the slope.
+      const onPiste = Math.random() < 0.4, cy = slide.y;
+      const x = onPiste ? c.centerAt(cy) + (Math.random() * 2 - 1) * c.widthAt(cy) : -MARGIN + Math.random() * (W + 2 * MARGIN);
+      const fast = k % 2 === 0;   // these overtake you and settle ahead
+      const y = slide.y - Math.random() * 5;
+      const lo = fast ? Math.min(skierY + 25, finishY - 14) : y + 8, hi = fast ? finishY - 8 : Math.min(y + 50, finishY - 8);
+      snowballs.push({ x, y, r: 3 + Math.floor(Math.random() * 3), v0: speed * (fast ? 1.15 + Math.random() * 0.3 : 0.55 + Math.random() * 0.35),
+        v: 1, stopAt: lo + Math.random() * Math.max(0, hi - lo), dx: (Math.random() - 0.5) * 12, top: y, roll: Math.random() * 4 });
+    }
+    SFX.playBreak();
+  }
+  // Rolls them on; returns the one you ran into, if any.
+  function moveSnowballs(dt) {
+    for (const b of snowballs) {
+      if (b.v <= 0) continue;
+      const left = b.stopAt - b.y;
+      b.v = Math.min(b.v0, Math.max(6, left * 2.2));
+      b.y += b.v * dt;
+      b.x += b.dx * dt * (b.v / b.v0);
+      b.roll += b.v * dt / b.r;
+      if (left < 0.5) b.v = 0;   // a lump now, for good
+    }
+    return snowballs.find(b => Math.abs(b.x - skierX) <= b.r + 1 && skierY >= b.y - b.r - 1 && skierY <= b.y + b.r + 1) || null;
+  }
+  function knockedBySnowball(b) {
+    snowballs.splice(snowballs.indexOf(b), 1);
+    speed *= 0.35;
+    vx *= 0.3;
+    SFX.playBreak();
+    for (let k = 0; k < 12; k++) particles.push({ x: b.x + (Math.random() - 0.5) * b.r * 2, y: b.y, vx: (Math.random() - 0.5) * 50,
+      vy: -20 - Math.random() * 30, g: 120, life: 0.35 + Math.random() * 0.3, size: 1, color: Math.random() < 0.6 ? VIC.white : VIC.lightBlue });
+    pop('SNOWBALL!');
   }
   // The Bottleneck: along one stretch a serac hangs over one side of the
   // piste, and every second or so a chunk breaks off (with a crack) a
@@ -3013,6 +3063,38 @@
     }
   }
 
+  // Snowballs: a white ball shaded light blue underneath, a fleck turning
+  // round it as it rolls, a ragged track behind. At rest, a lump.
+  function drawSnowballs(camY) {
+    for (const b of snowballs) {
+      const by = Math.round(b.y) - camY, bx = Math.round(b.x);
+      if (by < -12 || by > H + 12) continue;
+      // The track it ploughed, patchy.
+      for (let y = Math.ceil(b.top); y < b.y - b.r; y += 2) {
+        if (hash(bx * 3 + 1, y) < 0.5) continue;
+        const ty = y - camY;
+        if (ty >= 0 && ty < H) put(bx + Math.round(b.dx * (y - b.top) / Math.max(1, b.v0) ) + (hash(y, bx) < 0.5 ? -1 : 1) * Math.floor(hash(bx, y) * b.r), ty, VIC.white);
+      }
+      const r = b.r, still = b.v <= 0;
+      // A shadow on the snow, down and to the right.
+      for (let dx = -r + 1; dx <= r + 1; dx++) put(bx + dx, by + r + 1, VIC.lightBlue);
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          const d = dx * dx + dy * dy, R = r * r + r * 0.6;
+          if (d > R) continue;
+          if (still && dy === -r) continue;   // settled: a little flatter on top
+          const rim = d > (r - 1) * (r - 1) + (r - 1) * 0.6;
+          const shade = dx + dy > r * 0.6;   // the lower right, away from the light
+          put(bx + dx, by + dy, rim ? (shade ? VIC.blue : VIC.lightBlue) : shade ? VIC.paleBlue : VIC.white);
+        }
+      }
+      if (!still) {   // the fleck going round
+        const a = b.roll;
+        put(bx + Math.round(Math.cos(a) * (r - 1)), by + Math.round(Math.sin(a) * (r - 1)), VIC.paleBlue);
+      }
+    }
+  }
+
   // The sluff: a churning white tongue filling the gully behind you, light
   // blue swirling through it, a ragged front with lumps tumbling ahead.
   // Once it stops it lies still.
@@ -3795,6 +3877,7 @@
         }
       }
       if (slide && slide.y !== null) drawAvalanche(camY);   // over the poles it buries
+      if (snowballs.length) drawSnowballs(camY);
       if (icefall.length) drawIcefall(camY);
       if (state !== 'title') {
         drawAnimals(camY);
@@ -4311,7 +4394,7 @@
     // tussock grass, no trees.
     aconcagua: { penitentes: 0.6, rocks: 1, forest: 0.4, tussock: true, dogs: 0.06 },
     // Long the deadliest 8,000er, mostly to avalanches; and "full of food".
-    annapurna: { wildlife: { odds: 0.016, kinds: { leopard: 1 } }, avalanche: { from: 9, to: 17 }, pines: 1.6, treeline: 1.1 },
+    annapurna: { wildlife: { odds: 0.016, kinds: { leopard: 1 } }, avalanche: { from: 9, to: 22, hold: 24, minV: 57, breakUp: true }, pines: 1.6, treeline: 1.1 },
     // The Savage Mountain: the most technical slalom of all.
     // ...run at night: dim all round, a headlamp ahead.
     // The Bottleneck: a serac over the piste for a long stretch, shedding
