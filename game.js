@@ -427,7 +427,8 @@
     const fanCols = Math.ceil(S.fans / 2 / FAN_ROWS.length);
     const fanZone = (x, y) => fans.length > 0 && y > finishY - 28 && y < finishY + 56 &&
       Math.abs(x - centerAt(y)) < widthAt(y) + 15 + fanCols * 7;
-    course = { seed, centerAt, lineAt, poles, finishY, salt, titlePine, endless, lineEnd, extend, levelAt, widthAt, slopeAt, lips, signs, wall, rockDepth, inCouloir, camp, fans, fanZone, shape: S };
+    course = { seed, centerAt, lineAt, poles, finishY, salt, titlePine, endless, lineEnd, extend, levelAt, widthAt, slopeAt, lips, signs, wall, rockDepth, inCouloir, camp, fans, fanZone,
+      couloir: K ? { c0, c1, c2 } : null, shape: S };
     if (endless) extend(0);
     snowRows.clear();            // cached rows belong to the previous slope
   }
@@ -519,6 +520,7 @@
   const onFire = () => runGod || streak >= FIRE_AT;
   let runStart = 0, runEnd = null;
   let hitWhat = 'TREES';       // what ended a crashed run, for the card
+  let sluff = null;            // the loose snow pouring down a couloir behind you
   let exploded = new Set();    // pineapples already blown up, by cell
   // Trees and fences set alight on fire, by the same keys, each with when
   // and in which fire's colours. A tree hit is a stump; a tree passed burns
@@ -538,7 +540,7 @@
   // the skis, turns snap, and the ends of runs are wood or pineapple.
   const SFX = (() => {
     const AC = window.AudioContext || window.webkitAudioContext;
-    let ac = null, master = null, noise = null, swoosh = null;
+    let ac = null, master = null, noise = null, swoosh = null, hiss = null;
     let muted = false;
     try { muted = localStorage.getItem('slalom_muted') === '1'; } catch (_) {}
     const VOLUME = 0.45;
@@ -594,6 +596,22 @@
       sw.g.gain.setTargetAtTime(0, t, 0.05);
       sw.src.stop(t + 0.3);
       swoosh = null;
+    }
+
+    // The sluff: a low rushing hiss that swells as it closes on you
+    // (level 0..1); 0 lets it die away.
+    function updateSluff(level) {
+      if (!ac) return;
+      const t = ac.currentTime;
+      if (level > 0 && !hiss) {
+        hiss = noiseThrough('lowpass', 900, 0.7, t);
+        hiss.src.loop = true;
+        hiss.g.gain.value = 0;
+      }
+      if (!hiss) return;
+      hiss.g.gain.setTargetAtTime(0.22 * level, t, 0.15);
+      hiss.f.frequency.setTargetAtTime(500 + 1400 * level, t, 0.15);
+      if (level <= 0) { const h = hiss; h.src.stop(t + 0.8); hiss = null; }
     }
 
     // A change of direction: a short dash of noise sweeping down.
@@ -853,7 +871,7 @@
     // must never be able to stop a run, so every entry point swallows it.
     const safe = f => (...a) => { try { return f(...a); } catch (_) { return undefined; } };
     return {
-      unlock: safe(unlock), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
+      unlock: safe(unlock), updateSluff: safe(updateSluff), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
       stopSwoosh: safe(stopSwoosh), playDash: safe(playDash), playBreak: safe(playBreak),
       playExplosion: safe(playExplosion), playFanfare: safe(playFanfare), toggleMute: safe(toggleMute),
       playCoin: safe(playCoin), playCount: safe(playCount), playTick: safe(playTick), playDing: safe(playDing), playNoBonus: safe(playNoBonus),
@@ -997,7 +1015,7 @@
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     held = []; tapLeft = 0;
-    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = [];
+    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null;
     animals = []; animalSlot = Math.ceil(START_PAD / ANIMAL_SLOT);
     birds = []; birdIn = between(course.endless ? BIRD_EVERY_ENDLESS : BIRD_EVERY);
     passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
@@ -1089,7 +1107,7 @@
     state = 'crashed';
     mode = 'crash';
     runEnd = performance.now();
-    hitWhat = hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
+    hitWhat = hit.sluff ? 'SLUFF' : hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
     SFX.stopSwoosh();
     if (hit.pine) SFX.playExplosion(); else SFX.playBreak();
     if (hit.pine) {
@@ -1549,7 +1567,31 @@
     }
 
     if (onFire()) scorchPassed();
+    if (course.couloir && moveSluff(dt)) { crash({ sluff: true }); return; }
     if (skierY >= course.finishY) finish();
+  }
+
+  // Sluff: ski a steep gully and the snow you knock loose pours down
+  // after you. It sets off when you drop in, a little way behind, and runs
+  // about as fast as a skier who keeps turning, faster towards the bottom;
+  // slow down too much and it knocks you over. Out of the gully it fans
+  // out and stops. Returns true if it caught you.
+  // It never falls further behind than SLUFF_HOLD rows: get ahead and it
+  // speeds up to stay on your tail, in view.
+  const SLUFF_BEHIND = 30, SLUFF_V0 = 86, SLUFF_V1 = 99, SLUFF_STOP = 160, SLUFF_HOLD = 26;
+  function moveSluff(dt) {
+    const { c0, c1 } = course.couloir;
+    if (!sluff) {
+      if (skierY < c0) return false;
+      sluff = { y: c0 - SLUFF_BEHIND, v: SLUFF_V0 };
+    }
+    if (sluff.v <= 0) return false;
+    if (sluff.y < c1) {
+      const base = SLUFF_V0 + (SLUFF_V1 - SLUFF_V0) * Math.max(0, (sluff.y - c0) / (c1 - c0));
+      sluff.v = Math.max(base, Math.min(260, speed + 3 * (skierY - sluff.y - SLUFF_HOLD)));
+    } else sluff.v = Math.max(0, sluff.v - SLUFF_STOP * dt);
+    sluff.y += sluff.v * dt;
+    return !runGod && sluff.y >= skierY - 2;
   }
 
   // On fire, a tree the skis have just gone past close by catches too.
@@ -2097,6 +2139,34 @@
     }
   }
 
+  // The sluff: a churning white tongue filling the gully behind you, light
+  // blue swirling through it, a ragged front with lumps tumbling ahead.
+  // Once it stops it lies still.
+  function drawSluff(camY) {
+    const now = performance.now(), live = sluff.v > 0, tick = live ? Math.floor(now / 70) : 0;
+    const { c0 } = course.couloir;
+    const top = Math.max(camY, c0), bottom = Math.min(camY + H, Math.ceil(sluff.y) + 3);
+    for (let wy = top; wy <= bottom; wy++) {
+      const c = Math.round(course.centerAt(wy)), hw = Math.ceil(course.widthAt(wy)) + 4;
+      for (let x = c - hw; x <= c + hw; x++) {
+        if (course.wall(x, wy)) continue;
+        const front = sluff.y - 3 * noise2(x / 3, tick / 2);
+        if (wy > front) continue;
+        const h = hash(x * 7 + 1, wy + tick * 13);
+        put(x, wy - camY, wy > front - 3 ? VIC.lightBlue : h < 0.32 ? VIC.lightBlue : h < 0.55 ? VIC.paleBlue : VIC.white);
+      }
+    }
+    if (!live) return;
+    // Lumps tumbling just ahead of the front.
+    for (let k = 0; k < 4; k++) {
+      const ly = Math.round(sluff.y + 2 + 3 * hash(k, tick)), c = course.centerAt(ly);
+      const lx = Math.round(c + (hash(k + 9, tick) - 0.5) * 2 * course.widthAt(ly));
+      if (course.wall(lx, ly)) continue;
+      put(lx, ly - camY, VIC.white); put(lx + 1, ly - camY, VIC.lightBlue);
+      put(lx, ly + 1 - camY, VIC.lightBlue); put(lx + 1, ly + 1 - camY, VIC.white);
+    }
+  }
+
   // Fans at the finish: standing about, now and then waving; once you're
   // over the line, jumping with their arms up. X is the jacket.
   const FAN_STAND = ['..K..', '.KKK.', 'XXXXX', 'X.X.X', 'X.X.X', '..X..', '.K.K.', '.K.K.'];
@@ -2569,6 +2639,7 @@
     if (course) for (const g of course.signs) drawSign(g, camY);
     if (course && course.camp) drawCamp(course.camp, camY);
     if (course && course.fans) drawFans(camY);
+    if (sluff) drawSluff(camY);
 
     if (course) {
       for (const p of course.poles) {
@@ -3001,7 +3072,7 @@
     if (finished) paintCardStars(stars());
     // What happened on the run, never how it was scored: the arithmetic
     // stays in the server's check, not on screen as a recipe.
-    breakdownEl.textContent = finished ? `TIME ${fmt(runCs())}` : ranOut ? 'OUT OF MISSES' : `INTO THE ${hitWhat}`;
+    breakdownEl.textContent = finished ? `TIME ${fmt(runCs())}` : ranOut ? 'OUT OF MISSES' : hitWhat === 'SLUFF' ? 'CAUGHT BY THE SLUFF' : `INTO THE ${hitWhat}`;
     breakdownEl.hidden = false;
     lastSubmittedId = null;
     submitStatusEl.classList.remove('error');
@@ -3291,6 +3362,7 @@
       if (tally) updateTally(Math.min(dt, 0.05));
     }
     if (state === 'running' && onFire()) spawnEmbers();
+    SFX.updateSluff(state === 'running' && sluff && sluff.v > 0 ? Math.max(0.15, Math.min(1, 1 - (skierY - sluff.y) / 120)) : 0);
     if (state === 'running') {
       SFX.updateSwoosh(speed / DOWN_SPEED, snowDepth(skierX, course.centerAt(skierY), skierY), heading !== 'down');
     }
