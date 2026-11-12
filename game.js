@@ -3514,6 +3514,8 @@
   }
 
   function render() {
+    // Between Championship courses, the world map instead of the slope.
+    if (champ && champ.stage === 'pick' && !overlayEl.hidden) { drawMap(); ctx.putImageData(img, 0, 0); return; }
     // An avalanche shakes the whole mountain.
     const shake = slideLevel() > 0 ? Math.round((Math.random() - 0.5) * 2.4 * slideLevel()) : 0;
     const camY = cameraTop() + shake;
@@ -3803,6 +3805,96 @@
   ];
   const CHAMP_COURSES = 10, FINALE = 'chomolungma';
 
+  // ------------------------------------------------------------------- map
+  // The world between courses, Street Fighter 2 style: land from Natural
+  // Earth (public domain, 1:110m), in the Equal Earth projection, baked to
+  // a 1-bit bitmap. Runs of sea and land alternate, starting
+  // with sea, in base 36.
+  const WORLD = {
+    big: { w: 220, h: 107, runs: '2o.4.57.1.2.3.1.2.1.4.2.j.c.4.u.2.3q.4.2.1.1.1.1.5.8.f.u.2.b.a.9.4.33.8.2.3.2.3.1.1.9.c.v.1.6.1.1.1.2.j.4.3.2l.9.4.1.5.7.1.3.3.7.5.d.i.5.f.2.1.z.5.1.1z.2.5.z.2.1.1.4.4.9.k.b.2.1.1.a.1.19.1t.3.2.z.6.3.6.6.7.4.b.4.2.4.2.1p.1u.1.3.w.8.3.6.5.m.5.1.1x.1u.x.7.3.a.3.l.6.2.1p.1.7.1u.4.1.1.4.l.8.4.y.7.4.1m.3.2.1y.1.a.j.8.7.q.1.7.3.3.1j.8.2.1v.1.d.l.5.8.q.2.5.1.1.1.3.1k.8.3.28.n.1.b.o.1.1.2.4.1.3.1.1.1k.a.2.26.o.1.c.m.2.1.3.1.1x.6.1.26.z.r.20.1.1.2c.u.5.1.s.1z.1.1.2b.s.1.2.3.3.p.21.2d.v.1.1.u.j.2.6.2.18.2b.u.1.2.v.7.2.8.1.8.2.19.2.1.27.t.10.5.1.2.1.7.6.4.2.18.4.2.25.s.x.7.4.2.2.5.7.4.2.16.6.1.24.s.y.5.4.1.3.5.1.1.1.b.2.10.1.4.5.1.25.q.10.5.b.2.1.d.2.10.1.1.1.1.7.1.24.q.10.5.7.1.4.1.2.c.2.10.4.2.5.1.24.p.12.1.4.5.6.1.3.1.1.1.1.1b.3.2.3.3.23.p.13.1.1.7.7.2.3.1.1.1a.4.2.2.4.24.m.14.a.e.1c.6.2.26.l.14.d.4.1.7.1c.5.1.28.1.1.i.14.f.2.5.1.1.1.1e.2d.1.1.d.2.3.15.w.2.15.2c.1.1.9.7.2.14.y.1.15.2c.1.1.8.8.2.12.r.2.8.2.13.2e.7.9.1.13.s.1.8.4.11.2c.1.2.6.b.1.10.t.2.8.2.1.6.u.2e.1.1.6.1c.u.2.c.5.t.2h.4.8.1.1.2.10.w.1.c.6.c.1.d.1o.1.u.4.5.2.5.1.z.w.1.c.8.9.3.8.1s.1.t.6.3.2.8.2.w.w.2.a.9.8.5.7.2.1.2k.9.6.1.2.3.1.1.t.x.2.9.a.6.6.7.2p.7.17.x.2.8.b.5.8.7.8.1.2h.1.1.3.1.1.15.y.2.5.d.4.b.6.7.1.2j.6.13.10.1.4.f.3.b.7.6.1.2l.4.14.z.1.2.h.3.b.7.8.1.2l.1.7.1.x.10.j.3.e.4.9.1.2k.1.6.4.w.z.3.2.f.2.f.3.9.1.2l.1.4.2.1.6.t.13.f.2.g.1.9.1.2m.2.1.c.s.13.t.1.f.1.2o.b.s.12.j.1.o.1.1.1.2o.c.s.8.2.r.v.1.9.1.4.1.2o.f.q.2.7.q.t.2.1.2.7.2.2t.g.11.n.u.1.2.1.6.3.2s.h.11.m.w.1.1.1.5.4.2s.h.11.l.x.3.4.5.6.1.2k.i.11.k.z.2.4.5.2r.l.x.l.z.3.3.4.2.2.5.2.2h.n.w.j.11.3.2.4.2.1.9.3.2d.p.v.h.12.3.5.1.3.1.2.1.3.7.2a.r.u.h.13.2.i.6.3.1.26.s.t.g.15.1.i.6.1.1.2.1.24.s.t.g.15.4.f.6.2a.r.t.g.19.1.1.1.1.2.1.1.8.2.2.1.2a.q.u.g.1c.1.2.1.d.2.6.1.23.p.u.h.44.o.v.g.1k.3.3.1.2f.n.v.g.5.1.1d.3.3.2.2f.n.u.i.4.1.19.2.1.3.4.2.2g.m.u.h.3.3.19.7.3.2.2i.k.u.g.3.4.17.a.1.3.2j.i.v.f.4.3.18.e.2j.i.w.d.5.3.17.g.2j.h.w.d.5.3.14.j.9.1.29.h.w.d.5.2.13.l.a.1.28.f.y.d.5.2.13.m.2i.d.11.b.6.2.12.n.2i.d.11.a.1b.n.2i.d.11.a.1b.n.2i.d.11.a.1b.m.2j.c.13.8.1c.m.2j.c.13.7.1d.l.2l.a.14.6.1d.6.5.a.2m.a.14.4.1f.4.7.9.2n.8.31.7.c.1.2b.9.30.6.d.1.2b.8.31.2.1.1.f.2.2a.6.3l.1.2c.6.3k.1.2d.5.35.1.c.2.2g.5.3g.1.2i.4.3e.3.2j.4.3e.1.2l.5.60.4.1x.1.43.3.62.1.64.3.10s.1.62.1.1c.6.1.1.7.r.3k.1.1.2.x.1.5.g.2.z.35.2.c.2.k.22.2n.v.i.20.2l.1.2.t.b.2.3.26.2r.3b.1c' },
+  };
+  const worldBits = {};
+  function worldMap(size) {
+    if (worldBits[size]) return worldBits[size];
+    const { w, h, runs } = WORLD[size], bits = new Uint8Array(w * h);
+    let i = 0, land = 0;
+    for (const r of runs.split('.')) { const n = parseInt(r, 36); if (land) bits.fill(1, i, i + n); i += n; land ^= 1; }
+    return (worldBits[size] = { w, h, bits });
+  }
+  // Equal Earth, as baked: longitude and latitude to a pixel on a map w wide.
+  function equalEarth(lon, lat, w, h) {
+    const A1 = 1.340264, A2 = -0.081106, A3 = 0.000893, A4 = 0.003796, M = Math.sqrt(3) / 2;
+    const l = lon * Math.PI / 180, t = Math.asin(M * Math.sin(lat * Math.PI / 180)), t2 = t * t, t6 = t2 * t2 * t2;
+    const x = l * Math.cos(t) / (M * (A1 + 3 * A2 * t2 + t6 * (7 * A3 + 9 * A4 * t2)));
+    const y = t * (A1 + A2 * t2 + t6 * (A3 + A4 * t2));
+    return [Math.round((x + 2.7064) / 5.4128 * w), Math.round((1.3173 - y) / 2.6346 * h)];
+  }
+  // Where each mountain is, and a nudge in pixels for neighbours that
+  // would otherwise sit on top of each other.
+  const PLACES = {
+    alyeska: [-149.1, 60.97], kunama: [148.3, -36.46], pista3: [6.95, 45.71, -2, 0], aoraki: [170.1, -43.59],
+    fuji: [138.7, 35.36], cervino: [7.66, 45.98, 2, -1], vinson: [-85.6, -78.53], kirinyaga: [37.3, -0.15, -1, -1],
+    iztactepetl: [-97.3, 19.03], kilimanjaro: [37.4, -3.07, 1, 2], aconcagua: [-70.0, -32.65],
+    annapurna: [83.8, 28.6, -2, 0], k2: [76.5, 35.88, 0, -1], chomolungma: [86.9, 27.99, 2, 1],
+  };
+
+  // The map screen: sea, land (snow towards the poles), a pale shore, the
+  // road travelled so far, then every mountain: done ones with a little
+  // flag, open ones bright, locked ones dithered grey. The one picked
+  // blinks, with dotted lines to what finishing it would open.
+  // On a phone the detailed map is wider than the screen, so the view
+  // glides sideways to keep the mountain you've picked in the middle.
+  let mapPan = null;
+  function drawMap() {
+    const { w, h, bits } = worldMap('big');
+    let x0 = Math.floor((VW - w) / 2);
+    const y0 = NARROW ? 30 : 8;
+    if (w > VW) {
+      const o = champOptions(), sel = o[champ.pick % o.length], [lon, lat, dx = 0] = PLACES[sel.id];
+      const want = Math.max(VW - w, Math.min(0, Math.round(VW / 2 - equalEarth(lon, lat, w, h)[0] - dx)));
+      mapPan = mapPan === null ? want : mapPan + (want - mapPan) * 0.15;
+      x0 = Math.round(mapPan);
+    }
+    const px = (x, y, c) => {
+      if (x < 0 || x >= VW || y < 0 || y >= H) return;
+      const i = (y * VW + x) * 4; img.data[i] = c[0]; img.data[i + 1] = c[1]; img.data[i + 2] = c[2]; img.data[i + 3] = 255;
+    };
+    const land = (x, y) => x >= 0 && x < w && y >= 0 && y < h && bits[y * w + x] === 1;
+    for (let y = 0; y < H; y++) for (let x = 0; x < VW; x++) px(x, y, VIC.blue);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (land(x, y)) {
+        // Snow towards the poles, fading out through a dither, not a ruled line.
+        const f = y < h / 2 ? (h * 0.15 - y) / (h * 0.06) : (y - h * 0.84) / (h * 0.03);
+        const snow = f >= 1 || (f > 0 && hash(x * 13 + 5, y * 7) < f);
+        px(x0 + x, y0 + y, snow ? VIC.white : VIC.green);
+      }
+      else if (land(x - 1, y) || land(x + 1, y) || land(x, y - 1) || land(x, y + 1)) px(x0 + x, y0 + y, VIC.lightBlue);
+    }
+    const at = id => { const [lon, lat, dx = 0, dy = 0] = PLACES[id], [x, y] = equalEarth(lon, lat, w, h); return [x0 + x + dx, y0 + y + dy]; };
+    const dots = (a, b, c, gap) => {
+      const n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1])));
+      for (let k = 0; k <= n; k += gap) px(Math.round(a[0] + (b[0] - a[0]) * k / n), Math.round(a[1] + (b[1] - a[1]) * k / n), c);
+    };
+    const c = champ, opts = champOptions(), pick = opts[c.pick % opts.length], blink = Math.floor(performance.now() / 300) % 2;
+    for (let k = 1; k < c.played.length; k++) dots(at(c.played[k - 1].id), at(c.played[k].id), VIC.white, 2);
+    for (const id of pick.unlocks.filter(id => !c.open.has(id) && !skied(id))) dots(at(pick.id), at(id), VIC.yellow, 3);
+    for (const m of MOUNTAINS) {
+      const [mx, my] = at(m.id), open = opts.includes(m), picked = m === pick;
+      if (skied(m.id)) {   // a little flag planted
+        for (let r = -4; r <= 0; r++) px(mx, my + r, VIC.black);
+        px(mx + 1, my - 4, VIC.red); px(mx + 2, my - 4, VIC.red); px(mx + 1, my - 3, VIC.red);
+        continue;
+      }
+      // A peak: two rows, outlined in black.
+      const ink = picked ? (blink ? VIC.yellow : VIC.white) : open ? VIC.white : null;
+      for (const [dx, dy] of [[0, -2], [-1, -1], [0, -1], [1, -1], [-2, 0], [-1, 0], [0, 0], [1, 0], [2, 0]]) {
+        px(mx + dx, my + dy, ink || ((mx + dx + my + dy) % 2 ? VIC.black : VIC.white));   // locked: dithered grey
+      }
+      for (const [dx, dy] of [[0, -3], [-1, -2], [1, -2], [-2, -1], [2, -1], [-3, 0], [3, 0]]) px(mx + dx, my + dy, VIC.black);
+      if (picked) for (let r = 0; r < 3; r++) for (let q = -r; q <= r; q++) px(mx + q, my - 9 + r, blink ? VIC.yellow : VIC.white);   // ▼ over it
+    }
+  }
+
   // ----------------------------------------------------------------- flags
   // Each mountain's flags, drawn as pixel art. A flag is a size and a
   // function from a pixel to a colour key (null: see-through).
@@ -4041,6 +4133,8 @@
   function showChamp() {
     const c = champ, P = champParts, n = c.played.length + (c.stage === 'result' || c.stage === 'done' ? 0 : 1);
     cardEl.classList.add('champ-mode');
+    overlayEl.classList.toggle('map-mode', c.stage === 'pick');
+    document.body.classList.toggle('map-mode', c.stage === 'pick');
     champEl.hidden = false;
     P.pick.hidden = c.stage !== 'pick';
     P.flags.hidden = c.stage !== 'intro';
@@ -4089,6 +4183,8 @@
 
   function hideChamp() {
     cardEl.classList.remove('champ-mode');
+    overlayEl.classList.remove('map-mode');
+    document.body.classList.remove('map-mode');
     champEl.hidden = true;
   }
 

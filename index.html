@@ -106,6 +106,14 @@
     opacity: 0; pointer-events: none; transition: opacity 0.45s ease;
   }
   #overlay.visible { opacity: 1; pointer-events: auto; }
+  /* Over the world map: no wash, and the card tucked in below the map. */
+  #overlay.map-mode { background: none; align-items: flex-end; padding-bottom: 4vh; }
+  #overlay.map-mode .card { margin: 0 auto; }
+  body.map-mode #hud { visibility: hidden; }
+  #overlay.map-mode #champ-list { display: none; }
+  #overlay.map-mode #champ-head { font-size: 11px; margin-bottom: 4px; }
+  #overlay.map-mode #champ-sub { margin-bottom: 8px; }
+  #overlay.map-mode #champ-text { text-align: center; margin-bottom: 8px; }
   /* The Championship's own screens take the card over. */
   #overlay .card.champ-mode > :not(#champ) { display: none !important; }
   #champ-head { font-size: 13px; margin: 0 0 8px; line-height: 1.5; }
