@@ -206,6 +206,10 @@
   #overlay button:disabled { opacity: 0.5; cursor: default; }
   #submit-status { font-size: 8px; margin: 0 0 8px; min-height: 10px; line-height: 1.6; }
   #submit-status.error { color: var(--vic-red); }
+  /* Which piste the run was on, under WIPEOUT / GAME OVER. */
+  #run-piste { font-size: 10px; line-height: 1.6; color: var(--vic-blue); margin: -4px 0 10px; }
+  #run-piste .flag-row { display: flex; justify-content: center; gap: 8px; margin-top: 4px; }
+  #run-piste canvas.flag { display: block; height: 16px; width: auto; image-rendering: pixelated; image-rendering: crisp-edges; outline: 2px solid var(--vic-blue); }
   #leaderboard h3 { font-size: 11px; margin: 4px 0 10px; padding: 0; }
   /* The board's name on the card's white, in blue. */
   #leaderboard h3 .board-name { color: var(--vic-blue); line-height: 1.6; padding: 0 0 6px; }
@@ -430,6 +434,7 @@
         <div id="champ-prompt"></div>
       </div>
       <h2 id="overlay-title"><span id="overlay-word">FINISH</span><canvas class="pine-icon" width="5" height="7"></canvas></h2>
+      <div id="run-piste" hidden></div>
       <div id="final-score">SCORE <b id="final-score-val">0</b></div>
       <canvas id="final-stars" width="41" height="11"></canvas>
       <div id="breakdown"></div>

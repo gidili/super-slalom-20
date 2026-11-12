@@ -603,6 +603,7 @@
   const pauseBtnEl = document.getElementById('pause-btn');
   const restartBtnEl = document.getElementById('restart-btn');
   const breakdownEl = document.getElementById('breakdown');
+  const runPisteEl = document.getElementById('run-piste');
   const submitFormEl = document.getElementById('submit-form');
   const initialsInputEl = document.getElementById('initials-input');
   const submitBtnEl = document.getElementById('submit-btn');
@@ -4435,6 +4436,16 @@
     overlayWordEl.textContent = finished || ranOut ? 'GAME OVER' : 'WIPEOUT';
     overlayTitleEl.className = 'bad';
     finalScoreEl.textContent = points();
+    // The piste the run was on, with its flags.
+    const m = runClassic ? mountain(runClassic) : null;
+    runPisteEl.textContent = course.endless ? 'ENDLESS' : m ? m.short || m.name.split(/ \(| "/)[0] : 'RANDOM';
+    if (!course.endless) {
+      const row = document.createElement('div');
+      row.className = 'flag-row';
+      row.append(...(m ? FLAGS_OF[m.id] : ['random']).map(flagCanvas));
+      runPisteEl.appendChild(row);
+    }
+    runPisteEl.hidden = false;
     finalStarsEl.hidden = !finished;
     if (finished) paintCardStars(stars());
     // What happened on the run, never how it was scored: the arithmetic
@@ -4476,6 +4487,7 @@
   function setBoardView(on) {
     boardView = on;
     for (const el of [overlayTitleEl, finalScoreRowEl, againRowEl, restartHintEl]) el.hidden = on;
+    if (on) runPisteEl.hidden = true;
     closeRowEl.hidden = !on;
     if (on) {
       finalStarsEl.hidden = breakdownEl.hidden = submitFormEl.hidden = true;
@@ -4572,9 +4584,13 @@
     const god = board.endsWith(':god');
     const top = document.createElement('div');
     top.className = 'board-name';
-    top.innerHTML = (god ? 'SECRET GOD MODE<br>' : '')
-      + (classic ? `SINGLE &middot; ${classic.short || classic.name.split(/ \(| "/)[0]}` : BOARD_TITLE[board.replace(':god', '')]);
-    if (classic) {   // every flag the mountain flies, in a row
+    // On the run's own card the piste is already named under WIPEOUT, so
+    // the heading keeps only the god-mode line there; the crown shows it all.
+    const named = boardView;
+    top.innerHTML = named
+      ? (god ? 'SECRET GOD MODE<br>' : '') + (classic ? `SINGLE &middot; ${classic.short || classic.name.split(/ \(| "/)[0]}` : BOARD_TITLE[board.replace(':god', '')])
+      : god ? 'SECRET GOD MODE' : '';
+    if (classic && named) {   // every flag the mountain flies, in a row
       const row = document.createElement('div');
       row.className = 'flag-row';
       row.append(...FLAGS_OF[classic.id].map(flagCanvas));
@@ -4583,7 +4599,7 @@
     const bar = document.createElement('div');
     bar.className = 'board-bar';
     bar.textContent = 'TOP 10';
-    boardTitleEl.replaceChildren(top, bar);
+    boardTitleEl.replaceChildren(...(top.innerHTML ? [top] : []), bar);
     boardTitleEl.classList.toggle('god', board.endsWith(':god'));
     fetchLeaderboard(board);
   }
