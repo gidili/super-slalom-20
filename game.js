@@ -4127,7 +4127,7 @@
     }],
   };
   const FLAGS_OF = {
-    alyeska: ['us', 'alaska'], kunama: ['australia', 'aboriginal'], pista3: ['italy'], aoraki: ['nz', 'maori'],
+    alyeska: ['us', 'alaska'], kunama: ['aboriginal', 'australia'], pista3: ['italy'], aoraki: ['maori', 'nz'],
     fuji: ['japan'], cervino: ['swiss', 'italy'], vinson: ['penguin'], kirinyaga: ['kenya'], iztactepetl: ['mexico'],
     kilimanjaro: ['tanzania'], aconcagua: ['argentina'], annapurna: ['nepal'], k2: ['pakistan'], chomolungma: ['tibet', 'china'],
   };
@@ -4570,9 +4570,14 @@
     shownBoard = board;
     const classic = board.startsWith('classic:') ? mountain(board.split(':')[1]) : null;
     boardTitleEl.innerHTML = classic
-      ? (board.endsWith(':god') ? 'SECRET GOD MODE<br>' : '') + `SINGLE &middot; ${classic.name.split(/ \(| "/)[0]} TOP 10<br>`
+      ? (board.endsWith(':god') ? 'SECRET GOD MODE<br>' : '') + `SINGLE &middot; ${classic.short || classic.name.split(/ \(| "/)[0]} TOP&nbsp;10<br>`
       : BOARD_TITLE[board];
-    if (classic) boardTitleEl.appendChild(flagCanvas(FLAGS_OF[classic.id][0]));
+    if (classic) {   // every flag the mountain flies, in a row
+      const row = document.createElement('div');
+      row.className = 'flag-row';
+      row.append(...FLAGS_OF[classic.id].map(flagCanvas));
+      boardTitleEl.appendChild(row);
+    }
     boardTitleEl.classList.toggle('god', board.endsWith(':god'));
     fetchLeaderboard(board);
   }
