@@ -649,6 +649,7 @@
   // Championship courses are fixed, so where the animals turn up is
   // shuffled per run instead; Single's come from its seed as ever.
   let animalSalt = 0;
+  let runClassic = null;       // a Single run on a mountain's course: its id
   let exploded = new Set();    // pineapples already blown up, by cell
   // Trees and fences set alight on fire, by the same keys, each with when
   // and in which fire's colours. A tree hit is a stump; a tree passed burns
@@ -1228,6 +1229,8 @@
   function toTitle(keep = false) {
     state = 'title';
     ranOut = false;
+    // The last run's weather and wildlife go with it.
+    sluff = null; slide = null; heli = null; icefall = []; wind = null; gustLines = []; fellIn = false; pan = 0;
     if (!keep) { champ = null; prepareRun(); }
     particles = [];
     hideOverlay();
@@ -1266,12 +1269,20 @@
       sessionId = null;
       runGod = godMode;
     }
+    // Single on a mountain: its Championship course (unranked for now).
+    runClassic = !champ && chosenMode() === 'single' ? classicPick() : null;
+    if (runClassic) {
+      const m = mountain(runClassic);
+      buildCourse(m.seed, false, shapeOf(m));
+      sessionId = null;
+      runGod = godMode;
+    }
     skierX = course.centerAt(0);
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     held = []; tapLeft = 0;
     hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null; crossed = 0; pan = 0; wind = null; gustLines = []; fellIn = false; slide = null; icefall = []; iceIn = 0.5;
-    animalSalt = champ ? Math.floor(Math.random() * 999983) : 0;
+    animalSalt = champ || runClassic ? Math.floor(Math.random() * 999983) : 0;
     animals = []; animalSlot = Math.ceil(START_PAD / ANIMAL_SLOT);
     birds = []; birdIn = between(course.endless ? BIRD_EVERY_ENDLESS : BIRD_EVERY);
     moths = []; mothIn = 2; petals = [];
@@ -1664,6 +1675,12 @@
       else if (e.key === 'm' || e.key === 'M') flash(SFX.toggleMute() ? 'SOUND OFF' : 'SOUND ON');
       return;
     }
+    // Up and down pick Single's course.
+    if (state === 'title' && chosenMode() === 'single' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      chooseCourse(singleIndex + (e.key === 'ArrowUp' ? -1 : 1));
+      return;
+    }
     const titleDir = SHIFTS[e.code] || (LEFT.has(e.key) ? 'left' : RIGHT.has(e.key) ? 'right' : null);
     if ((state === 'title' || cardUp()) && titleDir) {
       e.preventDefault();
@@ -1719,10 +1736,56 @@
     modeIndex = (i + modeBtns.length) % modeBtns.length;
     modeBtns.forEach((b, k) => b.classList.toggle('chosen', k === modeIndex));
     modeTextEl.innerHTML = MODE_TEXT[modeBtns[modeIndex].dataset.mode];
+    if (chosenMode() === 'single') { chooseCourse(singleIndex); return; }
+    paintCourseList();
     paintHud();
     if (!leaderboardCache[currentBoard()]) fetchLeaderboard();
   }
   const chosenMode = () => modeBtns[modeIndex].dataset.mode;
+
+  // Single's course: Random (a fresh slope every run, as ever) or one of
+  // the Championship mountains, west to east. Remembered between visits.
+  const courseListEl = document.getElementById('course-list');
+  const SINGLE_COURSES = ['random'];   // the mountains join once they're defined
+  let singleIndex = 0;
+  const singleCourse = () => SINGLE_COURSES[singleIndex];
+  const classicPick = () => (chosenMode() === 'single' && singleCourse() !== 'random' ? singleCourse() : null);
+  function paintCourseList() {
+    courseListEl.hidden = chosenMode() !== 'single';
+    if (courseListEl.hidden) return;
+    if (!courseListEl.children.length) {
+      SINGLE_COURSES.forEach((id, k) => {
+        const li = document.createElement('li'), m = id === 'random' ? null : mountain(id);
+        const flag = document.createElement('span'); flag.className = 'flag-cell';
+        flag.appendChild(flagCanvas(m ? FLAGS_OF[id][0] : 'random'));
+        const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = m ? m.name.split(/ \(| "/)[0] : 'RANDOM';
+        const alt = document.createElement('span'); alt.className = 'alt'; alt.textContent = m ? m.height.replace('~', '') : '';
+        const bs = document.createElement('span'); bs.className = 'bs';
+        li.append(flag, nm, alt, bs);
+        li.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (state !== 'title') return;
+          if (k === singleIndex) startChosen(); else chooseCourse(k);
+        });
+        courseListEl.appendChild(li);
+      });
+    }
+    [...courseListEl.children].forEach((li, k) => {
+      li.classList.toggle('chosen', k === singleIndex);
+      li.querySelector('.bs').textContent = getBest(k === 0 ? 'single' : 'single:' + SINGLE_COURSES[k]) || '-';
+    });
+    const li = courseListEl.children[singleIndex];
+    if (li && li.scrollIntoView) li.scrollIntoView({ block: 'center' });
+  }
+  function chooseCourse(k) {
+    singleIndex = (k + SINGLE_COURSES.length) % SINGLE_COURSES.length;
+    try { localStorage.setItem('slalom_single_course', singleCourse()); } catch (_) {}
+    const m = classicPick() && mountain(classicPick());
+    modeTextEl.innerHTML = m ? `${m.name.split(/ \(| "/)[0]} &middot; ${m.country} &middot; ${m.height}<br>THE CHAMPIONSHIP COURSE` : MODE_TEXT.single;
+    paintCourseList();
+    paintHud();
+    if (!leaderboardCache[currentBoard()]) fetchLeaderboard();
+  }
   function startChosen() {
     if (chosenMode() === 'championship') startChampionship();
     else startRun();
@@ -3403,7 +3466,7 @@
       for (let i = iMin; i < iMax; i++) {
         const tr = treeAt(i, j, salt, centerAt);
         if (!tr || exploded.has(i + ',' + j) || scorched.has(i + ',' + j)) continue;
-        const rows = tr.pine ? PINEAPPLE : tr.pen ? PENITENTE : tr.ice ? ICE_SHAPES[(tr.i * 7 + tr.j * 3) % 3] : tr.rock ? ROCKS[tr.rock - 1] : tr.cherry ? CHERRY : tr.rata ? RATA
+        const rows = tr.pine ? PINEAPPLE : tr.pen ? PENITENTE : tr.ice ? ICE_SHAPES[(((tr.i * 7 + tr.j * 3) % 3) + 3) % 3] : tr.rock ? ROCKS[tr.rock - 1] : tr.cherry ? CHERRY : tr.rata ? RATA
           : tr.bush ? BUSH : tr.groundsel ? GROUNDSEL : TREE;
         shadowOf(rows, tr.x - (tr.pine ? 2 : 4), tr.y - camY - rows.length + 1);
       }
@@ -3562,7 +3625,7 @@
         if (sc) drawScorchedTree(tr, sc, camY);
         else if (exploded.has(i + ',' + j)) continue;
         else if (tr.pen) blit(PENITENTE, tr.x - 4, tr.y - camY - PENITENTE.length + 1);
-        else if (tr.ice) { const r = ICE_SHAPES[(tr.i * 7 + tr.j * 3) % 3]; blit(r, tr.x - 4, tr.y - camY - r.length + 1); }
+        else if (tr.ice) { const r = ICE_SHAPES[(((tr.i * 7 + tr.j * 3) % 3) + 3) % 3]; blit(r, tr.x - 4, tr.y - camY - r.length + 1); }
         else if (tr.rock) { const r = ROCKS[tr.rock - 1]; blit(r, tr.x - 4, tr.y - camY - r.length + 1); }
         else if (tr.cherry) blit(CHERRY, tr.x - 4, tr.y - camY - 8);
         else if (tr.rata) blit(RATA, tr.x - 4, tr.y - camY - 8);
@@ -3610,7 +3673,7 @@
     if (course) for (const g of course.signs) drawSign(g, camY);
     if (course && course.camp) drawCamp(course.camp, camY);
     if (course && course.fans) drawFans(camY);
-    if (sluff) drawSluff(camY);
+    if (sluff && course && course.couloir) drawSluff(camY);
 
     if (course) {
       for (const p of course.poles) {
@@ -3753,8 +3816,15 @@
   }
   // The Championship's best is a total, set when one ends; its courses
   // leave the others alone.
-  const bestMode = () => state === 'title' && !champ ? (chosenMode() === 'endless' ? 'endless' : chosenMode() === 'championship' ? 'championship' : 'single')
-    : champ ? 'championship' : course && course.endless ? 'endless' : 'single';
+  // A mountain's course in Single keeps its own best too: 'single:<id>'.
+  const bestMode = () => state === 'title' && !champ
+    ? (chosenMode() === 'endless' ? 'endless' : chosenMode() === 'championship' ? 'championship' : classicPick() ? 'single:' + classicPick() : 'single')
+    : champ ? 'championship' : course && course.endless ? 'endless' : runClassic ? 'single:' + runClassic : 'single';
+  const bestKey = m => BEST_KEYS[m] || 'slalom_best_' + m.replace(':', '_');
+  function getBest(m) {
+    if (!(m in best)) { best[m] = 0; try { best[m] = parseInt(localStorage.getItem(bestKey(m)) || '0', 10) || 0; } catch (_) {} }
+    return best[m];
+  }
 
   function paintHud() {
     const score = state === 'title' ? 0 : earned() + shownBonus;
@@ -3766,11 +3836,11 @@
     missBoxEl.classList.toggle('last-miss', endless && left === 1 && state !== 'title' && state !== 'crashed');
     // Like snake-bit, BEST climbs live once this run passes it.
     const m = bestMode();
-    if (score > best[m] && m !== 'championship') {
+    if (score > getBest(m) && m !== 'championship') {
       best[m] = score;
-      try { localStorage.setItem(BEST_KEYS[m], score); } catch (_) {}
+      try { localStorage.setItem(bestKey(m), score); } catch (_) {}
     }
-    bestEl.textContent = best[m];
+    bestEl.textContent = getBest(m);
     placeHudButtons();
   }
 
@@ -4043,6 +4113,11 @@
       if (inCircle(x, y, 9, 6, 4)) return 'y';
       return Math.floor((Math.atan2(y - 7, x - 9) + Math.PI) / (Math.PI / 6)) % 2 ? 'r' : 'b';
     }],
+    // Not a flag: Random's question mark, in the same frame.
+    random: [18, 12, (x, y) => {
+      const Q = ['.www.', 'w...w', '....w', '...w.', '..w..', '.....', '..w..'], ch = (Q[y - 2] || '')[x - 6];
+      return ch === 'w' ? 'w' : 'b';
+    }],
     china: [18, 12, (x, y) => {
       if ((x === 3 && y >= 2 && y <= 4) || (y === 3 && x >= 2 && x <= 4)) return 'y';
       return ['6,1', '7,2', '7,4', '6,5'].includes(x + ',' + y) ? 'y' : 'r';
@@ -4069,6 +4144,8 @@
     return cv;
   }
   const mountain = id => MOUNTAINS.find(m => m.id === id);
+  SINGLE_COURSES.push(...[...MOUNTAINS].sort((a, b) => a.lon - b.lon).map(m => m.id));
+  try { singleIndex = Math.max(0, SINGLE_COURSES.indexOf(localStorage.getItem('slalom_single_course') || 'random')); } catch (_) {}
   // Names for tight spots: the pick button and result card, and the
   // course list. Most drop the bracket; the finale keeps its famous name.
   const shortName = m => m.short || m.name.split(' (')[0];
@@ -4464,9 +4541,11 @@
   // The last top 10 seen of each board, kept to decide whether a run
   // qualifies. Unknown (offline, not loaded yet) qualifies, so a real top
   // score is never lost.
-  const boardOf = (endless, god) => (endless ? 'endless' : 'single') + (god ? ':god' : '');
-  const currentBoard = () => boardOf(bestMode() === 'endless', godMode);
-  const runBoard = () => boardOf(course.endless, runGod);
+  // Boards: Single, Endless, and each mountain's own ('classic:<id>'), each
+  // with its secret god twin.
+  const boardOf = (endless, god, classic = null) => (endless ? 'endless' : classic ? 'classic:' + classic : 'single') + (god ? ':god' : '');
+  const currentBoard = () => boardOf(bestMode() === 'endless', godMode, state === 'title' ? classicPick() : runClassic);
+  const runBoard = () => boardOf(course.endless, runGod, runClassic);
   const BOARD_TITLE = {
     single: 'SINGLE TOP 10', 'single:god': 'SECRET GOD MODE<br>SINGLE TOP 10',
     endless: 'ENDLESS TOP 10', 'endless:god': 'SECRET GOD MODE<br>ENDLESS TOP 10',
@@ -4484,13 +4563,19 @@
   function showBoard(board) {
     if (board !== shownBoard) leaderboardListEl.innerHTML = '';
     shownBoard = board;
-    boardTitleEl.innerHTML = BOARD_TITLE[board];
+    const classic = board.startsWith('classic:') ? mountain(board.split(':')[1]) : null;
+    boardTitleEl.innerHTML = classic
+      ? (board.endsWith(':god') ? 'SECRET GOD MODE<br>' : '') + `SINGLE &middot; ${classic.name.split(/ \(| "/)[0]} TOP 10<br>`
+      : BOARD_TITLE[board];
+    if (classic) boardTitleEl.appendChild(flagCanvas(FLAGS_OF[classic.id][0]));
     boardTitleEl.classList.toggle('god', board.endsWith(':god'));
     fetchLeaderboard(board);
   }
 
   async function fetchLeaderboard(board = currentBoard()) {
     const render = board === shownBoard, endless = board.startsWith('endless'), god = board.endsWith(':god');
+    // The mountains' own boards aren't on the server yet.
+    if (board.startsWith('classic:')) { leaderboardCache[board] = []; if (render) leaderboardListEl.innerHTML = placeholder('COMING SOON'); return; }
     if (!juicer) { if (render) leaderboardListEl.innerHTML = placeholder('OFFLINE'); return; }
     if (render && !leaderboardListEl.children.length) leaderboardListEl.innerHTML = placeholder('LOADING...');
     const table = juicer.from(endless ? 'slalom_mode_scores' : god ? 'slalom_god_scores' : 'slalom_scores')
@@ -4564,7 +4649,7 @@
   // A game controller, polled every frame like snake-bit's: the d-pad or
   // left stick turns while held, Start is Space, A is R, B closes the board
   // or the card. Typing initials, A submits and B skips. First pad only.
-  let gpDir = null, gpPrev = [];
+  let gpDir = null, gpPrev = [], gpV = 0;
   function pollGamepad() {
     const pads = typeof navigator.getGamepads === 'function' ? navigator.getGamepads() : [];
     let pad = null;
@@ -4585,6 +4670,12 @@
       else if (dir && state === 'title') chooseMode(modeIndex + (dir === 'left' ? -1 : 1));
       else if (dir && cardUp()) pickCard(cardPick + (dir === 'left' ? -1 : 1));
       gpDir = dir;
+    }
+    // Up and down on the pad pick Single's course on the title.
+    const ay = pad.axes[1] || 0, vdir = pressed(12) || ay < -0.5 ? -1 : pressed(13) || ay > 0.5 ? 1 : 0;
+    if (vdir !== gpV) {
+      if (vdir && state === 'title' && !boardView && !splashUp && chosenMode() === 'single') chooseCourse(singleIndex + vdir);
+      gpV = vdir;
     }
 
     if (splashUp) {
