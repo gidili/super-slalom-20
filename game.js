@@ -3842,7 +3842,8 @@
       best[m] = score;
       try { localStorage.setItem(bestKey(m), score); } catch (_) {}
     }
-    bestEl.textContent = getBest(m);
+    // Your best on the course you're skiing; nothing until you're on one.
+    bestEl.textContent = state === 'title' ? '-' : getBest(m);
     placeHudButtons();
   }
 
