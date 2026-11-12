@@ -1149,19 +1149,22 @@
   // Switching on the title asks again; an answer to an older ask is
   // dropped, so the session is always the kind last asked for.
   let sessionGod = false, prepareSeq = 0;
-  async function openSession(seq, endless = false) {
+  // A Single run on a mountain asks for that mountain's session instead
+  // (its course is fixed, so no seed comes back: 0).
+  async function openSession(seq, endless = false, classic = null) {
     sessionId = null;
     endPromise = null;
     edges = Promise.resolve();
     sessionGod = godMode;
     if (juicer) {
       try {
-        const { data, error } = await (endless ? juicer.rpc('slalom_start_endless', { p_god: sessionGod })
+        const { data, error } = await (classic ? juicer.rpc('slalom_start_course', { p_course: classic, p_god: sessionGod })
+          : endless ? juicer.rpc('slalom_start_endless', { p_god: sessionGod })
           : juicer.rpc(sessionGod ? 'slalom_start_god_game' : 'slalom_start_game'));
         if (seq !== prepareSeq) return 0;
         if (!error && data && data.session) {
           sessionId = data.session;
-          return Number(data.seed);
+          return Number(data.seed || 0);
         }
       } catch (_) { /* fall through to an unranked run */ }
     }
@@ -1269,13 +1272,14 @@
       sessionId = null;
       runGod = godMode;
     }
-    // Single on a mountain: its Championship course (unranked for now).
+    // Single on a mountain: its Championship course, on its own session
+    // and board.
     runClassic = !champ && chosenMode() === 'single' ? classicPick() : null;
     if (runClassic) {
       const m = mountain(runClassic);
+      await openSession(prepareSeq, false, runClassic);
       buildCourse(m.seed, false, shapeOf(m));
-      sessionId = null;
-      runGod = godMode;
+      runGod = sessionGod;
     }
     skierX = course.centerAt(0);
     skierY = 0;
@@ -4574,13 +4578,13 @@
 
   async function fetchLeaderboard(board = currentBoard()) {
     const render = board === shownBoard, endless = board.startsWith('endless'), god = board.endsWith(':god');
-    // The mountains' own boards aren't on the server yet.
-    if (board.startsWith('classic:')) { leaderboardCache[board] = []; if (render) leaderboardListEl.innerHTML = placeholder('COMING SOON'); return; }
+    const classic = board.startsWith('classic:') ? board.split(':')[1] : null;
     if (!juicer) { if (render) leaderboardListEl.innerHTML = placeholder('OFFLINE'); return; }
     if (render && !leaderboardListEl.children.length) leaderboardListEl.innerHTML = placeholder('LOADING...');
-    const table = juicer.from(endless ? 'slalom_mode_scores' : god ? 'slalom_god_scores' : 'slalom_scores')
+    const table = juicer.from(endless || classic ? 'slalom_mode_scores' : god ? 'slalom_god_scores' : 'slalom_scores')
       .select('id, initials, score');
-    const { data, error } = await (endless ? table.eq('mode', 'endless').eq('god', god) : table)
+    const { data, error } = await (classic ? table.eq('mode', 'classic').eq('course', classic).eq('god', god)
+      : endless ? table.eq('mode', 'endless').eq('god', god) : table)
       .order('score', { ascending: false })       // highest first
       .order('created_at', { ascending: true })
       .limit(10);
@@ -4611,7 +4615,8 @@
     // ended_at, so wait for it rather than racing it.
     if (endPromise) await endPromise;
 
-    const { data, error } = await juicer.rpc(course.endless ? 'slalom_submit_endless' : runGod ? 'slalom_submit_god_score' : 'slalom_submit_score', {
+    const { data, error } = await juicer.rpc(course.endless ? 'slalom_submit_endless' : runClassic ? 'slalom_submit_course'
+      : runGod ? 'slalom_submit_god_score' : 'slalom_submit_score', {
       p_session: sessionId,
       p_payload: {
         initials: raw.padEnd(3, '-'),

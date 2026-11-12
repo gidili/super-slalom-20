@@ -72,7 +72,8 @@ create table if not exists slalom_sessions (
 -- secret board. Fixed when the session is issued, so a run can't change
 -- boards halfway.
 alter table slalom_sessions add column if not exists god boolean not null default false;
--- Which game the session is for: 'single', or 'endless'.
+-- Which game the session is for: 'single', 'endless', or 'classic' (a
+-- Championship mountain, played in Single).
 alter table slalom_sessions add column if not exists mode text not null default 'single';
 
 -- RLS on with NO policies: the anon key cannot read this table, so it
@@ -147,6 +148,32 @@ create policy slalom_mode_scores_public_read
 create index if not exists slalom_mode_scores_board_idx
   on slalom_mode_scores (mode, god, score desc, created_at asc);
 
+-- ------------------------------------------------------------------ courses
+-- The Championship mountains, as the server needs to know them to check
+-- a run on one: its poles, its red poles, its par time (hundredths of a
+-- second). Kept in sync by hand with game.js (shapeOf / PAR).
+create table if not exists slalom_courses (
+  id     text primary key,
+  poles  int  not null,
+  reds   int  not null,
+  par_cs int  not null
+);
+
+-- RLS on, no policies: only the score functions read it.
+alter table slalom_courses enable row level security;
+
+insert into slalom_courses (id, poles, reds, par_cs) values
+  ('alyeska', 25, 4, 3468), ('kunama', 25, 4, 3620), ('pista3', 25, 4, 3887),
+  ('aoraki', 25, 4, 3371), ('fuji', 25, 4, 3481), ('cervino', 25, 4, 2860),
+  ('vinson', 25, 4, 3046), ('kirinyaga', 25, 4, 3057), ('iztactepetl', 25, 4, 3017),
+  ('kilimanjaro', 35, 6, 4597), ('aconcagua', 25, 4, 2703), ('annapurna', 25, 4, 2716),
+  ('k2', 25, 4, 2532), ('chomolungma', 25, 4, 4170)
+on conflict (id) do update set poles = excluded.poles, reds = excluded.reds, par_cs = excluded.par_cs;
+
+-- Which mountain a 'classic' run is on (null for Single and Endless).
+-- (Added after slalom_courses exists, below it in the order run.)
+alter table slalom_sessions add column if not exists course text references slalom_courses (id);
+
 -- --------------------------------------------------------------- functions
 
 -- Returns {"session": uuid, "seed": bigint}. A 40-bit seed: everything the
@@ -181,6 +208,22 @@ declare
 begin
   insert into slalom_sessions (seed, god, mode) values (v_seed, coalesce(p_god, false), 'endless') returning id into v_id;
   return jsonb_build_object('session', v_id, 'seed', v_seed);
+end $$;
+
+-- A run on one of the mountains, normal or god mode. The course is fixed,
+-- so there's no seed to hand out (0 is stored); the session just records
+-- which mountain, and it's checked against that mountain's numbers.
+create or replace function slalom_start_course(p_course text, p_god boolean) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  v_id uuid;
+begin
+  if not exists (select 1 from slalom_courses where id = p_course) then
+    raise exception 'unknown course';
+  end if;
+  insert into slalom_sessions (seed, god, mode, course)
+    values (0, coalesce(p_god, false), 'classic', p_course) returning id into v_id;
+  return jsonb_build_object('session', v_id);
 end $$;
 
 -- Space on the title. First call wins, so a retry can't move the start.
@@ -488,6 +531,137 @@ begin
 end $$;
 
 -- The two doors in: the real board and the secret one.
+-- A score on one of the mountains, normal or god mode (the session says
+-- which). The same checks as Single's, with that mountain's own numbers
+-- for poles, red poles and par. Saved to the mode board as 'classic'.
+create or replace function slalom_submit_course(p_session uuid, p_payload jsonb)
+returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  v_id       uuid;
+  v_god      boolean;
+  v_mode     text;
+  v_course   text;
+  v_poles    int;
+  v_red_max  int;
+  v_par      int;
+  v_initials text;
+  v_score    int;
+  v_passed   int;
+  v_missed   int;
+  v_reds     int;
+  v_clips    int;
+  v_streaks  jsonb;
+  v_n        int;
+  v_sum      int := 0;
+  v_clip_pts int := 0;
+  v_max_streak int := 0;
+  v_pine     int;
+  v_tree     int;
+  v_fence    int;
+  v_fox      int;
+  v_wolf     int;
+  v_bear     int;
+  v_forgiven int;
+  v_time_cs  int;
+  v_finished boolean;
+  v_expected int;
+  v_started  timestamptz;
+  v_paused_cs numeric;
+  v_pauses   int;
+  v_ended    timestamptz;
+  v_used     timestamptz;
+  v_elapsed_cs numeric;
+  v_msg constant text := 'score not accepted: if you wanna be a smarty pants your job is to do the work!';
+begin
+  v_initials := p_payload->>'initials';
+  v_score    := (p_payload->>'score')::int;
+  v_passed   := (p_payload->>'passed')::int;
+  v_missed   := (p_payload->>'missed')::int;
+  v_reds     := (p_payload->>'reds')::int;
+  v_clips    := coalesce((p_payload->>'clips')::int, 0);
+  v_streaks  := p_payload->'streaks';
+  v_pine     := coalesce((p_payload#>>'{burned,pine}')::int, 0);
+  v_tree     := coalesce((p_payload#>>'{burned,tree}')::int, 0);
+  v_fence    := coalesce((p_payload#>>'{burned,fence}')::int, 0);
+  v_fox      := coalesce((p_payload#>>'{survived,fox}')::int, 0);
+  v_wolf     := coalesce((p_payload#>>'{survived,wolf}')::int, 0);
+  v_bear     := coalesce((p_payload#>>'{survived,bear}')::int, 0);
+  v_forgiven := coalesce((p_payload->>'forgiven')::int, 0);
+  v_time_cs  := (p_payload->>'time_cs')::int;
+  v_finished := coalesce((p_payload->>'finished')::boolean, false);
+
+  select go_at, paused_cs, pauses, ended_at, used_at, god, mode, course
+    into v_started, v_paused_cs, v_pauses, v_ended, v_used, v_god, v_mode, v_course
+    from slalom_sessions
+   where id = p_session
+     for update;
+
+  if not found              then raise exception '%', v_msg; end if;
+  if v_mode <> 'classic'    then raise exception '%', v_msg; end if;
+  if v_started is null      then raise exception '%', v_msg; end if;
+  if v_ended is null        then raise exception '%', v_msg; end if;
+  if v_used  is not null    then raise exception '%', v_msg; end if;
+
+  -- The mountain's own numbers.
+  select poles, reds, par_cs into v_poles, v_red_max, v_par from slalom_courses where id = v_course;
+  if not found then raise exception '%', v_msg; end if;
+
+  -- The clock, as for Single.
+  v_elapsed_cs := extract(epoch from (v_ended - v_started)) * 100;
+  if v_elapsed_cs > 360000 then raise exception '%', v_msg; end if;  -- 1 hour
+  v_elapsed_cs := v_elapsed_cs - v_paused_cs;
+  if abs(v_time_cs - v_elapsed_cs) > 400 + 100 * v_pauses then raise exception '%', v_msg; end if;
+
+  -- Poles: each cleared or missed at most once; all of them on a finish.
+  if v_passed < 0 or v_forgiven < 0 or v_missed + v_forgiven < 0 then raise exception '%', v_msg; end if;
+  if v_forgiven > v_pine then raise exception '%', v_msg; end if;
+  if v_passed + v_missed + v_forgiven > v_poles then raise exception '%', v_msg; end if;
+  if v_finished and v_passed + v_missed + v_forgiven <> v_poles then raise exception '%', v_msg; end if;
+  if v_reds < 0 or v_reds > v_red_max or v_reds > v_passed then raise exception '%', v_msg; end if;
+  if v_clips < 0 or v_clips > v_passed then raise exception '%', v_msg; end if;
+
+  -- Streaks, as for Single.
+  if jsonb_typeof(v_streaks) <> 'array' then raise exception '%', v_msg; end if;
+  if jsonb_array_length(v_streaks) > (v_passed - v_clips) + v_missed + v_forgiven + 1 then raise exception '%', v_msg; end if;
+  for v_n in select (e #>> '{}')::int from jsonb_array_elements(v_streaks) e loop
+    if v_n is null or v_n < 1 then raise exception '%', v_msg; end if;
+    v_sum := v_sum + v_n;
+    v_max_streak := greatest(v_max_streak, v_n);
+    v_clip_pts := v_clip_pts + 10 * (least(v_n, 12) * (least(v_n, 12) + 1) / 2 + greatest(v_n - 12, 0) * 12);
+  end loop;
+  if v_sum <> v_clips then raise exception '%', v_msg; end if;
+
+  -- Burning (rocks, ice, tents and nets count as trees and fences) and
+  -- animals, as for Single.
+  if v_pine < 0 or v_tree < 0 or v_fence < 0 then raise exception '%', v_msg; end if;
+  if v_pine + v_tree + v_fence > (case when v_god then 400 else 100 end) then raise exception '%', v_msg; end if;
+  if not v_god and v_pine + v_tree + v_fence > 0 and v_max_streak < 4 then raise exception '%', v_msg; end if;
+  if v_fox < 0 or v_wolf < 0 or v_bear < 0 or v_fox + v_wolf + v_bear > 20 then raise exception '%', v_msg; end if;
+
+  if length(coalesce(v_initials, '')) <> 3 then raise exception '%', v_msg; end if;
+  if v_time_cs <= 0 then raise exception '%', v_msg; end if;
+
+  -- The score, with this mountain's par.
+  v_expected := v_passed * 10 + v_reds * 25 + v_clip_pts
+              + v_pine * 50 + v_tree * 25 + v_fence * 25
+              + v_fox * 50 + v_wolf * 100 + v_bear * 300;
+  if v_finished then
+    v_expected := v_expected + 50;
+    if v_missed <= 3 then
+      v_expected := v_expected + greatest(0, (v_par - (v_time_cs + v_missed * 60)) * 5);
+    end if;
+  end if;
+  if v_score <> v_expected then raise exception '%', v_msg; end if;
+
+  insert into slalom_mode_scores (mode, god, course, initials, score, payload)
+  values ('classic', v_god, v_course, v_initials, v_score, p_payload)
+  returning id into v_id;
+
+  update slalom_sessions set used_at = now() where id = p_session;
+  return v_id;
+end $$;
+
 create or replace function slalom_submit_score(p_session uuid, p_payload jsonb)
 returns uuid
 language plpgsql security definer set search_path = public as $$
@@ -503,6 +677,7 @@ begin
 end $$;
 
 grant execute on function slalom_start_game()               to anon, authenticated;
+grant execute on function slalom_start_course(text, boolean) to anon, authenticated;
 grant execute on function slalom_start_god_game()           to anon, authenticated;
 grant execute on function slalom_go(uuid)                   to anon, authenticated;
 grant execute on function slalom_pause(uuid)                to anon, authenticated;
@@ -510,6 +685,7 @@ grant execute on function slalom_resume(uuid)               to anon, authenticat
 grant execute on function slalom_end_game(uuid)             to anon, authenticated;
 grant execute on function slalom_submit_score(uuid, jsonb)  to anon, authenticated;
 grant execute on function slalom_submit_god_score(uuid, jsonb) to anon, authenticated;
+grant execute on function slalom_submit_course(uuid, jsonb) to anon, authenticated;
 grant execute on function slalom_start_endless(boolean)     to anon, authenticated;
 grant execute on function slalom_submit_endless(uuid, jsonb) to anon, authenticated;
 -- Reached only through the two above.
