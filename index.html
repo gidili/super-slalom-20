@@ -83,7 +83,7 @@
   #title-card p#mode-text { min-height: 4em; margin-bottom: 1em; }
   /* Single's courses: Random, then every mountain, all on show. */
   #course-list {
-    list-style: none; margin: -0.4em auto 1.2em; padding: 0; max-width: 360px;
+    list-style: none; margin: -0.4em auto 1.2em; padding: 0; max-width: 440px;
     border: 2px solid var(--vic-blue); background: var(--vic-white); pointer-events: auto; scrollbar-width: none;
     font-size: clamp(6px, 1.25vw, 9px);
   }
@@ -93,8 +93,10 @@
   h3 canvas.flag { display: block; margin: 6px auto 0; height: 18px; width: auto; image-rendering: pixelated; image-rendering: crisp-edges; outline: 2px solid var(--vic-blue); }
   #course-list li { display: flex; align-items: center; gap: 0.8em; height: 1.75em; padding: 0 0.7em; cursor: pointer; text-shadow: none; }
   #course-list li.chosen { background: var(--vic-blue); color: var(--vic-white); }
-  #course-list .flag-cell { width: 2.4em; display: flex; justify-content: center; }
-  #course-list .flag-cell canvas { height: 1.2em; width: auto; image-rendering: pixelated; image-rendering: crisp-edges; }
+  #course-list .flag-cell { width: 4.4em; display: flex; justify-content: center; gap: 0.3em; }
+  #course-list .flag-cell canvas { height: 1.2em; width: auto; image-rendering: pixelated; image-rendering: crisp-edges; outline: 1px solid var(--vic-blue); }
+  #course-list .flag-cell canvas.shaped, #course-list li.chosen .flag-cell canvas { outline-color: transparent; }
+  #course-list li.chosen .flag-cell canvas:not(.shaped) { outline-color: var(--vic-white); }
   #course-list .nm { flex: 1; text-align: left; white-space: nowrap; overflow: hidden; }
   #course-list .alt { width: 7.5em; text-align: right; white-space: nowrap; }
   #message { top: 62%; font-size: clamp(8px, 1.9vw, 13px); }

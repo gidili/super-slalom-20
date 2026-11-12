@@ -1763,8 +1763,8 @@
       SINGLE_COURSES.forEach((id, k) => {
         const li = document.createElement('li'), m = id === 'random' ? null : mountain(id);
         const flag = document.createElement('span'); flag.className = 'flag-cell';
-        flag.appendChild(flagCanvas(m ? FLAGS_OF[id][0] : 'random'));
-        const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = m ? m.name.split(/ \(| "/)[0] : 'RANDOM';
+        flag.append(...(m ? FLAGS_OF[id] : ['random']).map(flagCanvas));   // both, where a mountain has two
+        const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = m ? m.short || m.name.split(/ \(| "/)[0] : 'RANDOM';
         const alt = document.createElement('span'); alt.className = 'alt'; alt.textContent = m ? m.height.replace('~', '') : '';
         li.append(flag, nm, alt);
         li.addEventListener('click', (e) => {
