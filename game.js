@@ -742,6 +742,22 @@
       if (level <= 0) { const h = hiss; h.src.stop(t + 0.8); hiss = null; }
     }
 
+    // A little propeller plane: a buzzing drone that swells and fades,
+    // rising a touch as it goes, for `dur` seconds.
+    function playFlight(dur) {
+      if (!ac) return;
+      const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(), lfo = ac.createOscillator(), lg = ac.createGain();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(95, t);
+      o.frequency.linearRampToValueAtTime(130, t + dur);
+      lfo.frequency.value = 22; lg.gain.value = 0.04;
+      lfo.connect(lg); lg.connect(g.gain);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.07, t + dur * 0.3);
+      g.gain.linearRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(master); o.start(t); lfo.start(t); o.stop(t + dur + 0.05); lfo.stop(t + dur + 0.05);
+    }
+
     // Ice breaking off: a sharp crack.
     function playCrack() {
       if (!ac) return;
@@ -1110,7 +1126,7 @@
     // must never be able to stop a run, so every entry point swallows it.
     const safe = f => (...a) => { try { return f(...a); } catch (_) { return undefined; } };
     return {
-      unlock: safe(unlock), playCrack: safe(playCrack), updateAvalanche: safe(updateAvalanche), playFall: safe(playFall), updateWind: safe(updateWind), playScrape: safe(playScrape), playBark: safe(playBark), updateSluff: safe(updateSluff), updateHeli: safe(updateHeli), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
+      unlock: safe(unlock), playFlight: safe(playFlight), playCrack: safe(playCrack), updateAvalanche: safe(updateAvalanche), playFall: safe(playFall), updateWind: safe(updateWind), playScrape: safe(playScrape), playBark: safe(playBark), updateSluff: safe(updateSluff), updateHeli: safe(updateHeli), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
       stopSwoosh: safe(stopSwoosh), playDash: safe(playDash), playBreak: safe(playBreak),
       playExplosion: safe(playExplosion), playFanfare: safe(playFanfare), toggleMute: safe(toggleMute),
       playCoin: safe(playCoin), playCount: safe(playCount), playTick: safe(playTick), playDing: safe(playDing), playNoBonus: safe(playNoBonus),
@@ -3515,7 +3531,12 @@
 
   function render() {
     // Between Championship courses, the world map instead of the slope.
-    if (champ && champ.stage === 'pick' && !overlayEl.hidden) { drawMap(); ctx.putImageData(img, 0, 0); return; }
+    if (champ && (champ.stage === 'pick' || champ.stage === 'fly') && !overlayEl.hidden) {
+      drawMap();
+      ctx.putImageData(img, 0, 0);
+      if (champ.stage === 'fly' && performance.now() - champ.fly.at >= flightTime()) champGo();   // touchdown
+      return;
+    }
     // An avalanche shakes the whole mountain.
     const shake = slideLevel() > 0 ? Math.round((Math.random() - 0.5) * 2.4 * slideLevel()) : 0;
     const camY = cameraTop() + shake;
@@ -3844,14 +3865,15 @@
   // blinks, with dotted lines to what finishing it would open.
   // On a phone the detailed map is wider than the screen, so the view
   // glides sideways to keep the mountain you've picked in the middle.
-  let mapPan = null;
+  let mapPan = null, mapSpots = {};
   function drawMap() {
     const { w, h, bits } = worldMap('big');
     let x0 = Math.floor((VW - w) / 2);
     const y0 = NARROW ? 30 : 8;
     if (w > VW) {
-      const o = champOptions(), sel = o[champ.pick % o.length], [lon, lat, dx = 0] = PLACES[sel.id];
-      const want = Math.max(VW - w, Math.min(0, Math.round(VW / 2 - equalEarth(lon, lat, w, h)[0] - dx)));
+      const o = champOptions(), sel = champ.stage === 'fly' ? champ.current : o[champ.pick % o.length], [lon, lat, dx = 0] = PLACES[sel.id];
+      const focus = champ.stage === 'fly' ? planeAt(w, h, 0)[0] : equalEarth(lon, lat, w, h)[0] + dx;
+      const want = Math.max(VW - w, Math.min(0, Math.round(VW / 2 - focus)));
       mapPan = mapPan === null ? want : mapPan + (want - mapPan) * 0.15;
       x0 = Math.round(mapPan);
     }
@@ -3871,15 +3893,19 @@
       else if (land(x - 1, y) || land(x + 1, y) || land(x, y - 1) || land(x, y + 1)) px(x0 + x, y0 + y, VIC.lightBlue);
     }
     const at = id => { const [lon, lat, dx = 0, dy = 0] = PLACES[id], [x, y] = equalEarth(lon, lat, w, h); return [x0 + x + dx, y0 + y + dy]; };
+    mapSpots = Object.fromEntries(MOUNTAINS.map(m => [m.id, at(m.id)]));   // for tapping
     const dots = (a, b, c, gap) => {
       const n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1])));
       for (let k = 0; k <= n; k += gap) px(Math.round(a[0] + (b[0] - a[0]) * k / n), Math.round(a[1] + (b[1] - a[1]) * k / n), c);
     };
-    const c = champ, opts = champOptions(), pick = opts[c.pick % opts.length], blink = Math.floor(performance.now() / 300) % 2;
+    const c = champ, opts = champOptions(), blink = Math.floor(performance.now() / 300) % 2;
+    const flying = c.stage === 'fly', pick = flying ? c.current : opts[c.pick % opts.length];
     for (let k = 1; k < c.played.length; k++) dots(at(c.played[k - 1].id), at(c.played[k].id), VIC.white, 2);
-    for (const id of pick.unlocks.filter(id => !c.open.has(id) && !skied(id))) dots(at(pick.id), at(id), VIC.yellow, 3);
+    if (!flying) for (const id of pick.unlocks.filter(id => !c.open.has(id) && !skied(id))) dots(at(pick.id), at(id), VIC.yellow, 3);
     for (const m of MOUNTAINS) {
-      const [mx, my] = at(m.id), open = opts.includes(m), picked = m === pick;
+      const [mx, base] = at(m.id), open = opts.includes(m), picked = m === pick;
+      // The ones you can pick bob gently, each to its own beat.
+      const my = base - (open && !picked && !flying && Math.sin(performance.now() / 260 + mx) > 0 ? 1 : 0);
       if (skied(m.id)) {   // a little flag planted
         for (let r = -4; r <= 0; r++) px(mx, my + r, VIC.black);
         px(mx + 1, my - 4, VIC.red); px(mx + 2, my - 4, VIC.red); px(mx + 1, my - 3, VIC.red);
@@ -3891,9 +3917,58 @@
         px(mx + dx, my + dy, ink || ((mx + dx + my + dy) % 2 ? VIC.black : VIC.white));   // locked: dithered grey
       }
       for (const [dx, dy] of [[0, -3], [-1, -2], [1, -2], [-2, -1], [2, -1], [-3, 0], [3, 0]]) px(mx + dx, my + dy, VIC.black);
-      if (picked) for (let r = 0; r < 3; r++) for (let q = -r; q <= r; q++) px(mx + q, my - 9 + r, blink ? VIC.yellow : VIC.white);   // ▼ over it
+      if (picked) for (let r = 0; r < 3; r++) for (let q = r - 2; q <= 2 - r; q++) px(mx + q, my - 9 + r, blink ? VIC.yellow : VIC.white);   // ▼ over it
+    }
+    if (!flying) {
+      // The pick's name on the map, white on a black shadow, above its ▼.
+      const [mx, my] = at(pick.id), label = pick.name.split(/ \(| "/)[0];
+      const lw = label.length * 4 - 1, lx = Math.max(2, Math.min(VW - lw - 2, mx - (lw >> 1))), ly = Math.max(1, my - 16);
+      for (const [dx, dy, c] of [[1, 1, VIC.black], [0, 0, VIC.white]]) {
+        for (let k = 0; k < label.length; k++) {
+          const bitsK = FONT3[label[k]] || FONT3[' '];
+          for (let b = 0; b < 15; b++) if (bitsK[b] === '1') px(lx + k * 4 + (b % 3) + dx, ly + Math.floor(b / 3) + dy, c);
+        }
+      }
+    }
+    if (flying) {
+      // The plane, its dotted trail behind it, nose along the way it's going.
+      const [sx, sy, ang] = planeAt(w, h, 0), [fx, fy] = planeAt(w, h, -1);
+      dots([x0 + fx, y0 + fy], [x0 + sx, y0 + sy], VIC.white, 3);
+      const cs = Math.cos(ang), sn = Math.sin(ang);
+      PLANE.forEach((row, r) => [...row].forEach((ch, k) => {
+        if (ch === '.') return;
+        const u = k - 4, v = r - 3;
+        px(Math.round(x0 + sx + u * cs - v * sn), Math.round(y0 + sy + u * sn + v * cs), ch === 'K' ? VIC.black : VIC.white);
+      }));
     }
   }
+  // A little plane from above, pointing right: wings, tail, a dark nose.
+  const PLANE = ['...X.....', '...XX....', 'X..XXX...', 'XXXXXXXXK', 'X..XXX...', '...XX....', '...X.....'];
+  // Where a hop starts and ends, on a map w by h. The first hop of a
+  // Championship flies in from off to the west.
+  function flightEnds(w, h) {
+    const spot = id => { const [lon, lat, dx = 0, dy = 0] = PLACES[id], [x, y] = equalEarth(lon, lat, w, h); return [x + dx, y + dy]; };
+    const b = spot(champ.fly.to), a = champ.fly.from ? spot(champ.fly.from) : [b[0] - 80, b[1] - 25];
+    return [a, b];
+  }
+  // How long a hop takes: longer for further, 1 to 2 seconds.
+  function flightTime() {
+    const { w, h } = worldMap('big'), [a, b] = flightEnds(w, h);
+    return 1000 + Math.min(1000, Math.hypot(b[0] - a[0], b[1] - a[1]) * 8);
+  }
+  // The plane's spot at t (0..1 of the hop): eased, on a gentle arc.
+  function flightPos(w, h, t) {
+    const [a, b] = flightEnds(w, h), e = t * t * (3 - 2 * t);
+    return [a[0] + (b[0] - a[0]) * e, a[1] + (b[1] - a[1]) * e - Math.sin(Math.PI * t) * 8];
+  }
+  // Now: where the plane is and which way it points; back < 0: where it set off.
+  function planeAt(w, h, back) {
+    if (back < 0) return flightPos(w, h, 0);
+    const t = Math.min(1, (performance.now() - champ.fly.at) / flightTime());
+    const [x, y] = flightPos(w, h, t), [nx, ny] = flightPos(w, h, Math.min(1, t + 0.02)), [px0, py0] = flightPos(w, h, Math.max(0, t - 0.02));
+    return [x, y, Math.atan2(ny - py0, nx - px0)];
+  }
+
 
   // ----------------------------------------------------------------- flags
   // Each mountain's flags, drawn as pixel art. A flag is a size and a
@@ -4133,8 +4208,14 @@
   function showChamp() {
     const c = champ, P = champParts, n = c.played.length + (c.stage === 'result' || c.stage === 'done' ? 0 : 1);
     cardEl.classList.add('champ-mode');
-    overlayEl.classList.toggle('map-mode', c.stage === 'pick');
-    document.body.classList.toggle('map-mode', c.stage === 'pick');
+    overlayEl.classList.toggle('map-mode', c.stage === 'pick' || c.stage === 'fly');
+    document.body.classList.toggle('map-mode', c.stage === 'pick' || c.stage === 'fly');
+    overlayEl.classList.toggle('flying', c.stage === 'fly');
+    if (c.stage === 'fly') {   // just the map and the plane; the card comes back on landing
+      overlayEl.hidden = false;
+      requestAnimationFrame(() => overlayEl.classList.add('visible'));
+      return;
+    }
     champEl.hidden = false;
     P.pick.hidden = c.stage !== 'pick';
     P.flags.hidden = c.stage !== 'intro';
@@ -4185,6 +4266,7 @@
     cardEl.classList.remove('champ-mode');
     overlayEl.classList.remove('map-mode');
     document.body.classList.remove('map-mode');
+    overlayEl.classList.remove('flying');
     champEl.hidden = true;
   }
 
@@ -4192,8 +4274,15 @@
   function champGo() {
     const c = champ;
     if (c.stage === 'pick') {
+      // Off to the next mountain: the plane flies there over the map.
       const opts = champOptions();
       c.current = opts[c.pick % opts.length];
+      const from = c.played.length ? c.played[c.played.length - 1].id : null;
+      c.fly = { from, to: c.current.id, at: performance.now() };
+      c.stage = 'fly';
+      showChamp();
+      SFX.playFlight(flightTime() / 1000);
+    } else if (c.stage === 'fly') {   // landed, or skipped
       c.stage = 'intro';
       buildCourse(c.current.seed, false, shapeOf(c.current));   // its slope, behind the card
       showChamp();
@@ -4239,6 +4328,19 @@
   // A tap anywhere on the card moves things on, except on the pick screen,
   // where the name is the button.
   cardEl.addEventListener('click', (e) => { if (champUp() && champ.stage !== 'pick' && !e.target.closest('button')) champGo(); });
+  overlayEl.addEventListener('click', (e) => {
+    if (!champUp()) return;
+    if (champ.stage === 'fly') { champGo(); return; }   // a tap skips the flight
+    if (champ.stage !== 'pick' || e.target.closest('.card')) return;
+    // A tap on the map: pick the nearest open mountain; tap it again to go.
+    const r = canvas.getBoundingClientRect(), gx = (e.clientX - r.left) / r.width * VW, gy = (e.clientY - r.top) / r.height * H;
+    const opts = champOptions();
+    let best = -1, bestD = 12;
+    opts.forEach((m, k) => { const [x, y] = mapSpots[m.id] || [-99, -99], d = Math.hypot(gx - x, gy - (y - 1)); if (d < bestD) { bestD = d; best = k; } });
+    if (best < 0) return;
+    if (best === champ.pick % opts.length) champGo();
+    else { champ.pick = best; showChamp(); }
+  });
 
   // -------------------------------------------------------------- overlay
   // Two steps, like snake-bit: the run's breakdown and the initials first,
