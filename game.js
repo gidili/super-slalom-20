@@ -172,24 +172,25 @@
   // available and the leaderboard measures skiing, not seed luck. Drawn
   // from their own PRNG stream, so tuning the course shape never moves them.
   // Never the first pole: it can't be missed, so red there would be free.
-  function pickRedPoles(seed) {
+  function pickRedPoles(seed, count = POLE_COUNT, reds = RED_COUNT) {
     const rnd = mulberry32((seed % 4294967296) ^ 0x5EED);
-    const idx = Array.from({ length: POLE_COUNT - 1 }, (_, i) => i + 1);
+    const idx = Array.from({ length: count - 1 }, (_, i) => i + 1);
     for (let i = idx.length - 1; i > 0; i--) {
       const j = Math.floor(rnd() * (i + 1));
       [idx[i], idx[j]] = [idx[j], idx[i]];
     }
-    return new Set(idx.slice(0, RED_COUNT));
+    return new Set(idx.slice(0, reds));
   }
 
   // The poles in quick sections, by index. Sections never touch: at least
   // two ordinary gaps between them, and one before the finish.
-  function pickQuickPoles(seed) {
+  function pickQuickPoles(seed, count = POLE_COUNT, sections = QUICK_SECTIONS) {
+    if (!sections) return new Set();
     const rnd = mulberry32((seed % 4294967296) ^ 0x0B1C);
-    const last = POLE_COUNT - 1 - QUICK_POLES;    // latest start
+    const last = count - 1 - QUICK_POLES;    // latest start
     for (;;) {
       const starts = [];
-      for (let k = 0; k < QUICK_SECTIONS; k++) {
+      for (let k = 0; k < sections; k++) {
         starts.push(QUICK_FIRST + Math.floor(rnd() * (last - QUICK_FIRST + 1)));
       }
       starts.sort((a, b) => a - b);
@@ -203,12 +204,45 @@
 
   let course = null;
 
-  function buildCourse(seed, endless = false) {
-    const redPoles = pickRedPoles(seed);
+  // How a course is laid out. Single and Endless use this as it is; each
+  // Championship mountain changes some of it (see shapeOf).
+  const SHAPE = {
+    poles: POLE_COUNT, reds: RED_COUNT,
+    gapFirst: POLE_GAP_FIRST, gapLast: POLE_GAP_LAST,   // between poles, top and bottom
+    offset: POLE_OFFSET, offsetLast: POLE_OFFSET,       // how far out they stand
+    jitter: 4,                 // ...plus up to this much, at random
+    quick: QUICK_SECTIONS,     // bunched-up stretches
+    width: PATH_HW,            // piste half width, or [[t, hw], ...] down the course (t 0..1)
+    twist: 1,                  // how far the piste wanders
+    sway: 1,                   // ...and how often: under 1 is longer, lazier bends
+    crowd: 1,                  // trees and pineapples on the piste, times Single's
+    par: PAR_CS, star3: STAR3_CS,
+  };
+
+  // A width that changes down the course: straight lines between the
+  // points, flat past the ends.
+  function widthFn(width, finishY) {
+    if (typeof width === 'number') return () => width;
+    return (y) => {
+      const t = y / finishY;
+      if (t <= width[0][0]) return width[0][1];
+      for (let k = 1; k < width.length; k++) {
+        const [t1, w1] = width[k], [t0, w0] = width[k - 1];
+        if (t <= t1) return w0 + (w1 - w0) * (t - t0) / (t1 - t0);
+      }
+      return width[width.length - 1][1];
+    };
+  }
+  // The piste's half width at a world row.
+  const pisteHW = y => (course ? course.widthAt(y) : PATH_HW);
+
+  function buildCourse(seed, endless = false, shape = SHAPE) {
+    const S = shape;
+    const redPoles = pickRedPoles(seed, S.poles, S.reds);
     const rnd = mulberry32(seed % 4294967296);
-    const f1 = 0.006 + rnd() * 0.004, p1 = rnd() * Math.PI * 2;
-    const f2 = 0.017 + rnd() * 0.008, p2 = rnd() * Math.PI * 2;
-    const centerAt = y => W / 2 + 18 * Math.sin(y * f1 + p1) + 10 * Math.sin(y * f2 + p2);
+    const f1 = (0.006 + rnd() * 0.004) * S.sway, p1 = rnd() * Math.PI * 2;
+    const f2 = (0.017 + rnd() * 0.008) * S.sway, p2 = rnd() * Math.PI * 2;
+    const centerAt = y => W / 2 + S.twist * 18 * Math.sin(y * f1 + p1) + S.twist * 10 * Math.sin(y * f2 + p2);
 
     // The seed picks the first pole's side; after that they alternate, so
     // the line is a slalom, not a schuss. Each pole is passed on its
@@ -216,18 +250,20 @@
     // The first pole too: every pole has a flag, so there's no free choice
     // that the rest of the course would then ignore.
     const first = rnd() < 0.5 ? -1 : 1;
-    const quick = pickQuickPoles(seed);
+    const quick = pickQuickPoles(seed, S.poles, S.quick);
     const poles = [];
     let y = START_PAD;
-    for (let i = 0; i < (endless ? 0 : POLE_COUNT); i++) {
+    for (let i = 0; i < (endless ? 0 : S.poles); i++) {
+      const t = (i - 1) / (S.poles - 2);
       if (i > 0) {
         y += quick.has(i) && quick.has(i - 1)
           ? QUICK_GAP
-          : POLE_GAP_FIRST + (POLE_GAP_LAST - POLE_GAP_FIRST) * (i - 1) / (POLE_COUNT - 2);
+          : S.gapFirst + (S.gapLast - S.gapFirst) * (i - 1) / (S.poles - 2);
       }
       y = Math.round(y);
       const side = i % 2 === 0 ? first : -first;
-      const off = quick.has(i) ? QUICK_OFFSET + rnd() * 2 : POLE_OFFSET + rnd() * 4;
+      const off = quick.has(i) ? QUICK_OFFSET + rnd() * 2
+        : S.offset + (S.offsetLast - S.offset) * Math.max(0, t) + rnd() * S.jitter;
       const x = Math.round(centerAt(y) + side * off);
       // pass: side to pass on. fallen: 0 standing, else the direction it
       // fell (-1 left, 1 right).
@@ -311,8 +347,9 @@
       nextPole -= gone;
       while (pts.length > 2 && pts[1].y < at - ENDLESS_BEHIND) pts.shift();
     };
-    const lineEnd = endless ? Infinity : poles[POLE_COUNT - 1].y;
-    course = { seed, centerAt, lineAt, poles, finishY, salt, titlePine, endless, lineEnd, extend, levelAt };
+    const lineEnd = endless ? Infinity : poles[poles.length - 1].y;
+    const widthAt = widthFn(S.width, finishY);
+    course = { seed, centerAt, lineAt, poles, finishY, salt, titlePine, endless, lineEnd, extend, levelAt, widthAt, shape: S };
     if (endless) extend(0);
     snowRows.clear();            // cached rows belong to the previous slope
   }
@@ -805,12 +842,12 @@
     (state === 'finished' ? FINISH_POINTS : 0);
   const bonusCs = () => runCs() + missed * MISS_CS;
   const timeBonus = () =>
-    missed > MISS_LIMIT ? 0 : Math.max(0, (PAR_CS - bonusCs()) * BONUS_PER_CS);
+    missed > MISS_LIMIT ? 0 : Math.max(0, (course.shape.par - bonusCs()) * BONUS_PER_CS);
   const points = () => earned() + (state === 'finished' ? timeBonus() : 0);
   function stars() {
     if (state !== 'finished') return 0;
-    if (missed <= 0 && runCs() <= STAR3_CS) return 3;
-    if (missed <= STAR2_MISSES && bonusCs() < PAR_CS) return 2;
+    if (missed <= 0 && runCs() <= course.shape.star3) return 3;
+    if (missed <= STAR2_MISSES && bonusCs() < course.shape.par) return 2;
     return 1;
   }
 
@@ -874,7 +911,7 @@
       buildCourse(await openSession(prepareSeq, true), true);
       runGod = sessionGod;
     } else if (champ) {   // unranked for now
-      buildCourse(champ.current.seed);
+      buildCourse(champ.current.seed, false, shapeOf(champ.current));
       sessionId = null;
       runGod = godMode;
     }
@@ -1032,7 +1069,7 @@
 
   function finish() {
     // Poles not yet resolved can only be ones skipped right before the line.
-    while (nextPole < POLE_COUNT) resolvePole(false);
+    while (nextPole < course.poles.length) resolvePole(false);
     state = 'finished';
     mode = 'down';
     SFX.stopSwoosh();
@@ -1468,7 +1505,7 @@
   // noise, so the piste isn't a clean lane.
   function snowDepth(x, center, y) {
     const left = x < center;
-    const hw = PATH_HW + noise2(y / 22, left ? 3.5 : 9.5) * EDGE_WOBBLE;
+    const hw = pisteHW(y) + noise2(y / 22, left ? 3.5 : 9.5) * EDGE_WOBBLE;
     const d = Math.abs(x - center);
     if (d <= hw) return 0;
     const span = (left ? center : W - center) - hw;
@@ -1496,14 +1533,15 @@
     if (course && Math.abs(x - course.titlePine.x) < 10 && Math.abs(y - course.titlePine.y) < 12) return null;
     const depth = snowDepth(x, centerAt(y), y);
     // Endless puts more on the piste the harder it gets.
-    const crowd = course && course.endless ? 1 + 2 * course.levelAt(y) : 1;
+    const crowd = !course ? 1 : course.endless ? 1 + 2 * course.levelAt(y) : course.shape.crowd;
     const pineChance = depth <= 0 ? PINE_CHANCE * PINE_PISTE * crowd : PINE_CHANCE;
     const pine = hash(i * 48271 + salt, j * 13 + 5) < pineChance && pineIsFair(x, y);
     if (pine) {
       // Anywhere at all, so no tree chance to pass.
     } else if (depth <= 0) {
       // The odd tree on the piste itself, never on the racing line.
-      if (hash(i * 92821 + salt, j) >= PISTE_TREE || !lineIsClear(x, y)) return null;
+      const more = course && !course.endless ? course.shape.crowd : 1;
+      if (hash(i * 92821 + salt, j) >= PISTE_TREE * more || !lineIsClear(x, y)) return null;
     } else {
       const chance = TREE_EDGE + (TREE_MAX - TREE_EDGE) * depth;
       if (hash(i * 92821 + salt, j) >= chance) return null;
@@ -1556,12 +1594,13 @@
     const len = 16 + Math.floor(hash(k * 91 + salt, side + 13) * 22);
     let a;
     const intrude = INTRUDE_CHANCE * (course && course.endless ? 1 + course.levelAt(y) : 1);
+    const hw = pisteHW(y);
     if (course && hash(k * 17 + salt, side + 41) < intrude) {
-      a = Math.round(c + side * (PATH_HW - 4 - hash(k * 23 + salt, side + 3) * (INTRUDE_MAX - 4)));
+      a = Math.round(c + side * (hw - 4 - hash(k * 23 + salt, side + 3) * (INTRUDE_MAX - 4)));
       // The line runs inside the piste edge, so backing out reaches clear.
-      while (!lineIsClear(a, y) && Math.abs(a - c) < PATH_HW + EDGE_WOBBLE) a += side;
+      while (!lineIsClear(a, y) && Math.abs(a - c) < hw + EDGE_WOBBLE) a += side;
     } else {
-      const edge = c + side * (PATH_HW + EDGE_WOBBLE);
+      const edge = c + side * (hw + EDGE_WOBBLE);
       const room = side < 0 ? edge : W - edge;
       if (room < len + 8) return null;
       a = Math.round(edge + side * (4 + Math.floor(hash(k * 53 + salt, side + 29) * (room - len - 4))));
@@ -1607,7 +1646,7 @@
     const { salt, centerAt, endless } = course;
     if (hash(k * 719 + salt, side + 83) >= (endless ? ANIMAL_ODDS_ENDLESS : ANIMAL_ODDS)) return null;
     const y = k * ANIMAL_SLOT + Math.floor(hash(k * 41 + salt, side + 7) * (ANIMAL_SLOT - 20));
-    const x = Math.round(centerAt(y) + side * (PATH_HW + 6 + hash(k * 59 + salt, side + 19) * 14));
+    const x = Math.round(centerAt(y) + side * (pisteHW(y) + 6 + hash(k * 59 + salt, side + 19) * 14));
     if (x < 10 || x > W - 10 || y > course.finishY - 40) return null;
     if (Math.abs(x - course.lineAt(y)) < CLEAR_LINE + ANIMAL_ROAM) return null;
     const roll = hash(k * 137 + salt, side + 53);
@@ -2263,8 +2302,8 @@
       // Finish line: red/black checker across the piste.
       const fy = course.finishY - camY;
       if (fy > -4 && fy < H + 4) {
-        const c = centerAt(course.finishY);
-        for (let x = Math.floor(c - PATH_HW); x <= c + PATH_HW; x++) {
+        const c = centerAt(course.finishY), hw = pisteHW(course.finishY);
+        for (let x = Math.floor(c - hw); x <= c + hw; x++) {
           for (let k = 0; k < 4; k++) {
             put(x, fy + k, ((x >> 1) + (k >> 1)) % 2 ? VIC.red : VIC.black);
           }
@@ -2463,6 +2502,58 @@
   const CHAMP_COURSES = 10, FINALE = 'chomolungma';
   const mountain = id => MOUNTAINS.find(m => m.id === id);
 
+  // Each mountain's slope. Difficulty comes from height (0 the lowest, 1
+  // the highest): closer poles, wider swings, more bunched-up stretches,
+  // a narrower piste with more on it. Then each mountain's own character
+  // on top. Par and three-star times come from autopilot runs of each.
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const BY_HEIGHT = MOUNTAINS.map(m => m.id).sort((a, b) => metres(a) - metres(b));
+  function metres(id) { return +mountain(id).height.replace(/[^0-9]/g, ''); }
+  const CHARACTER = {
+    // A narrow chute near the bottom: the trees close in, no way out.
+    alyeska: { width: [[0, 44], [0.7, 44], [0.76, 27], [0.94, 27], [1, 36]] },
+    // Broad and gentle: long lazy bends, little on the piste.
+    kunama: { width: 50, sway: 0.55, twist: 1.2, crowd: 0.3, quick: 0 },
+    pista3: {},
+    aoraki: {},
+    // Even as a metronome: same gap, same swing, no bunching.
+    fuji: { gapFirst: 82, gapLast: 82, offset: 13, offsetLast: 13, jitter: 0, quick: 0, twist: 0.5 },
+    // Swiss top tight and technical; Italian bottom opens into long turns.
+    cervino: { gapFirst: 62, gapLast: 92, offset: 15, offsetLast: 11,
+      width: [[0, 34], [0.47, 34], [0.53, 48], [1, 48]] },
+    vinson: {},
+    // The glacier shrinks: the piste narrows to a strip by the finish.
+    kirinyaga: { width: [[0, 46], [0.85, 24], [1, 22]], offset: 13, offsetLast: 9 },
+    // The serpent: the twistiest piste, long S-bends.
+    iztactepetl: { twist: 1.8, sway: 0.6 },
+    // The long one: steady, not tricky.
+    kilimanjaro: { poles: 35, reds: 6, gapFirst: 86, gapLast: 74, jitter: 2, quick: 1 },
+    aconcagua: {},
+    annapurna: {},
+    // The Savage Mountain: the most technical slalom of all.
+    k2: { quick: 3, offset: 15, offsetLast: 15, gapLast: 54 },
+    chomolungma: {},
+  };
+  // Par and three-star times (cs), scaled from Single's by how long the
+  // autopilot takes on each. Re-run when a course changes.
+  const PAR = {
+    alyeska: [3468, 3342], kunama: [3620, 3489], pista3: [3407, 3283], aoraki: [3371, 3249],
+    fuji: [3481, 3355], cervino: [2860, 2756], vinson: [3046, 2935], kirinyaga: [3057, 2947],
+    iztactepetl: [3017, 2907], kilimanjaro: [4505, 4342], aconcagua: [2703, 2605],
+    annapurna: [2716, 2617], k2: [2702, 2604], chomolungma: [2721, 2622],
+  };
+  function shapeOf(m) {
+    const d = BY_HEIGHT.indexOf(m.id) / (BY_HEIGHT.length - 1);
+    const off = lerp(11, 14, d);
+    return Object.assign({}, SHAPE, {
+      gapFirst: Math.round(lerp(100, 88, d)), gapLast: Math.round(lerp(72, 58, d)),
+      offset: off, offsetLast: off,
+      quick: d < 0.25 ? 1 : d < 0.7 ? 2 : 3,
+      width: Math.round(lerp(44, 36, d)),
+      crowd: lerp(0.6, 1.6, d),
+    }, CHARACTER[m.id], { par: PAR[m.id][0], star3: PAR[m.id][1] });
+  }
+
   // champ: null outside a Championship. stage: 'pick' (where next), 'intro'
   // (the mountain's card), 'run', 'result' (after a course), 'done'.
   let champ = null;
@@ -2482,7 +2573,10 @@
   // finale once nine are done. If crashes have left nothing open, the two
   // lowest not yet skied open up, so every Championship reaches the end.
   const skied = id => champ.played.some(p => p.id === id);
+  // Testing only: ?allmountains opens every mountain, the finale too.
+  const ALL_OPEN = /[?&]allmountains\b/.test(location.search);
   function champOptions() {
+    if (ALL_OPEN) return MOUNTAINS.filter(m => !skied(m.id)).sort((a, b) => a.lon - b.lon);
     if (champ.played.length === CHAMP_COURSES - 1) return [mountain(FINALE)];
     const left = () => MOUNTAINS.filter(m => m.id !== FINALE && champ.open.has(m.id) && !skied(m.id));
     if (!left().length) MOUNTAINS.filter(m => m.id !== FINALE && !skied(m.id)).slice(0, 2).forEach(m => champ.open.add(m.id));
@@ -2492,8 +2586,14 @@
   const champTotal = () => champ.played.reduce((t, p) => t + p.points, 0);
   function champListHtml() {
     if (!champ.played.length) return '';
-    return champ.played.map((p, i) => `<li><span>${i + 1} ${mountain(p.id).name.split(' (')[0]}</span><span>${p.finished ? '*'.repeat(p.stars) : 'X'} ${p.points}</span></li>`).join('')
-      + `<li class="total"><span>TOTAL</span><span>${champTotal()}</span></li>`;
+    // Stars, time (a wipeout has none), points, in columns.
+    const cols = (stars, time, pts) => `<span class="cols"><b>${stars}</b><b>${time}</b><b>${pts}</b></span>`;
+    // The total time only means something if every course was finished.
+    const all = champ.played.every(p => p.finished);
+    const totalCs = champ.played.reduce((a, p) => a + p.time_cs, 0);
+    return champ.played.map((p, i) => `<li><span>${i + 1} ${mountain(p.id).name.split(/ \(| "/)[0]}</span>${
+      cols(p.finished ? '*'.repeat(p.stars) : '', p.finished ? fmt(p.time_cs) : 'WIPEOUT', p.points)}</li>`).join('')
+      + `<li class="total"><span>TOTAL</span>${cols('', all ? fmt(totalCs) : '', champTotal())}</li>`;
   }
 
   function showChamp() {
@@ -2523,7 +2623,7 @@
     } else if (c.stage === 'result') {
       const p = c.played[c.played.length - 1];
       P.head.textContent = p.finished ? 'FINISHED' : 'WIPEOUT';
-      P.sub.textContent = `${mountain(p.id).name.split(' (')[0]} +${p.points}`;
+      P.sub.textContent = `${mountain(p.id).name.split(' (')[0]} +${p.points}` + (p.finished ? ` · TIME ${fmt(p.time_cs)}` : '');
       P.text.textContent = '';
       P.prompt.textContent = (NARROW ? 'TAP' : 'SPACE') + (c.played.length === CHAMP_COURSES ? ' TO SEE HOW YOU DID' : ' FOR THE NEXT MOUNTAIN');
     } else {
@@ -2548,7 +2648,7 @@
       const opts = champOptions();
       c.current = opts[c.pick % opts.length];
       c.stage = 'intro';
-      buildCourse(c.current.seed);   // its slope, behind the card
+      buildCourse(c.current.seed, false, shapeOf(c.current));   // its slope, behind the card
       showChamp();
     } else if (c.stage === 'intro') {
       c.stage = 'run';
@@ -2578,7 +2678,7 @@
   // A course is over: keep its points, open what it earned, show the tally.
   function champCourseOver(finished) {
     const c = champ, m = c.current;
-    c.played.push({ id: m.id, points: points(), stars: finished ? stars() : 0, finished });
+    c.played.push({ id: m.id, points: points(), stars: finished ? stars() : 0, finished, time_cs: runCs() });
     // A crash opens just one: the first neighbour not already open.
     const fresh = m.unlocks.filter(id => !c.open.has(id) && !skied(id));
     (finished ? fresh : fresh.slice(0, 1)).forEach(id => c.open.add(id));
