@@ -1726,7 +1726,7 @@
   // so the Konami code's left-right-left-right ends where it began.
   const MODE_TEXT = {
     single: 'TEST YOUR SLALOM SKILLS:<br>25 POLES, ONE MOUNTAIN, NO SECOND CHANCES.',
-    championship: '12 LEGENDARY MOUNTAINS, ONE CHAMPION.<br>CAN YOU CONQUER THE NORTH FACE OF EVEREST?',
+    championship: '10 OUT OF 14 LEGENDARY MOUNTAINS, ONE CHAMPION.<br>CAN YOU CONQUER THE NORTH FACE OF EVEREST?',
     endless: 'NO FINISH LINE. HOW FAR CAN YOU GO?<br>A CRASH OR 4 MISSES AND IT\'S OVER.',
   };
   const modeBtns = [...document.querySelectorAll('.mode-btn')];
