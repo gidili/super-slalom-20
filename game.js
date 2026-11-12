@@ -226,6 +226,7 @@
     arena: false,              // ...and the crowd in a ring behind a barrier past the finish
     couloir: null,             // a pole-less gully between rock walls at the top (see buildCourse)
     rocks: 0,                  // the share of trees that are boulders instead
+    debris: 0,                 // boulders strewn on the piste itself, or [[t, density], ...]
     fences: 1,                 // fences, times Single's (0: none)
     camp: false,               // a base camp of tents beside the finish
     fans: 5,                   // people cheering at the finish
@@ -398,7 +399,7 @@
     };
     const lineEnd = endless ? Infinity : poles[poles.length - 1].y;
     const baseWidth = alongCourse(S.width, finishY), baseSlope = alongCourse(S.slope, finishY);
-    const cherryAt = alongCourse(S.cherry, finishY);
+    const cherryAt = alongCourse(S.cherry, finishY), debrisAt = alongCourse(S.debris, finishY);
     const widthAt = !K ? baseWidth : y =>
       y < c0 || y > c2 ? baseWidth(y)
         : y <= c1 ? K.hw : K.hw + (baseWidth(y) - K.hw) * smooth((y - c1) / K.open);
@@ -498,7 +499,7 @@
       liftX = sum / n > W / 2 ? 18 : W - 18;
     }
     course = { seed, centerAt, lineAt, poles, finishY, salt, nets, liftX, titlePine, endless, lineEnd, extend, levelAt, widthAt, slopeAt, lips, borders, signs, arena, wall, rockDepth, inCouloir, camp, fans, fanZone,
-      couloir: K ? { c0, c1, c2 } : null, cherryAt, shape: S };
+      couloir: K ? { c0, c1, c2 } : null, cherryAt, debrisAt, shape: S };
     if (endless) extend(0);
     snowRows.clear();            // cached rows belong to the previous slope
   }
@@ -1788,12 +1789,15 @@
     const crowd = !course ? 1 : course.endless ? 1 + 2 * course.levelAt(y) : course.shape.crowd;
     const pineChance = depth <= 0 ? PINE_CHANCE * PINE_PISTE * crowd : PINE_CHANCE;
     const pine = hash(i * 48271 + salt, j * 13 + 5) < pineChance && pineIsFair(x, y);
+    let debris = 0;
     if (pine) {
       // Anywhere at all, so no tree chance to pass.
     } else if (depth <= 0) {
       // The odd tree on the piste itself, never on the racing line.
       const more = course && !course.endless ? course.shape.crowd : 1;
-      if (hash(i * 92821 + salt, j) >= PISTE_TREE * more || !lineIsClear(x, y)) return null;
+      // A rockfall leaves boulders all over the piste, though never on the line.
+      debris = course && course.debrisAt ? course.debrisAt(y) : 0;
+      if (hash(i * 92821 + salt, j) >= PISTE_TREE * more + debris || !lineIsClear(x, y)) return null;
     } else {
       const chance = TREE_EDGE + (TREE_MAX - TREE_EDGE) * depth;
       if (hash(i * 92821 + salt, j) >= chance) return null;
@@ -1805,7 +1809,7 @@
       if (f && Math.abs(y - f.y) <= 10 && x >= f.x0 - 5 && x <= f.x1 + 5) return null;
     }
     // Some mountains swap trees for boulders: one of three shapes.
-    const rock = !pine && course && course.shape && hash(i * 3571 + salt, j * 7 + 2) < course.shape.rocks
+    const rock = !pine && course && course.shape && (debris > 0 || hash(i * 3571 + salt, j * 7 + 2) < course.shape.rocks)
       ? 1 + Math.floor(hash(i * 911 + salt, j * 5 + 3) * ROCKS.length) : 0;
     // Cherries grow in groves: patches of smooth noise, which spread and
     // join up as the course's share of them rises.
@@ -3218,7 +3222,11 @@
     // Room to tuck on the pitch, then the poles close in below it.
     pista3: { fans: 160, cameras: 60, edgeNets: 0.8, lift: true, arena: true, gaps: [[0, 170], [0.42, 160], [0.57, 75], [1, 64]], quick: 0, slope: [[0, 1], [0.05, 1], [0.08, 1.5], [0.6, 1.5], [0.66, 1]],
       signs: [{ t: 0.05, lines: ['GRAND MURET', '76%'] }] },
-    aoraki: {},
+    // In 1991 a rock avalanche sheared 10 m off the summit: a stretch of
+    // boulders strewn across the piste high up, and rocks among the trees
+    // all the way down.
+    aoraki: { rocks: 0.3, debris: [[0, 0], [0.1, 0], [0.13, 0.1], [0.3, 0.1], [0.34, 0]],
+      signs: [{ t: 0.1, lines: ['ROCKFALL'] }] },
     // Even as a metronome: same gap, same swing, no bunching.
     // ...and cherry trees in bloom down the lower half.
     // ...and cherry groves, small at first, bigger and bigger, until by
