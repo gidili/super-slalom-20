@@ -88,6 +88,11 @@
   /* Below the skier, who stands at about 30% down the screen. */
   #countdown { top: 45%; font-size: clamp(20px, 5.5vw, 38px); }
   #bonus { top: 20%; }
+  /* A night course: the words on the slope in white, or they vanish in the dark. */
+  body.night #tv #message, body.night #tv #pop, body.night #tv #countdown, body.night #tv #bonus {
+    color: var(--vic-white);
+    text-shadow: 2px 0 0 var(--vic-blue), -2px 0 0 var(--vic-blue), 0 2px 0 var(--vic-blue), 0 -2px 0 var(--vic-blue);
+  }
   #bonus-time { font-size: clamp(8px, 1.9vw, 13px); margin-bottom: 0.8em; }
   #bonus-score { font-size: clamp(14px, 3.6vw, 26px); margin-bottom: 0.4em; }
   #bonus-points { font-size: clamp(8px, 1.9vw, 13px); }

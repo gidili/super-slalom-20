@@ -424,6 +424,7 @@
       while (pts.length > 2 && pts[1].y < at - ENDLESS_BEHIND) pts.shift();
     };
     const lineEnd = endless ? Infinity : poles[poles.length - 1].y;
+    document.body.classList.toggle('night', !!S.night);
     const baseWidth = alongCourse(S.width, finishY), baseSlope = alongCourse(S.slope, finishY);
     const cherryAt = alongCourse(S.cherry, finishY), debrisAt = alongCourse(S.debris, finishY);
     // Penitentes grow in fields: patches of smooth noise, below the start.
@@ -1832,9 +1833,11 @@
     if (course.couloir && moveSluff(dt)) { crash({ sluff: true }); return; }
     if (course.shape.avalanche && moveAvalanche(dt)) { crash({ avalanche: true }); return; }
     if (course.shape.serac) {
+      // A chunk knocks you back, it doesn't end the run: it shatters and
+      // you lose most of your speed. On fire you smash it for points.
       const chunk = moveIcefall(dt);
       if (chunk && onFire()) smashChunk(chunk);
-      else if (chunk && !runGod) { crash({ icefall: true }); return; }
+      else if (chunk) knockedByIce(chunk);
     }
     if (crossed < course.borders.length && skierY >= course.borders[crossed]) { crossed++; flash(course.shape.welcome, 1800); }
     if (skierY >= course.finishY) finish();
@@ -1960,6 +1963,14 @@
     for (const k of icefall) k.x += k.v * dt;
     icefall = icefall.filter(k => Math.abs(k.x - course.centerAt(k.y)) < course.widthAt(k.y) + 30);
     return icefall.find(k => Math.abs(k.x - skierX) <= 2.5 && skierY >= k.y - 3 && skierY <= k.y + 2) || null;
+  }
+  function knockedByIce(k) {
+    icefall.splice(icefall.indexOf(k), 1);
+    speed *= 0.35;
+    vx *= 0.3;
+    SFX.playBreak();
+    spawnExplosion(k.x, k.y - 2, PEN_PIECES);
+    pop('ICEFALL!');
   }
   function smashChunk(k) {
     icefall.splice(icefall.indexOf(k), 1);
@@ -2792,7 +2803,7 @@
   // further down the course (never all the way: you can always read the
   // slope). A headlamp throws a cone of full light ahead down the hill,
   // leaning with your turns.
-  const NIGHT = [12, 10, 60], LAMP_LEN = 95, LAMP_HALF = 0.42;
+  const NIGHT = [12, 10, 60], LAMP_EDGE = [214, 190, 92], LAMP_LEN = 125, LAMP_HALF = 0.42;
   function nightfall(camY) {
     const dark = alongCourse(course.shape.night, course.finishY);
     const sx0 = Math.round(skierX) - camX, sy0 = Math.round(skierY) - camY - 2;
@@ -2812,9 +2823,13 @@
           }
         }
         light = light > 0.6 ? 1 : light > 0.25 ? 0.5 : 0;   // in hard steps, VIC-20 style
+        const i = (sy * VW + sx) * 4;
+        if (light === 0.5) {   // the beam's edge: a warm yellow fringe
+          d[i] += (LAMP_EDGE[0] - d[i]) * 0.45; d[i + 1] += (LAMP_EDGE[1] - d[i + 1]) * 0.45; d[i + 2] += (LAMP_EDGE[2] - d[i + 2]) * 0.45;
+          continue;
+        }
         const k = base * (1 - light);
         if (k <= 0) continue;
-        const i = (sy * VW + sx) * 4;
         d[i] += (NIGHT[0] - d[i]) * k; d[i + 1] += (NIGHT[1] - d[i + 1]) * k; d[i + 2] += (NIGHT[2] - d[i + 2]) * k;
       }
     }
@@ -3619,9 +3634,10 @@
     }
 
     if (course && state !== 'title') { drawPetals(); drawStreaks(); drawMoths(); drawBirds(); }
+    // Night falls on the slope, not on the score: stars go on after.
+    if (course && course.shape.night && state !== 'title') nightfall(camY);
     if (tally && tally.dinged) drawStars(tally.starsShown);
 
-    if (course && course.shape.night && state !== 'title') nightfall(camY);
     ctx.putImageData(img, 0, 0);
   }
 
@@ -3850,7 +3866,7 @@
     // ...run at night: dim all round, a headlamp ahead.
     // The Bottleneck: a serac over the piste for a long stretch, shedding
     // ice. Above any treeline: rock only. Longer, tighter bunched runs.
-    k2: { night: [[0, 0.65], [1, 0.65]], wildlife: { odds: 0.016, kinds: { leopard: 1 } },
+    k2: { night: [[0, 0.88], [1, 0.88]], wind: true, wildlife: { odds: 0.016, kinds: { leopard: 1 } },
       serac: { from: 0.4, to: 0.7, side: 1 }, rocks: 1, forest: 0.5,
       quick: 2, quickLen: 7, quickGap: 36, offset: 15, offsetLast: 15, gapFirst: 82, gapLast: 50 },
     // The Hornbein Couloir first: steep, narrow, zigzagging between rock
