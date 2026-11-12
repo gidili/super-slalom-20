@@ -223,6 +223,7 @@
     camp: false,               // a base camp of tents beside the finish
     fans: 5,                   // people cheering at the finish
     heli: false,               // dropped off by helicopter at the start
+    moths: false,              // Bogong moth swarms fluttering past
     twist: 1,                  // how far the piste wanders
     sway: 1,                   // ...and how often: under 1 is longer, lazier bends
     crowd: 1,                  // trees and pineapples on the piste, times Single's
@@ -1042,6 +1043,7 @@
     hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null;
     animals = []; animalSlot = Math.ceil(START_PAD / ANIMAL_SLOT);
     birds = []; birdIn = between(course.endless ? BIRD_EVERY_ENDLESS : BIRD_EVERY);
+    moths = []; mothIn = 2;
     passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
     streak = 0; streaks = []; clipPoints = 0; burned = { pine: 0, tree: 0, fence: 0 };
     survived = { fox: 0, wolf: 0, bear: 0 }; forgiven = 0;
@@ -1930,6 +1932,49 @@
   let birds = [], birdIn = 0;
   const between = ([a, b]) => a + Math.random() * (b - a);
 
+  // Bogong moths: every so often a loose cloud of specks, a pixel each,
+  // drifts across the screen, every moth fluttering on its own. Scenery.
+  const MOTH_EVERY = [5, 10];
+  let moths = [], mothIn = 3;
+  function updateMoths(dt) {
+    if (!course.shape.moths) { moths = []; return; }
+    mothIn -= dt;
+    if (mothIn <= 0) {
+      mothIn = between(MOTH_EVERY);
+      const dir = Math.random() < 0.5 ? 1 : -1, cy = 15 + Math.random() * (H - 60), v = dir * (18 + Math.random() * 12);
+      const n = 14 + Math.floor(Math.random() * 14);
+      for (let i = 0; i < n; i++) {
+        moths.push({ x: (dir > 0 ? -6 : VW + 6) - dir * Math.random() * 40, y: cy + (Math.random() - 0.5) * 26,
+          v: v * (0.8 + Math.random() * 0.4), ph: Math.random() * 6.3, ink: Math.random() < 0.6 ? VIC.orange : VIC.black });
+      }
+    }
+    const now = performance.now() / 1000;
+    // Where the skier is on screen, in the moths' own (screen) coordinates.
+    const px = skierX - camX, py = skierY - cameraTop() - 2, live = state === 'running', fire = live && onFire();
+    for (const m of moths) {
+      const dx = m.x - px, dy = m.y - py, d = Math.hypot(dx, dy) || 1;
+      // Moths to a flame: on fire, any that come near are drawn in and
+      // circle you for a few seconds, then peel off.
+      if (fire && !m.orbit && !m.done && d < 40) m.orbit = { a: Math.atan2(dy, dx), r: 5 + Math.random() * 7, left: 2.5 + Math.random() * 2 };
+      if (m.orbit) {
+        m.orbit.a += (5 + m.ph) * dt; m.orbit.left -= dt;
+        m.x = px + Math.cos(m.orbit.a) * m.orbit.r; m.y = py + Math.sin(m.orbit.a) * m.orbit.r * 0.8;
+        if (m.orbit.left <= 0 || !fire) { m.orbit = null; m.done = true; m.ex = Math.cos(m.ph) * 30; m.ey = -20; }
+        continue;
+      }
+      // Ski through a swarm and it scatters, then drifts on.
+      if (live && !fire && d < 11 && Math.hypot(m.ex || 0, m.ey || 0) < 8) { m.ex = dx / d * 55; m.ey = dy / d * 55; }
+      m.ex = (m.ex || 0) * Math.exp(-2.5 * dt); m.ey = (m.ey || 0) * Math.exp(-2.5 * dt);
+      m.x += (m.v + m.ex) * dt;
+      m.y += (Math.sin(now * 9 + m.ph) * 14 + m.ey) * dt;
+    }
+    moths = moths.filter(m => m.orbit || (m.v > 0 ? m.x < VW + 10 : m.x > -10) && m.y > -20 && m.y < H + 20);
+  }
+  function drawMoths() {
+    const flick = Math.floor(performance.now() / 80);
+    for (const m of moths) if ((flick + Math.round(m.ph * 10)) % 5) put(Math.round(camX + m.x), Math.round(m.y), m.ink);
+  }
+
   function spawnBirds() {
     const dir = Math.random() < 0.5 ? 1 : -1, y = 10 + Math.random() * (H - 50);
     if (Math.random() < EAGLE_ODDS) {
@@ -2751,7 +2796,7 @@
       }
     }
 
-    if (course && state !== 'title') drawBirds();
+    if (course && state !== 'title') { drawMoths(); drawBirds(); }
     if (tally && tally.dinged) drawStars(tally.starsShown);
 
     ctx.putImageData(img, 0, 0);
@@ -2935,7 +2980,7 @@
     // A narrow chute near the bottom: the trees close in, no way out.
     alyeska: { fans: 34, heli: true, width: [[0, 44], [0.7, 44], [0.76, 27], [0.94, 27], [1, 36]] },
     // Broad and gentle: long lazy bends, little on the piste.
-    kunama: { fans: 34, width: 50, sway: 0.55, twist: 1.2, crowd: 0.3, quick: 0 },
+    kunama: { fans: 34, moths: true, width: 50, sway: 0.55, twist: 1.2, crowd: 0.3, quick: 0 },
     // The Grand Muret: 76%, right after the start. The slope drops away,
     // you fly for a few poles, then it eases.
     // Room to tuck on the pitch, then the poles close in below it.
@@ -3440,6 +3485,7 @@
     if (course && state !== 'title' && state !== 'paused' && state !== 'starting') {
       updateAnimals(Math.min(dt, 0.05));
       updateBirds(Math.min(dt, 0.05));
+      updateMoths(Math.min(dt, 0.05));
     }
     if (particles.length) updateParticles(Math.min(dt, 0.05));
     if (state === 'running' || state === 'crashed' || state === 'finished') paintHud();
