@@ -29,6 +29,7 @@
     orange: [170, 116, 73],    lightBlue: [128, 128, 255],
     yellow: [191, 206, 114],
     paleBlue: [184, 184, 255], // the steep-face tint only
+    pink: [226, 150, 190],     // the VIC-20's pink, for cherry blossom
   };
   const css = c => `rgb(${c[0]},${c[1]},${c[2]})`;
 
@@ -216,14 +217,18 @@
     quick: QUICK_SECTIONS,     // bunched-up stretches
     width: PATH_HW,            // piste half width, or [[t, hw], ...] down the course (t 0..1)
     slope: 1,                  // how steep: speed times this, or [[t, x], ...] like width
-    signs: [],                 // boards by the piste: [{ t, lines: [...] }]
+    signs: [],                 // boards by the piste: [{ t, lines: [...], flag }]
+    borders: [],               // a national border across the slope, at these t
+    welcome: '',               // ...and what flashes up as you cross it
     couloir: null,             // a pole-less gully between rock walls at the top (see buildCourse)
     rocks: 0,                  // the share of trees that are boulders instead
     fences: 1,                 // fences, times Single's (0: none)
     camp: false,               // a base camp of tents beside the finish
     fans: 5,                   // people cheering at the finish
+    cameras: 0,                // ...of whom this many are taking photos
     heli: false,               // dropped off by helicopter at the start
     moths: false,              // Bogong moth swarms fluttering past
+    cherry: 0,                 // share of trees that are cherries in bloom, or [[t, share], ...]
     twist: 1,                  // how far the piste wanders
     sway: 1,                   // ...and how often: under 1 is longer, lazier bends
     crowd: 1,                  // trees and pineapples on the piste, times Single's
@@ -389,6 +394,7 @@
     };
     const lineEnd = endless ? Infinity : poles[poles.length - 1].y;
     const baseWidth = alongCourse(S.width, finishY), baseSlope = alongCourse(S.slope, finishY);
+    const cherryAt = alongCourse(S.cherry, finishY);
     const widthAt = !K ? baseWidth : y =>
       y < c0 || y > c2 ? baseWidth(y)
         : y <= c1 ? K.hw : K.hw + (baseWidth(y) - K.hw) * smooth((y - c1) / K.open);
@@ -404,8 +410,17 @@
       .filter((pt, k) => S.slope[k][1] <= 1 && pt[1] > 1)
       .map(pt => Math.round(S.slope[S.slope.indexOf(pt) - 1][0] * finishY))
       .concat(K ? [c0] : []);
-    const signs = S.signs.map(g => ({ y: Math.round(g.t * finishY), lines: g.lines }))
-      .concat(K && K.sign ? [{ y: c0, lines: K.sign }] : []);
+    const borders = S.borders.map(t => Math.round(t * finishY));
+    // Signs stand just off the piste on whichever side has room, bottom
+    // edge on their row; worked out here so trees can keep clear.
+    const signs = S.signs.map(g => ({ y: Math.round(g.t * finishY), lines: g.lines, flag: g.flag }))
+      .concat(K && K.sign ? [{ y: c0, lines: K.sign }] : [])
+      .map(g => {
+        const wd = Math.max(...g.lines.map(l => l.length)) * 4 + 3, ht = g.lines.length * 6 + 3;
+        const c = centerAt(g.y), edge = baseWidth(g.y) + 6;
+        const x0 = c - edge - wd > 2 ? Math.round(c - edge - wd) : Math.round(Math.min(c + edge, W - wd - 2));
+        return { ...g, wd, ht, x0, top: g.y - ht - 4 - (g.flag ? 0 : 0) };
+      });
     // Base camp: tents for ten in a cluster just off the piste by the
     // finish, on the side with more room. Kept clear of trees and rocks.
     let camp = null;
@@ -424,13 +439,14 @@
       const col = Math.floor(m / FAN_ROWS.length), fy = finishY + FAN_ROWS[m % FAN_ROWS.length] + (col % 2) * 3;
       const jit = hash(k * 131 + salt, 7) * 2;
       fans.push({ x: Math.round(centerAt(fy) + side * (widthAt(fy) + 7 + col * 7 + jit)), y: fy,
-        ink: FAN_INKS[Math.floor(hash(k * 29 + salt, 11) * FAN_INKS.length)], phase: Math.floor(hash(k * 17 + salt, 3) * 8) });
+        ink: FAN_INKS[Math.floor(hash(k * 29 + salt, 11) * FAN_INKS.length)], phase: Math.floor(hash(k * 17 + salt, 3) * 8),
+        camera: k < S.cameras });
     }
     const fanCols = Math.ceil(S.fans / 2 / FAN_ROWS.length);
     const fanZone = (x, y) => fans.length > 0 && y > finishY - 28 && y < finishY + 56 &&
       Math.abs(x - centerAt(y)) < widthAt(y) + 15 + fanCols * 7;
-    course = { seed, centerAt, lineAt, poles, finishY, salt, titlePine, endless, lineEnd, extend, levelAt, widthAt, slopeAt, lips, signs, wall, rockDepth, inCouloir, camp, fans, fanZone,
-      couloir: K ? { c0, c1, c2 } : null, shape: S };
+    course = { seed, centerAt, lineAt, poles, finishY, salt, titlePine, endless, lineEnd, extend, levelAt, widthAt, slopeAt, lips, borders, signs, wall, rockDepth, inCouloir, camp, fans, fanZone,
+      couloir: K ? { c0, c1, c2 } : null, cherryAt, shape: S };
     if (endless) extend(0);
     snowRows.clear();            // cached rows belong to the previous slope
   }
@@ -524,6 +540,7 @@
   let hitWhat = 'TREES';       // what ended a crashed run, for the card
   let sluff = null;            // the loose snow pouring down a couloir behind you
   let heli = null;             // the helicopter that drops you off, if there is one
+  let crossed = 0;             // borders crossed so far this run
   let exploded = new Set();    // pineapples already blown up, by cell
   // Trees and fences set alight on fire, by the same keys, each with when
   // and in which fire's colours. A tree hit is a stump; a tree passed burns
@@ -1040,10 +1057,10 @@
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     held = []; tapLeft = 0;
-    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null;
+    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null; crossed = 0;
     animals = []; animalSlot = Math.ceil(START_PAD / ANIMAL_SLOT);
     birds = []; birdIn = between(course.endless ? BIRD_EVERY_ENDLESS : BIRD_EVERY);
-    moths = []; mothIn = 2;
+    moths = []; mothIn = 2; petals = [];
     passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
     streak = 0; streaks = []; clipPoints = 0; burned = { pine: 0, tree: 0, fence: 0 };
     survived = { fox: 0, wolf: 0, bear: 0 }; forgiven = 0;
@@ -1596,6 +1613,7 @@
 
     if (onFire()) scorchPassed();
     if (course.couloir && moveSluff(dt)) { crash({ sluff: true }); return; }
+    if (crossed < course.borders.length && skierY >= course.borders[crossed]) { crossed++; flash(course.shape.welcome, 1800); }
     if (skierY >= course.finishY) finish();
   }
 
@@ -1685,6 +1703,7 @@
     if (course && Math.abs(x - course.titlePine.x) < 10 && Math.abs(y - course.titlePine.y) < 12) return null;
     if (course && course.inCouloir && course.inCouloir(y)) return null;   // nothing grows on the rock
     if (course && course.fanZone && course.fanZone(x, y)) return null;
+    if (course && course.signs && course.signs.some(g => x > g.x0 - 6 && x < g.x0 + g.wd + 6 && y > g.top - 10 && y < g.y + 10)) return null;
     const cp = course && course.camp;
     if (cp && x > cp.x - 10 && x < cp.x + cp.w + 10 && y > cp.y - 4 && y < cp.y + cp.h + 12) return null;
     const depth = snowDepth(x, centerAt(y), y);
@@ -1711,7 +1730,11 @@
     // Some mountains swap trees for boulders: one of three shapes.
     const rock = !pine && course && course.shape && hash(i * 3571 + salt, j * 7 + 2) < course.shape.rocks
       ? 1 + Math.floor(hash(i * 911 + salt, j * 5 + 3) * ROCKS.length) : 0;
-    return { i, j, x, y, pine, rock };
+    // Cherries grow in groves: patches of smooth noise, which spread and
+    // join up as the course's share of them rises.
+    const cherry = !pine && !rock && course && course.cherryAt &&
+      noise2(i / 3 + (salt % 89), j / 3 + 17) < course.cherryAt(y) * 1.1;
+    return { i, j, x, y, pine, rock, cherry };
   }
 
   // True if something deadly at (x, y) leaves the racing line and the
@@ -1970,6 +1993,22 @@
     }
     moths = moths.filter(m => m.orbit || (m.v > 0 ? m.x < VW + 10 : m.x > -10) && m.y > -20 && m.y < H + 20);
   }
+  // Cherry petals: a few pink specks always drifting down and across.
+  const PETALS = 16;
+  let petals = [];
+  function updatePetals(dt) {
+    if (!course.shape.cherry) { petals = []; return; }
+    const first = !petals.length;   // the first lot fill the screen; later ones come in at the top
+    while (petals.length < PETALS) petals.push({ x: Math.random() * VW, y: first ? Math.random() * H : -4,
+      vx: 6 + Math.random() * 10, vy: 10 + Math.random() * 8, ph: Math.random() * 6.3 });
+    const now = performance.now() / 1000;
+    for (const p of petals) { p.x += (p.vx + Math.sin(now * 3 + p.ph) * 12) * dt; p.y += p.vy * dt; }
+    petals = petals.filter(p => p.y < H + 4 && p.x < VW + 4);
+  }
+  function drawPetals() {
+    for (const p of petals) put(Math.round(camX + p.x), Math.round(p.y), VIC.pink);
+  }
+
   function drawMoths() {
     const flick = Math.floor(performance.now() / 80);
     for (const m of moths) if ((flick + Math.round(m.ph * 10)) % 5) put(Math.round(camX + m.x), Math.round(m.y), m.ink);
@@ -2286,11 +2325,25 @@
   const FAN_STAND = ['..K..', '.KKK.', 'XXXXX', 'X.X.X', 'X.X.X', '..X..', '.K.K.', '.K.K.'];
   const FAN_CHEER = ['X...X', 'X.K.X', 'XKKKX', '.XXX.', '..X..', '..X..', '.K.K.', '.K.K.'];
   const FAN_INKS = [VIC.red, VIC.blue, VIC.orange, VIC.green, VIC.red, VIC.lightBlue];
+  // A photographer: camera up at the chest. Before you finish they snap
+  // the blossom now and then; once you're over the line, it's all you.
+  const FAN_PHOTO = ['..K..', '.KKK.', 'XXXXX', 'XKKKX', '.KKK.', '..X..', '.K.K.', '.K.K.'];
+  function drawPhotographer(f, sy, now) {
+    blit(FAN_PHOTO, f.x - 2, sy - 7, f.ink);
+    const every = state === 'finished' ? 550 : 3100, at = (now + f.phase * 397) % every;
+    if (at < 90) {   // the flash
+      const fx = f.x, fy = sy - 5;
+      put(fx, fy, VIC.white);
+      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) put(fx + dx, fy + dy, VIC.yellow);
+      for (const [dx, dy] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) put(fx + dx, fy + dy, VIC.white);
+    }
+  }
   function drawFans(camY) {
     const now = performance.now();
     for (const f of course.fans) {
       const sy = f.y - camY;
       if (sy < -6 || sy > H + 6) continue;
+      if (f.camera) { drawPhotographer(f, sy, now); continue; }
       let spr = FAN_STAND, lift = 0;
       if (state === 'finished') {
         const beat = Math.floor(now / 170) + f.phase;
@@ -2300,7 +2353,21 @@
     }
   }
 
-  const INKS = { O: VIC.orange, G: VIC.green, Y: VIC.yellow, R: VIC.red,
+  // A cherry tree in bloom: a round pink crown flecked white, on a trunk.
+  // Same footprint as a pine, so it hits and burns the same.
+  const CHERRY = [
+    '..PPPPP..',
+    '.PPWPPPP.',
+    'PPPPPPWPP',
+    'PWPPPPPPP',
+    'PPPPPWPPP',
+    '.PPPPPPP.',
+    '..PPPPP..',
+    '....O....',
+    '....O....',
+  ];
+
+  const INKS = { P: VIC.pink, O: VIC.orange, G: VIC.green, Y: VIC.yellow, R: VIC.red,
     B: VIC.lightBlue, C: VIC.cyan, V: VIC.blue, K: VIC.black, W: VIC.white };
 
   // The on-screen arrows, in the same blocky pixels as everything else.
@@ -2444,18 +2511,25 @@
   // A board on two posts, just off the piste on whichever side has room,
   // its bottom edge on the sign's row.
   function drawSign(g, camY) {
-    const wd = Math.max(...g.lines.map(l => l.length)) * 4 + 3, ht = g.lines.length * 6 + 3;
-    const by = g.y - camY;
-    if (by < -4 || by - ht - 4 > H) return;
-    const c = course.centerAt(g.y), edge = pisteHW(g.y) + EDGE_WOBBLE + 2;
-    const x0 = c - edge - wd > 2 ? Math.round(c - edge - wd) : Math.round(c + edge);
-    const top = by - ht - 4;
+    const { wd, ht, x0 } = g, by = g.y - camY, top = g.top - camY;
+    if (by < -4 || top - 12 > H) return;
     for (let y = top; y < top + ht; y++)
       for (let x = x0; x < x0 + wd; x++)
         put(x, y, y === top || y === top + ht - 1 || x === x0 || x === x0 + wd - 1 ? VIC.blue : VIC.white);
     g.lines.forEach((l, i) => text3(l, x0 + 2 + Math.floor((wd - 3 - l.length * 4 + 1) / 2), top + 2 + i * 6, VIC.blue));
     for (const px of [x0 + 3, x0 + wd - 4]) for (let y = top + ht; y <= by; y++) put(px, y, VIC.black);
+    if (g.flag) {
+      // On a short pole on top of the board, flying right.
+      const px = x0 + Math.floor(wd / 2) - 5;
+      for (let y = top - 8; y < top; y++) put(px, y, VIC.black);
+      FLAGS[g.flag].forEach((row, r) => [...row].forEach((ch, k) => put(px + 1 + k, top - 8 + r, INKS[ch] || VIC.white)));
+    }
   }
+  // Flags, read from the pole outward. W is white, with a black edge
+  // where it would vanish into the snow.
+  const FLAGS = {
+    it: ['KKKKKKKKKK', 'GGGWWWRRRK', 'GGGWWWRRRK', 'GGGWWWRRRK', 'GGGWWWRRRK', 'KKKKKKKKKK'],
+  };
 
   // ------------------------------------------------------------ explosion
   // Like snake-bit's: a burst of pieces flung out and pulled down, here
@@ -2565,12 +2639,12 @@
       return;
     }
     const age = performance.now() - sc.at, frame = Math.floor(performance.now() / 90);
-    const colors = fireColors(sc.god);
-    for (let r = 0; r < TREE.length; r++) {
-      for (let c = 0; c < TREE[r].length; c++) {
-        if (TREE[r][c] === '.') continue;
+    const colors = fireColors(sc.god), shape = tr.cherry ? CHERRY : TREE;
+    for (let r = 0; r < shape.length; r++) {
+      for (let c = 0; c < shape[r].length; c++) {
+        if (shape[r][c] === '.') continue;
         if (age < POLE_BURN_MS) put(x0 + c, y0 + r, colors[Math.floor(hash(c * 31 + r, frame + tr.x) * 3)]);
-        else if (TREE[r][c] === 'O' || hash(tr.x * 13 + c, tr.y + r) > 0.35) put(x0 + c, y0 + r, VIC.black);
+        else if (shape[r][c] === 'O' || hash(tr.x * 13 + c, tr.y + r) > 0.35) put(x0 + c, y0 + r, VIC.black);
       }
     }
     if (age < POLE_BURN_MS) for (let c = 2; c <= 6; c++) flameUp(x0 + c, y0 + (c === 4 ? 0 : 2), sc.god, 3);
@@ -2643,7 +2717,7 @@
     const line = lineAt ? lineAt(wy) : null;
     // Steep pitches look it: the piste's speckle thickens with the slope.
     const steep = course && course.slopeAt ? 0.3 * Math.max(0, course.slopeAt(wy) - 1) : 0;
-    const lips = (course && course.lips) || [];
+    const lips = (course && course.lips) || [], borders = (course && course.borders) || [];
     for (let sx = -MARGIN; sx < W + MARGIN; sx++) {
       let col = VIC.white;
       if (sx < 0 || sx >= W) {   // past the edge: forest, densely speckled,
@@ -2687,6 +2761,8 @@
         const d = wy - lip - Math.round(1.5 * Math.sin(sx / 7));
         if (d >= 0 && d <= 1 && hash(sx + 313, wy) < 0.8) col = VIC.blue;
       }
+      // A border: a dashed red line straight across.
+      for (const b of borders) if (wy - b >= 0 && wy - b <= 1 && ((sx + 64) >> 2) % 2) col = VIC.red;
       const i = (sx + MARGIN) * 4;
       row[i] = col[0]; row[i + 1] = col[1]; row[i + 2] = col[2]; row[i + 3] = 255;
     }
@@ -2720,6 +2796,7 @@
         if (sc) drawScorchedTree(tr, sc, camY);
         else if (exploded.has(i + ',' + j)) continue;
         else if (tr.rock) { const r = ROCKS[tr.rock - 1]; blit(r, tr.x - 4, tr.y - camY - r.length + 1); }
+        else if (tr.cherry) blit(CHERRY, tr.x - 4, tr.y - camY - 8);
         else if (!tr.pine) blit(TREE, tr.x - 4, tr.y - camY - 8, VIC.green);
         else blit(PINEAPPLE, tr.x - 2, tr.y - camY - 6);
       }
@@ -2796,7 +2873,7 @@
       }
     }
 
-    if (course && state !== 'title') { drawMoths(); drawBirds(); }
+    if (course && state !== 'title') { drawPetals(); drawMoths(); drawBirds(); }
     if (tally && tally.dinged) drawStars(tally.starsShown);
 
     ctx.putImageData(img, 0, 0);
@@ -2988,9 +3065,13 @@
       signs: [{ t: 0.05, lines: ['GRAND MURET', '76%'] }] },
     aoraki: {},
     // Even as a metronome: same gap, same swing, no bunching.
-    fuji: { gapFirst: 82, gapLast: 82, offset: 13, offsetLast: 13, jitter: 0, quick: 0, twist: 0.5 },
+    // ...and cherry trees in bloom down the lower half.
+    // ...and cherry groves, small at first, bigger and bigger, until by
+    // the finish it's nearly all blossom. Photographers at the bottom.
+    fuji: { cherry: [[0, 0], [0.25, 0], [0.45, 0.25], [0.75, 0.55], [0.95, 0.95]], fans: 8, cameras: 5, gapFirst: 82, gapLast: 82, offset: 13, offsetLast: 13, jitter: 0, quick: 0, twist: 0.5 },
     // Swiss top tight and technical; Italian bottom opens into long turns.
-    cervino: { fans: 34, gapFirst: 62, gapLast: 92, offset: 15, offsetLast: 11,
+    cervino: { fans: 34, borders: [0.5], signs: [{ t: 0.5, lines: ['ITALIA'], flag: 'it' }],
+      welcome: 'BENVENUTI IN ITALIA !!!', gapFirst: 62, gapLast: 92, offset: 15, offsetLast: 11,
       width: [[0, 34], [0.47, 34], [0.53, 48], [1, 48]] },
     vinson: {},
     // The glacier shrinks: the piste narrows to a strip by the finish.
@@ -3486,6 +3567,7 @@
       updateAnimals(Math.min(dt, 0.05));
       updateBirds(Math.min(dt, 0.05));
       updateMoths(Math.min(dt, 0.05));
+      updatePetals(Math.min(dt, 0.05));
     }
     if (particles.length) updateParticles(Math.min(dt, 0.05));
     if (state === 'running' || state === 'crashed' || state === 'finished') paintHud();
