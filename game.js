@@ -32,6 +32,7 @@
     pink: [226, 150, 190],     // the VIC-20's pink, for cherry blossom
     netOrange: [236, 132, 48], // the VIC-20's light orange, for safety nets
     crimson: [214, 40, 56],    // rātā flowers
+    dawn: [255, 228, 208],     // snow in the first light
   };
   const css = c => `rgb(${c[0]},${c[1]},${c[2]})`;
 
@@ -243,6 +244,7 @@
     bushes: false,             // low scrub instead of pines
     groundsels: false,         // giant groundsels instead of pines
     darkRock: false,           // bare rock is dark blue-black, not brown
+    dawn: false,               // first light: warm snow, long shadows
     twist: 1,                  // how far the piste wanders
     sway: 1,                   // ...and how often: under 1 is longer, lazier bends
     crowd: 1,                  // trees and pineapples on the piste, times Single's
@@ -2958,6 +2960,51 @@
     put(p.x + d, sy - 6, ink);
   }
 
+  // Dawn: the sun just up on the right, so everything standing throws a
+  // long shadow off to the left across the snow. Drawn first, under it all.
+  const SHADOW_DX = 1.5, SHADOW_DY = 0.7;
+  function shadowOf(rows, x0, top) {
+    const base = top + rows.length - 1;
+    for (let r = 0; r < rows.length; r++) {
+      const h = rows.length - 1 - r;
+      for (let c = 0; c < rows[r].length; c++) {
+        if (rows[r][c] === '.') continue;
+        const sx = x0 + c - Math.round(h * SHADOW_DX), sy = base - Math.round(h * SHADOW_DY);
+        put(sx, sy, VIC.lightBlue); put(sx - 1, sy, VIC.lightBlue);
+      }
+    }
+  }
+  const POLE_SHAPE = Array(9).fill('X');
+  function drawShadows(camY, j0, j1) {
+    const { salt, centerAt } = course;
+    const iMin = Math.floor(-MARGIN / TREE_CELL), iMax = Math.ceil((W + MARGIN) / TREE_CELL);
+    for (let j = j0; j <= j1; j++) {
+      for (let i = iMin; i < iMax; i++) {
+        const tr = treeAt(i, j, salt, centerAt);
+        if (!tr || exploded.has(i + ',' + j) || scorched.has(i + ',' + j)) continue;
+        const rows = tr.pine ? PINEAPPLE : tr.rock ? ROCKS[tr.rock - 1] : tr.cherry ? CHERRY : tr.rata ? RATA
+          : tr.bush ? BUSH : tr.groundsel ? GROUNDSEL : TREE;
+        shadowOf(rows, tr.x - (tr.pine ? 2 : 4), tr.y - camY - rows.length + 1);
+      }
+    }
+    for (const p of course.poles) {
+      const sy = p.y - camY;
+      if (!p.fallen && !p.burning && sy > -4 && sy < H + 20) shadowOf(POLE_SHAPE, p.x, sy - 8);
+    }
+    const k0 = Math.floor(camY / FENCE_SLOT) - 1, k1 = Math.floor((camY + H) / FENCE_SLOT) + 1;
+    for (let k = k0; k <= k1; k++) {
+      for (const side of [-1, 1]) {
+        const f = fenceAt(k, side, salt, centerAt);
+        if (f && !scorched.has(`f${k},${side}`)) shadowOf(Array(5).fill('X'.repeat(f.x1 - f.x0 + 1)), f.x0, f.y - camY - 4);
+      }
+    }
+    if (state !== 'title' && state !== 'crashed') {
+      const s = SPRITES[mode] || SPRITES.down;
+      shadowOf(s.map(r => r.replace(/[^.]/g, 'X')), Math.round(skierX) - 3, Math.round(skierY) - camY + 5 - s.length);
+    }
+    for (const a of animals) shadowOf(['XXXXX', 'XXXXX', 'XXXXX'], Math.round(a.x) - 2, Math.round(a.y) - camY - 2);
+  }
+
   // A row of slope always looks the same, so each one is computed once, on
   // the frame it scrolls into view, and copied after that. Most frames only
   // build a row or two; the noise is the expensive part.
@@ -3032,6 +3079,7 @@
       }
       // A border: a dashed red line straight across.
       for (const b of borders) if (wy - b >= 0 && wy - b <= 1 && ((sx + 64) >> 2) % 2) col = VIC.red;
+      if (col === VIC.white && course && course.shape.dawn) col = VIC.dawn;
       const i = (sx + MARGIN) * 4;
       row[i] = col[0]; row[i + 1] = col[1]; row[i + 2] = col[2]; row[i + 3] = 255;
     }
@@ -3056,6 +3104,7 @@
     const salt = course ? course.salt : 0;
     const j0 = Math.floor(camY / TREE_CELL) - 1;
     const j1 = Math.floor((camY + H) / TREE_CELL) + 1;
+    if (course && course.shape.dawn) drawShadows(camY, j0, j1);
     const iMin = Math.floor(-MARGIN / TREE_CELL), iMax = Math.ceil((W + MARGIN) / TREE_CELL);
     for (let j = j0; j <= j1; j++) {
       for (let i = iMin; i < iMax; i++) {
@@ -3294,7 +3343,7 @@
     { id: 'kirinyaga', name: 'KIRINYAGA (MOUNT KENYA)', country: 'KENYA', height: '5,199 M', lon: 37.3, seed: 1808,
       unlocks: ['kilimanjaro'],
       fact: 'To the Kikuyu people, Kirinyaga is home to the god Ngai, so they traditionally built their houses with the door facing the mountain. The country\'s name, Kenya, comes from how the British heard "Kirinyaga". Its summits honour the Maasai leader Mbatian, his brother and his son. Its glaciers, 16 km from the equator, may be gone by 2030.' },
-    { id: 'iztactepetl', name: 'IZTACTEPETL (PICO DE ORIZABA)', country: 'MEXICO', height: '5,636 M', lon: -97.3, seed: 1909,
+    { id: 'iztactepetl', name: 'IZTACTEPETL (PICO DE ORIZABA)', country: 'MEXICO', height: '5,636 M', lon: -97.3, seed: 1909, venus: true,
       unlocks: ['aconcagua'],
       fact: 'Locals call it Iztactepetl, the White Mountain. Legend says Quetzalcoatl, the Feathered Serpent god worshipped by the Toltecs and Aztecs, bade farewell to his followers within sight of it, and that Venus, the morning star he became, can be seen settling into its crater. It is Mexico\'s highest peak and a dormant volcano: it last erupted in 1846...' },
     { id: 'kilimanjaro', name: 'KILIMANJARO', country: 'TANZANIA', height: '5,895 M', lon: 37.4, seed: 2010,
@@ -3360,7 +3409,8 @@
       scree: [[0, 0], [1, 0]], snowBand: [[0, 70], [0.6, 22], [0.9, 6], [1, 4]], darkRock: true,
       groundsels: true, rocks: 0.45, forest: 0.4 },
     // The serpent: the twistiest piste, long S-bends.
-    iztactepetl: { twist: 1.8, sway: 0.6 },
+    // ...run at first light: warm snow and long shadows.
+    iztactepetl: { twist: 1.8, sway: 0.6, dawn: true },
     // The long one: steady, not tricky.
     // Mostly bare volcanic rock now: scree patches all over, boulders, few
     // trees, and ice cliffs of the last glaciers up top.
@@ -3464,6 +3514,11 @@
       P.head.textContent = `COURSE ${n}: ${m.name}`;
       P.sub.textContent = `${m.country} · ${m.height}`;
       P.text.textContent = m.fact.toUpperCase();
+      if (m.venus) {   // the morning star, shimmering by the story
+        const star = document.createElement('span');
+        star.className = 'venus';
+        P.text.appendChild(star);
+      }
       P.text.style.textAlign = 'left';
       P.prompt.textContent = NARROW ? 'TAP TO START' : 'PRESS SPACE TO START';
     } else if (c.stage === 'result') {
