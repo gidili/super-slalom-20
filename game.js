@@ -241,6 +241,8 @@
     forest: 1,                 // trees off the piste, times Single's
     ice: 0,                    // ice cliffs at the sides down to this t
     bushes: false,             // low scrub instead of pines
+    groundsels: false,         // giant groundsels instead of pines
+    darkRock: false,           // bare rock is dark blue-black, not brown
     twist: 1,                  // how far the piste wanders
     sway: 1,                   // ...and how often: under 1 is longer, lazier bends
     crowd: 1,                  // trees and pineapples on the piste, times Single's
@@ -419,7 +421,8 @@
         const c = centerAt(y), edge = baseWidth(y) + band(y) + 18 * (noise2(y / 30, x < c ? 3.5 : 8.5) - 0.5);
         if (Math.abs(x - c) > edge) return n < 0.9;
       }
-      return n < 0.12 + 0.55 * screeAmt(y);
+      const amt = screeAmt(y);
+      return amt > 0 && n < 0.12 + 0.55 * amt;
     };
     // How far into the ice (x, y) is, past the cliff's face; 0 or less is not ice.
     const iceDepth = !S.ice ? () => -99 : (x, y) => y >= S.ice * finishY ? -99
@@ -1869,7 +1872,8 @@
     const rata = !pine && !rock && !cherry && course && course.shape && course.shape.rata > 0 &&
       noise2(i / 2 + 300 + (salt % 61), j / 2 + 41) < course.shape.rata;
     const bush = !pine && !rock && !cherry && !rata && !!(course && course.shape && course.shape.bushes);
-    return { i, j, x, y, pine, rock, cherry, rata, bush };
+    const groundsel = !pine && !rock && !cherry && !rata && !!(course && course.shape && course.shape.groundsels);
+    return { i, j, x, y, pine, rock, cherry, rata, bush, groundsel };
   }
 
   // True if something deadly at (x, y) leaves the racing line and the
@@ -2247,7 +2251,7 @@
         const tr = treeAt(i, j, salt, centerAt);
         if (!tr || exploded.has(i + ',' + j) || scorched.has(i + ',' + j)) continue;
         // A pineapple is two pixels shorter and four narrower than a tree.
-        const reach = tr.pine ? 3 : 5, top = tr.pine ? 8 : tr.rock ? ROCKS[tr.rock - 1].length + 1 : tr.bush ? 6 : 10;
+        const reach = tr.pine ? 3 : 5, top = tr.pine ? 8 : tr.rock ? ROCKS[tr.rock - 1].length + 1 : tr.bush ? 6 : tr.groundsel ? GROUNDSEL.length + 1 : 10;
         if (Math.abs(x - tr.x) <= reach && y >= tr.y - top && y <= tr.y + 2) return tr;
       }
     }
@@ -2600,6 +2604,23 @@
     '.GGGGGGG.',
   ];
 
+  // A giant groundsel: a forked trunk shaggy with dead leaves, a cabbage
+  // of green leaves on top of each branch. Same footprint as a pine.
+  const GROUNDSEL = [
+    '.GGG.GGG.',
+    'GGYGGGYGG',
+    'GGGG.GGGG',
+    '.GG...GG.',
+    '..O...O..',
+    '..O...O..',
+    '..OO.OO..',
+    '...OOO...',
+    '....O....',
+    '....O....',
+    '....O....',
+    '...OOO...',
+  ];
+
   const INKS = { Q: VIC.crimson, P: VIC.pink, O: VIC.orange, G: VIC.green, Y: VIC.yellow, R: VIC.red,
     B: VIC.lightBlue, C: VIC.cyan, V: VIC.blue, K: VIC.black, W: VIC.white };
 
@@ -2865,7 +2886,7 @@
   // above, for POLE_BURN_MS; then a charred black skeleton. A tree that
   // was hit leaves only a stump.
   function drawScorchedTree(tr, sc, camY) {
-    const shape = tr.cherry ? CHERRY : tr.rata ? RATA : tr.bush ? BUSH : TREE;
+    const shape = tr.cherry ? CHERRY : tr.rata ? RATA : tr.bush ? BUSH : tr.groundsel ? GROUNDSEL : TREE;
     const x0 = tr.x - 4, y0 = tr.y - camY - (shape.length - 1), base = tr.y - camY;
     if (sc.hit) {
       put(tr.x, base, VIC.black); put(tr.x, base - 1, VIC.black);
@@ -2998,8 +3019,10 @@
         // pale blue ice beyond, the odd cyan crack running back.
         col = ice <= 2 ? VIC.white : hash(sx * 3 + 1, Math.floor(wy / 5)) < 0.08 ? VIC.cyan : VIC.paleBlue;
       } else if (course && course.screeAt && course.screeAt(sx, wy) && (off > LINE_HW || line === null)) {
-        // Scree: dark volcanic grit, brown and black.
-        col = hash(sx + 5, wy + 11) < 0.2 ? VIC.black : VIC.orange;
+        // Scree: dark volcanic grit, brown and black; or blue-black rock.
+        const v = hash(sx + 5, wy + 11);
+        col = course.shape.darkRock ? (v < 0.12 ? VIC.black : v < 0.42 ? VIC.blue : VIC.lightBlue)
+          : v < 0.2 ? VIC.black : VIC.orange;
       }
       // The lip where a steep pitch drops away: a broken dark line right
       // across the slope.
@@ -3045,6 +3068,7 @@
         else if (tr.cherry) blit(CHERRY, tr.x - 4, tr.y - camY - 8);
         else if (tr.rata) blit(RATA, tr.x - 4, tr.y - camY - 8);
         else if (tr.bush) blit(BUSH, tr.x - 4, tr.y - camY - 4);
+        else if (tr.groundsel) blit(GROUNDSEL, tr.x - 4, tr.y - camY - GROUNDSEL.length + 1);
         else if (!tr.pine) blit(TREE, tr.x - 4, tr.y - camY - 8, VIC.green);
         else blit(PINEAPPLE, tr.x - 2, tr.y - camY - 6);
       }
@@ -3330,7 +3354,11 @@
       width: [[0, 34], [0.47, 34], [0.53, 48], [1, 48]] },
     vinson: {},
     // The glacier shrinks: the piste narrows to a strip by the finish.
-    kirinyaga: { width: [[0, 46], [0.85, 24], [1, 22]], offset: 13, offsetLast: 9 },
+    // Bare dark rock beyond a snowfield that shrinks to a strip by the
+    // finish (it slows you), boulders on it, giant groundsels.
+    kirinyaga: { width: [[0, 46], [0.85, 24], [1, 22]], offset: 13, offsetLast: 9,
+      scree: [[0, 0], [1, 0]], snowBand: [[0, 70], [0.6, 22], [0.9, 6], [1, 4]], darkRock: true,
+      groundsels: true, rocks: 0.45, forest: 0.4 },
     // The serpent: the twistiest piste, long S-bends.
     iztactepetl: { twist: 1.8, sway: 0.6 },
     // The long one: steady, not tricky.
