@@ -218,6 +218,10 @@
     slope: 1,                  // how steep: speed times this, or [[t, x], ...] like width
     signs: [],                 // boards by the piste: [{ t, lines: [...] }]
     couloir: null,             // a pole-less gully between rock walls at the top (see buildCourse)
+    rocks: 0,                  // the share of trees that are boulders instead
+    fences: 1,                 // fences, times Single's (0: none)
+    camp: false,               // a base camp of tents beside the finish
+    fans: 5,                   // people cheering at the finish
     twist: 1,                  // how far the piste wanders
     sway: 1,                   // ...and how often: under 1 is longer, lazier bends
     crowd: 1,                  // trees and pineapples on the piste, times Single's
@@ -250,13 +254,25 @@
     const baseCenter = y => W / 2 + S.twist * 18 * Math.sin(y * f1 + p1) + S.twist * 10 * Math.sin(y * f2 + p2);
 
     // A couloir: from row K.start, K.rows of narrow gully between rock
-    // walls, zigzagging K.amp either side (whole periods, so it ends where
-    // it began), steep, no poles. Then it opens out over K.open rows onto
-    // the slope proper.
+    // walls, bending as K.bends says, steep, no poles. Then it opens out
+    // over K.open rows onto the slope proper.
     const K = S.couloir;
     const c0 = K ? K.start : 0, c1 = K ? K.start + K.rows : 0, c2 = K ? c1 + K.open : 0;
     const smooth = t => t * t * (3 - 2 * t);
-    const zig = y => K.amp * Math.asin(0.97 * Math.sin(2 * Math.PI * (y - c0) / K.period)) / Math.asin(0.97);
+    // The gully's line: through K.bends ([rows in, offset], ...), easing
+    // into and out of each. A bend that moves far over few rows is a
+    // dangerous one: about 3 rows down per pixel across is the limit at
+    // couloir speed.
+    const zig = y => {
+      const b = K.bends, d = y - c0;
+      for (let k = 1; k < b.length; k++) {
+        if (d <= b[k][0]) {
+          const t = (d - b[k - 1][0]) / (b[k][0] - b[k - 1][0]);
+          return b[k - 1][1] + (b[k][1] - b[k - 1][1]) * (1 - Math.cos(Math.PI * t)) / 2;
+        }
+      }
+      return b[b.length - 1][1];
+    };
     const centerAt = !K ? baseCenter : y =>
       y < c0 ? baseCenter(y)
         : y <= c1 ? baseCenter(c0) + zig(y)
@@ -388,7 +404,30 @@
       .concat(K ? [c0] : []);
     const signs = S.signs.map(g => ({ y: Math.round(g.t * finishY), lines: g.lines }))
       .concat(K && K.sign ? [{ y: c0, lines: K.sign }] : []);
-    course = { seed, centerAt, lineAt, poles, finishY, salt, titlePine, endless, lineEnd, extend, levelAt, widthAt, slopeAt, lips, signs, wall, rockDepth, inCouloir, shape: S };
+    // Base camp: tents for ten in a cluster just off the piste by the
+    // finish, on the side with more room. Kept clear of trees and rocks.
+    let camp = null;
+    if (S.camp && !endless) {
+      const cy = finishY - 18, c = centerAt(cy), edge = widthAt(cy) + EDGE_WOBBLE + 4;
+      const side = c > W / 2 ? -1 : 1;
+      const x = side < 0 ? Math.round(c - edge - CAMP_W) : Math.round(c + edge);
+      camp = { x, y: Math.round(cy - CAMP_H / 2), w: CAMP_W, h: CAMP_H };
+    }
+    // Fans along both edges of the piste at the finish, mostly just past
+    // the line, in columns outward when there are lots. Scenery only.
+    const fans = [];
+    const FAN_ROWS = [9, 18, 0, 27, 36, -9, 45, -18];
+    for (let k = 0; !endless && k < S.fans; k++) {
+      const side = k % 2 ? 1 : -1, m = k >> 1;
+      const col = Math.floor(m / FAN_ROWS.length), fy = finishY + FAN_ROWS[m % FAN_ROWS.length] + (col % 2) * 3;
+      const jit = hash(k * 131 + salt, 7) * 2;
+      fans.push({ x: Math.round(centerAt(fy) + side * (widthAt(fy) + 7 + col * 7 + jit)), y: fy,
+        ink: FAN_INKS[Math.floor(hash(k * 29 + salt, 11) * FAN_INKS.length)], phase: Math.floor(hash(k * 17 + salt, 3) * 8) });
+    }
+    const fanCols = Math.ceil(S.fans / 2 / FAN_ROWS.length);
+    const fanZone = (x, y) => fans.length > 0 && y > finishY - 28 && y < finishY + 56 &&
+      Math.abs(x - centerAt(y)) < widthAt(y) + 15 + fanCols * 7;
+    course = { seed, centerAt, lineAt, poles, finishY, salt, titlePine, endless, lineEnd, extend, levelAt, widthAt, slopeAt, lips, signs, wall, rockDepth, inCouloir, camp, fans, fanZone, shape: S };
     if (endless) extend(0);
     snowRows.clear();            // cached rows belong to the previous slope
   }
@@ -1050,7 +1089,7 @@
     state = 'crashed';
     mode = 'crash';
     runEnd = performance.now();
-    hitWhat = hit.wall ? 'ROCKS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
+    hitWhat = hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
     SFX.stopSwoosh();
     if (hit.pine) SFX.playExplosion(); else SFX.playBreak();
     if (hit.pine) {
@@ -1073,24 +1112,26 @@
       spawnExplosion(hit.x, hit.y - 3, [...fire, ...fire, ANIMALS[hit.kind].ink]);
       return;
     }
-    const kind = hit.fence ? 'fence' : hit.pine ? 'pine' : 'tree';
-    const key = hit.fence ? `f${hit.k},${hit.side}` : hit.i + ',' + hit.j;
+    // A tent goes up like a fence (its people are all outside).
+    const kind = hit.fence || hit.tent ? 'fence' : hit.pine ? 'pine' : 'tree';
+    const key = hit.tent ? 'tent' + hit.n : hit.fence ? `f${hit.k},${hit.side}` : hit.i + ',' + hit.j;
     exploded.add(key);
     const fire = fireColors(runGod);
-    if (kind === 'tree') scorched.set(key, { at: performance.now(), god: runGod, hit: true });
-    if (kind === 'fence') {
+    if (kind === 'tree' && !hit.rock) scorched.set(key, { at: performance.now(), god: runGod, hit: true });
+    if (hit.tent) scorched.set(key, { at: performance.now(), god: runGod });
+    else if (kind === 'fence') {
       const x = Math.round(hit.x);
       scorched.set(key, { at: performance.now(), god: runGod, gap0: x - 3, gap1: x + 3 });
     }
     burned[kind]++;
     SFX.playExplosion();
-    spawnExplosion(hit.x, hit.y - 4, kind === 'tree' ? [...fire, ...fire, ...TREE_PIECES]
+    spawnExplosion(hit.x, hit.y - 4, hit.rock ? ROCK_PIECES : hit.tent ? [...fire, ...fire, VIC.orange, VIC.yellow] : kind === 'tree' ? [...fire, ...fire, ...TREE_PIECES]
       : kind === 'fence' ? [...fire, ...fire, ...FENCE_PIECES] : PIECE_COLORS);
     // A pineapple smashed on fire takes back a miss, or banks one: Endless
     // can go above 4 LEFT, Single below 0 misses, which takes time off.
     const forgive = kind === 'pine';
     if (forgive) { missed--; forgiven++; SFX.playForgiven(); }
-    pop(`${{ pine: 'PINEAPPLE', tree: 'TREE', fence: 'FENCE' }[kind]} +${BURN_POINTS[kind]}${forgive ? '  MISS FORGIVEN' : ''}`);
+    pop(`${hit.rock ? 'ROCK' : hit.tent ? 'TENT' : { pine: 'PINEAPPLE', tree: 'TREE', fence: 'FENCE' }[kind]} +${BURN_POINTS[kind]}${forgive ? '  MISS FORGIVEN' : ''}`);
     paintHud();
   }
 
@@ -1469,7 +1510,7 @@
 
     // The couloir's walls: no fire gets through rock. Only a god does.
     if (course.wall(skierX, skierY) && !runGod) { crash({ wall: true }); return; }
-    const hit = hitTree(skierX, skierY) || hitFence(skierX, skierY) || hitAnimal(skierX, skierY);
+    const hit = hitTree(skierX, skierY) || hitFence(skierX, skierY) || hitTent(skierX, skierY) || hitAnimal(skierX, skierY);
     if (hit && onFire()) burn(hit);
     else if (hit) { crash(hit); return; }
 
@@ -1523,7 +1564,7 @@
         const key = i + ',' + j;
         if (scorched.has(key) || exploded.has(key)) continue;
         const tr = treeAt(i, j, salt, centerAt);
-        if (!tr || tr.pine) continue;
+        if (!tr || tr.pine || tr.rock) continue;
         if (Math.abs(skierX - tr.x) <= SCORCH_REACH && skierY > tr.y + 2 && skierY <= tr.y + 10) {
           scorched.set(key, { at: performance.now(), god: runGod, hit: false });
         }
@@ -1573,6 +1614,9 @@
     const y = j * TREE_CELL + 2 + Math.floor(hash(i * 5 + salt, j * 11 + 7) * (TREE_CELL - 4));
     if (course && Math.abs(x - course.titlePine.x) < 10 && Math.abs(y - course.titlePine.y) < 12) return null;
     if (course && course.inCouloir && course.inCouloir(y)) return null;   // nothing grows on the rock
+    if (course && course.fanZone && course.fanZone(x, y)) return null;
+    const cp = course && course.camp;
+    if (cp && x > cp.x - 10 && x < cp.x + cp.w + 10 && y > cp.y - 4 && y < cp.y + cp.h + 12) return null;
     const depth = snowDepth(x, centerAt(y), y);
     // Endless puts more on the piste the harder it gets.
     const crowd = !course ? 1 : course.endless ? 1 + 2 * course.levelAt(y) : course.shape.crowd;
@@ -1594,7 +1638,10 @@
       const f = fenceAt(kk, side, salt, centerAt);
       if (f && Math.abs(y - f.y) <= 10 && x >= f.x0 - 5 && x <= f.x1 + 5) return null;
     }
-    return { i, j, x, y, pine };
+    // Some mountains swap trees for boulders: one of three shapes.
+    const rock = !pine && course && course.shape && hash(i * 3571 + salt, j * 7 + 2) < course.shape.rocks
+      ? 1 + Math.floor(hash(i * 911 + salt, j * 5 + 3) * ROCKS.length) : 0;
+    return { i, j, x, y, pine, rock };
   }
 
   // True if something deadly at (x, y) leaves the racing line and the
@@ -1630,7 +1677,7 @@
   // start out in the fresh snow; some reach into the piste, but stop short
   // of the racing line.
   function fenceAt(k, side, salt, centerAt) {
-    if (hash(k * 613 + salt, side + 71) >= FENCE_CHANCE) return null;
+    if (hash(k * 613 + salt, side + 71) >= FENCE_CHANCE * (course && course.shape ? course.shape.fences : 1)) return null;
     const y = k * FENCE_SLOT + Math.floor(hash(k * 37 + salt, side + 5) * (FENCE_SLOT - 8));
     if (course && course.inCouloir && course.inCouloir(y)) return null;
     const c = centerAt(y);
@@ -1878,7 +1925,7 @@
         const tr = treeAt(i, j, salt, centerAt);
         if (!tr || exploded.has(i + ',' + j) || scorched.has(i + ',' + j)) continue;
         // A pineapple is two pixels shorter and four narrower than a tree.
-        const reach = tr.pine ? 3 : 5, top = tr.pine ? 8 : 10;
+        const reach = tr.pine ? 3 : 5, top = tr.pine ? 8 : tr.rock ? ROCKS[tr.rock - 1].length + 1 : 10;
         if (Math.abs(x - tr.x) <= reach && y >= tr.y - top && y <= tr.y + 2) return tr;
       }
     }
@@ -1969,6 +2016,106 @@
   const GOD_FLAMES = FLAMES.map(f => f.map(r => r.replace(/Y/g, 'C').replace(/O/g, 'B').replace(/R/g, 'V')));
 
   // X takes the ink passed in; the other letters are fixed colours.
+  // Boulders, tree-wide and lower: round, craggy, snow-capped. Standing
+  // on the tree's row, like a tree's trunk does.
+  const ROCKS = [
+    ['...VVV...',
+     '..VBBVV..',
+     '.VBVVVVV.',
+     '.VVVVVKV.',
+     'VVVVVKVVV',
+     'VVKVVVVKV',
+     '.KKKKKKK.'],
+    ['..VV.....',
+     '.VBBV.VV.',
+     '.VVVVVBVV',
+     'VVVKVVVVV',
+     'VVKVVVKVV',
+     '.KKKKKKKK'],
+    ['..BBB....',
+     '.BWWWB...',
+     '.VVVVVV..',
+     'VVBVVVVV.',
+     'VVVVKVVVV',
+     'VVVVVVKVV',
+     'VKVVVVVVV',
+     '.KKKKKKK.'],
+  ];
+  const ROCK_PIECES = [VIC.blue, VIC.blue, VIC.black, VIC.lightBlue];
+
+  // Base camp: dome tents, an A-frame, and prayer flags on a line.
+  const TENT_O = ['...OOOO...', '..OOOOOO..', '.OOYOOOOO.', '.OOYOKKOO.', 'OOOYOKKOOO', 'KKKKKKKKKK'];
+  const TENT_Y = ['...YYYY...', '..YYYYYY..', '.YYOYYYYY.', '.YYOYKKYY.', 'YYYOYKKYYY', 'KKKKKKKKKK'];
+  const TENT_A = ['...K...', '..OYO..', '.OOYOO.', '.OOKOO.', 'OOKKKOO', 'KKKKKKK'];
+  // Blue, white (light blue, or it vanishes on snow), red, green, yellow.
+  const PRAYER_FLAGS = (() => {
+    const w = 22, h = 9, g = Array.from({ length: h }, () => Array(w).fill('.'));
+    for (let y = 0; y < h; y++) { g[y][0] = 'K'; g[y][w - 1] = 'K'; }
+    const lineY = x => 1 + Math.round(3 * Math.sin(Math.PI * x / (w - 1)));
+    for (let x = 0; x < w; x++) g[lineY(x)][x] = 'K';
+    [['V', 3], ['B', 7], ['R', 11], ['G', 15], ['Y', 18]].forEach(([c, x]) => {
+      for (let dx = 0; dx < 2; dx++) for (let dy = 1; dy <= 2; dy++) g[lineY(x + dx) + dy][x + dx] = c;
+    });
+    return g.map(r => r.join(''));
+  })();
+  // The camp's layout, top-left origin: two flag lines over five tents.
+  const CAMP = [
+    [PRAYER_FLAGS, 2, 0], [PRAYER_FLAGS, 24, 2],
+    [TENT_O, 0, 12], [TENT_Y, 13, 9], [TENT_A, 26, 13], [TENT_Y, 35, 10],
+    [TENT_O, 6, 22], [TENT_A, 19, 21], [TENT_O, 30, 23],
+  ];
+  const CAMP_W = 46, CAMP_H = 29;
+  // The tents (not the flags), as the boxes you can hit.
+  const campTents = cp => CAMP.map(([spr, dx, dy], n) => ({ n, spr, x: cp.x + dx, y: cp.y + dy, w: spr[0].length, h: spr.length }))
+    .filter(t => t.spr !== PRAYER_FLAGS);
+  function hitTent(x, y) {
+    const cp = course.camp;
+    if (!cp || y < cp.y - 6 || y > cp.y + cp.h + 6) return null;
+    for (const t of campTents(cp)) {
+      if (exploded.has('tent' + t.n)) continue;
+      if (x >= t.x && x <= t.x + t.w - 1 && y + 3 >= t.y && y - 3 <= t.y + t.h - 1) {
+        return { tent: true, n: t.n, x: t.x + t.w / 2, y: t.y + t.h };
+      }
+    }
+    return null;
+  }
+  function drawCamp(cp, camY) {
+    if (cp.y + cp.h - camY < 0 || cp.y - camY > H) return;
+    for (const [spr, dx, dy] of CAMP) if (spr === PRAYER_FLAGS) blit(spr, cp.x + dx, cp.y + dy - camY);
+    for (const t of campTents(cp)) {
+      const sc = scorched.get('tent' + t.n), x0 = t.x, y0 = t.y - camY;
+      if (!sc) { blit(t.spr, x0, y0); continue; }
+      // Set alight: flickering in the fire's colours, flames on top; then
+      // a charred black shell.
+      const age = performance.now() - sc.at, frame = Math.floor(performance.now() / 90);
+      const colors = fireColors(sc.god);
+      t.spr.forEach((row, r) => [...row].forEach((ch, c) => {
+        if (ch === '.') return;
+        put(x0 + c, y0 + r, age < POLE_BURN_MS ? colors[Math.floor(hash(c * 31 + r, frame + t.n) * 3)] : VIC.black);
+      }));
+      if (age < POLE_BURN_MS) for (let c = 1; c < t.w - 1; c += 2) flameUp(x0 + c, y0 + 1, sc.god, 4);
+    }
+  }
+
+  // Fans at the finish: standing about, now and then waving; once you're
+  // over the line, jumping with their arms up. X is the jacket.
+  const FAN_STAND = ['..K..', '.KKK.', 'XXXXX', 'X.X.X', 'X.X.X', '..X..', '.K.K.', '.K.K.'];
+  const FAN_CHEER = ['X...X', 'X.K.X', 'XKKKX', '.XXX.', '..X..', '..X..', '.K.K.', '.K.K.'];
+  const FAN_INKS = [VIC.red, VIC.blue, VIC.orange, VIC.green, VIC.red, VIC.lightBlue];
+  function drawFans(camY) {
+    const now = performance.now();
+    for (const f of course.fans) {
+      const sy = f.y - camY;
+      if (sy < -6 || sy > H + 6) continue;
+      let spr = FAN_STAND, lift = 0;
+      if (state === 'finished') {
+        const beat = Math.floor(now / 170) + f.phase;
+        spr = FAN_CHEER; lift = beat % 2;
+      } else if ((Math.floor(now / 700) + f.phase) % 6 === 0) spr = FAN_CHEER;
+      blit(spr, f.x - 2, sy - 7 - lift, f.ink);
+    }
+  }
+
   const INKS = { O: VIC.orange, G: VIC.green, Y: VIC.yellow, R: VIC.red,
     B: VIC.lightBlue, C: VIC.cyan, V: VIC.blue, K: VIC.black, W: VIC.white };
 
@@ -2388,6 +2535,7 @@
         const sc = scorched.get(i + ',' + j);
         if (sc) drawScorchedTree(tr, sc, camY);
         else if (exploded.has(i + ',' + j)) continue;
+        else if (tr.rock) { const r = ROCKS[tr.rock - 1]; blit(r, tr.x - 4, tr.y - camY - r.length + 1); }
         else if (!tr.pine) blit(TREE, tr.x - 4, tr.y - camY - 8, VIC.green);
         else blit(PINEAPPLE, tr.x - 2, tr.y - camY - 6);
       }
@@ -2419,6 +2567,8 @@
     }
 
     if (course) for (const g of course.signs) drawSign(g, camY);
+    if (course && course.camp) drawCamp(course.camp, camY);
+    if (course && course.fans) drawFans(camY);
 
     if (course) {
       for (const p of course.poles) {
@@ -2642,19 +2792,19 @@
   function metres(id) { return +mountain(id).height.replace(/[^0-9]/g, ''); }
   const CHARACTER = {
     // A narrow chute near the bottom: the trees close in, no way out.
-    alyeska: { width: [[0, 44], [0.7, 44], [0.76, 27], [0.94, 27], [1, 36]] },
+    alyeska: { fans: 34, width: [[0, 44], [0.7, 44], [0.76, 27], [0.94, 27], [1, 36]] },
     // Broad and gentle: long lazy bends, little on the piste.
-    kunama: { width: 50, sway: 0.55, twist: 1.2, crowd: 0.3, quick: 0 },
+    kunama: { fans: 34, width: 50, sway: 0.55, twist: 1.2, crowd: 0.3, quick: 0 },
     // The Grand Muret: 76%, right after the start. The slope drops away,
     // you fly for a few poles, then it eases.
     // Room to tuck on the pitch, then the poles close in below it.
-    pista3: { gaps: [[0, 170], [0.42, 160], [0.57, 75], [1, 64]], quick: 0, slope: [[0, 1], [0.05, 1], [0.08, 1.5], [0.6, 1.5], [0.66, 1]],
+    pista3: { fans: 40, gaps: [[0, 170], [0.42, 160], [0.57, 75], [1, 64]], quick: 0, slope: [[0, 1], [0.05, 1], [0.08, 1.5], [0.6, 1.5], [0.66, 1]],
       signs: [{ t: 0.05, lines: ['GRAND MURET', '76%'] }] },
     aoraki: {},
     // Even as a metronome: same gap, same swing, no bunching.
     fuji: { gapFirst: 82, gapLast: 82, offset: 13, offsetLast: 13, jitter: 0, quick: 0, twist: 0.5 },
     // Swiss top tight and technical; Italian bottom opens into long turns.
-    cervino: { gapFirst: 62, gapLast: 92, offset: 15, offsetLast: 11,
+    cervino: { fans: 34, gapFirst: 62, gapLast: 92, offset: 15, offsetLast: 11,
       width: [[0, 34], [0.47, 34], [0.53, 48], [1, 48]] },
     vinson: {},
     // The glacier shrinks: the piste narrows to a strip by the finish.
@@ -2669,7 +2819,10 @@
     k2: { quick: 3, offset: 15, offsetLast: 15, gapLast: 54 },
     // The Hornbein Couloir first: steep, narrow, zigzagging between rock
     // walls, no poles; then out onto the North Face.
-    chomolungma: { couloir: { start: 100, rows: 600, open: 90, hw: 15, amp: 26, period: 300, slope: 1.6,
+    chomolungma: { rocks: 1, fences: 0, camp: true, couloir: { start: 100, rows: 1200, open: 90, hw: 15, slope: 1.6,
+      // Gentle swings, then dangerous ones, each just within reach.
+      bends: [[0, 0], [160, 18], [300, -20], [420, 22], [600, 5], [700, -26], [820, 16],
+        [960, -10], [1080, 20], [1200, 0]],
       sign: ['HORNBEIN', 'COULOIR'] } },
   };
   // Par and three-star times (cs), scaled from Single's by how long the
@@ -2678,7 +2831,7 @@
     alyeska: [3468, 3342], kunama: [3620, 3489], pista3: [3887, 3746], aoraki: [3371, 3249],
     fuji: [3481, 3355], cervino: [2860, 2756], vinson: [3046, 2935], kirinyaga: [3057, 2947],
     iztactepetl: [3017, 2907], kilimanjaro: [4505, 4342], aconcagua: [2703, 2605],
-    annapurna: [2716, 2617], k2: [2702, 2604], chomolungma: [3508, 3381],
+    annapurna: [2716, 2617], k2: [2702, 2604], chomolungma: [4170, 4018],
   };
   function shapeOf(m) {
     const d = BY_HEIGHT.indexOf(m.id) / (BY_HEIGHT.length - 1);
