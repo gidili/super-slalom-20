@@ -251,6 +251,7 @@
     wildlife: null,            // this mountain's own animals: { odds, kinds: { kind: weight } }
     icy: false,                // an ice field: blocks of ice for trees, glinting cyan edges...
     crevasses: false,          // ...and crevasses where fences would be
+    wind: false,               // katabatic gusts that push you sideways
     twist: 1,                  // how far the piste wanders
     sway: 1,                   // ...and how often: under 1 is longer, lazier bends
     crowd: 1,                  // trees and pineapples on the piste, times Single's
@@ -633,6 +634,7 @@
   let sluff = null;            // the loose snow pouring down a couloir behind you
   let heli = null;             // the helicopter that drops you off, if there is one
   let crossed = 0;             // borders crossed so far this run
+  let fellIn = false;          // swallowed by a crevasse: no skier left to draw
   // Championship courses are fixed, so where the animals turn up is
   // shuffled per run instead; Single's come from its seed as ever.
   let animalSalt = 0;
@@ -727,6 +729,41 @@
       hiss.g.gain.setTargetAtTime(0.22 * level, t, 0.15);
       hiss.f.frequency.setTargetAtTime(500 + 1400 * level, t, 0.15);
       if (level <= 0) { const h = hiss; h.src.stop(t + 0.8); hiss = null; }
+    }
+
+    // Into a crevasse: a long falling whistle, then a faint, far-off thump.
+    function playFall() {
+      if (!ac) return;
+      const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(900, t);
+      o.frequency.exponentialRampToValueAtTime(110, t + 0.9);
+      g.gain.setValueAtTime(0.16, t);
+      g.gain.exponentialRampToValueAtTime(0.02, t + 0.9);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 1);
+      o.connect(g); g.connect(master); o.start(t); o.stop(t + 1.01);
+      const th = ac.createOscillator(), tg = ac.createGain();
+      th.type = 'sine'; th.frequency.setValueAtTime(70, t + 1.05);
+      tg.gain.setValueAtTime(0.0001, t + 1.05);
+      tg.gain.exponentialRampToValueAtTime(0.12, t + 1.07);
+      tg.gain.exponentialRampToValueAtTime(0.0001, t + 1.25);
+      th.connect(tg); tg.connect(master); th.start(t + 1.05); th.stop(t + 1.26);
+    }
+
+    // The wind: a band of noise that swells and brightens with the gust.
+    let gale = null;
+    function updateWind(level) {
+      if (!ac) return;
+      const t = ac.currentTime;
+      if (level > 0 && !gale) {
+        gale = noiseThrough('bandpass', 500, 0.6, t);
+        gale.src.loop = true;
+        gale.g.gain.value = 0;
+      }
+      if (!gale) return;
+      gale.g.gain.setTargetAtTime(0.28 * level, t, 0.12);
+      gale.f.frequency.setTargetAtTime(350 + 1100 * level, t, 0.12);
+      if (level <= 0) { const w = gale; w.src.stop(t + 0.8); gale = null; }
     }
 
     // A dog's bark: two quick, rough yaps.
@@ -1033,7 +1070,7 @@
     // must never be able to stop a run, so every entry point swallows it.
     const safe = f => (...a) => { try { return f(...a); } catch (_) { return undefined; } };
     return {
-      unlock: safe(unlock), playScrape: safe(playScrape), playBark: safe(playBark), updateSluff: safe(updateSluff), updateHeli: safe(updateHeli), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
+      unlock: safe(unlock), playFall: safe(playFall), updateWind: safe(updateWind), playScrape: safe(playScrape), playBark: safe(playBark), updateSluff: safe(updateSluff), updateHeli: safe(updateHeli), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
       stopSwoosh: safe(stopSwoosh), playDash: safe(playDash), playBreak: safe(playBreak),
       playExplosion: safe(playExplosion), playFanfare: safe(playFanfare), toggleMute: safe(toggleMute),
       playCoin: safe(playCoin), playCount: safe(playCount), playTick: safe(playTick), playDing: safe(playDing), playNoBonus: safe(playNoBonus),
@@ -1177,7 +1214,7 @@
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     held = []; tapLeft = 0;
-    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null; crossed = 0; pan = 0;
+    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null; crossed = 0; pan = 0; wind = null; gustLines = []; fellIn = false;
     animalSalt = champ ? Math.floor(Math.random() * 999983) : 0;
     animals = []; animalSlot = Math.ceil(START_PAD / ANIMAL_SLOT);
     birds = []; birdIn = between(course.endless ? BIRD_EVERY_ENDLESS : BIRD_EVERY);
@@ -1275,7 +1312,12 @@
     runEnd = performance.now();
     hitWhat = hit.crevasse ? 'CREVASSE' : hit.ice ? 'ICE' : hit.pen ? 'PENITENTES' : hit.sluff ? 'SLUFF' : hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.net ? 'NETS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
     SFX.stopSwoosh();
-    if (hit.pine) SFX.playExplosion(); else SFX.playBreak();
+    if (hit.crevasse) {   // gone: a puff of snow and a long fall
+      fellIn = true;
+      SFX.playFall();
+      for (let k = 0; k < 14; k++) particles.push({ x: skierX + (Math.random() - 0.5) * 6, y: skierY - 2, vx: (Math.random() - 0.5) * 50,
+        vy: -30 - Math.random() * 30, g: 120, life: 0.4 + Math.random() * 0.3, size: 1, color: Math.random() < 0.5 ? VIC.white : VIC.cyan });
+    } else if (hit.pine) SFX.playExplosion(); else SFX.playBreak();
     if (hit.pine) {
       exploded.add(hit.i + ',' + hit.j);
       spawnExplosion(hit.x, hit.y - 4);
@@ -1731,6 +1773,7 @@
 
     skierY += speed * dt;
     skierX = Math.max(2, Math.min(W - 3, skierX + vx * dt));
+    if (course.shape.wind) blowWind(dt);
 
     // A pole is cleared when the skier crosses its row with both skis on
     // the flag side. See SKIS and CLIP_REACH.
@@ -1750,6 +1793,44 @@
     if (course.couloir && moveSluff(dt)) { crash({ sluff: true }); return; }
     if (crossed < course.borders.length && skierY >= course.borders[crossed]) { crossed++; flash(course.shape.welcome, 1800); }
     if (skierY >= course.finishY) finish();
+  }
+
+  // Katabatic wind: calm for a while, then a second of warning (thin
+  // streaks and a hiss from one side), then a gust that pushes you that
+  // way for two or three seconds. Never a push without the warning.
+  const WIND_PUSH = 28, WIND_CALM = [3, 6], WIND_WARN = 1, WIND_GUST = [2, 3];
+  let wind = null, gustLines = [];
+  function blowWind(dt) {
+    if (!wind) wind = { phase: 'calm', t: between(WIND_CALM), dir: 1, len: 1 };
+    wind.t -= dt;
+    if (wind.t <= 0) {
+      if (wind.phase === 'calm') { wind.phase = 'warn'; wind.t = WIND_WARN; wind.dir = Math.random() < 0.5 ? -1 : 1; }
+      else if (wind.phase === 'warn') { wind.phase = 'gust'; wind.len = wind.t = between(WIND_GUST); }
+      else { wind.phase = 'calm'; wind.t = between(WIND_CALM); }
+    }
+    if (wind.phase === 'gust') skierX = Math.max(2, Math.min(W - 3, skierX + wind.dir * WIND_PUSH * gustEnvelope() * dt));
+  }
+  const gustEnvelope = () => Math.max(0, Math.min(1, (wind.len - wind.t) / 0.3, wind.t / 0.4));
+  // How hard it's blowing, 0..1, for the sound and the streaks.
+  const windLevel = () => !wind || state !== 'running' ? 0
+    : wind.phase === 'warn' ? 0.1 + 0.25 * (1 - wind.t / WIND_WARN)
+    : wind.phase === 'gust' ? 0.35 + 0.65 * gustEnvelope() : 0;
+  // The streaks: thin dashes of blown snow racing across the screen.
+  function updateStreaks(dt) {
+    const level = windLevel();
+    if (level > 0 && Math.random() < level * 70 * dt) {
+      const dir = wind.dir;
+      gustLines.push({ x: dir > 0 ? -12 : VW + 12, y: Math.random() * H, len: 3 + Math.floor(Math.random() * (4 + 8 * level)),
+        v: dir * (150 + Math.random() * 90), ink: Math.random() < 0.5 ? VIC.lightBlue : VIC.cyan, drift: level > 0.6 && Math.random() < 0.4 });
+    }
+    for (const k of gustLines) k.x += k.v * dt;
+    gustLines = gustLines.filter(k => k.x > -20 && k.x < VW + 20);
+  }
+  function drawStreaks() {
+    for (const k of gustLines) {
+      const dir = Math.sign(k.v);
+      for (let i = 0; i < k.len; i++) if (!k.drift || i % 2 === 0) put(Math.round(camX + k.x - dir * i), Math.round(k.y), k.ink);
+    }
   }
 
   // Grinding over scree: a scrape every so often, sparks off the skis.
@@ -2728,16 +2809,32 @@
     'BBBBBBBBB',
   ];
   const PEN_PIECES = [VIC.white, VIC.white, VIC.cyan, VIC.lightBlue];
-  // A block of glacier ice: blue edges, cyan and white faces.
-  const ICEBLOCK = [
-    '.VVVVVV..',
-    'VCCWWCCV.',
-    'VCWWCCCVV',
-    'VCCCCCCVV',
-    'VCCCCCWVV',
-    'VVVVVVVVV',
-    '.BBBBBBB.',
+  // Lumps of glacier ice, broken and uneven: a leaning slab, a jagged
+  // serac, a low pile of shards. Blue edges, cyan and white faces.
+  const ICE_SHAPES = [
+    ['..VV.....',
+     '.VWCV....',
+     '.VWCCV...',
+     'VCWCCCVV.',
+     'VCCCWCCCV',
+     'VCCCCCCVV',
+     '.VVBBVVV.'],
+    ['....V....',
+     '...VWV.V.',
+     '..VWCVVCV',
+     '.VCWCCVCV',
+     'VCCCCWCV.',
+     'VVCCCCCVV',
+     '.BBVVVBB.'],
+    ['.........',
+     '.........',
+     '..V...V..',
+     '.VCV.VWV.',
+     'VWCCVCCCV',
+     'VCCCCCWCV',
+     '.BVVBVVB.'],
   ];
+  const ICEBLOCK = ICE_SHAPES[0];
   // A tuft of tussock grass, drawn into the snow itself.
   const TUFT = ['Y.Y.Y', 'YYYYY', '.OYO.'];
 
@@ -3100,7 +3197,7 @@
       for (let i = iMin; i < iMax; i++) {
         const tr = treeAt(i, j, salt, centerAt);
         if (!tr || exploded.has(i + ',' + j) || scorched.has(i + ',' + j)) continue;
-        const rows = tr.pine ? PINEAPPLE : tr.pen ? PENITENTE : tr.ice ? ICEBLOCK : tr.rock ? ROCKS[tr.rock - 1] : tr.cherry ? CHERRY : tr.rata ? RATA
+        const rows = tr.pine ? PINEAPPLE : tr.pen ? PENITENTE : tr.ice ? ICE_SHAPES[(tr.i * 7 + tr.j * 3) % 3] : tr.rock ? ROCKS[tr.rock - 1] : tr.cherry ? CHERRY : tr.rata ? RATA
           : tr.bush ? BUSH : tr.groundsel ? GROUNDSEL : TREE;
         shadowOf(rows, tr.x - (tr.pine ? 2 : 4), tr.y - camY - rows.length + 1);
       }
@@ -3240,7 +3337,7 @@
         if (sc) drawScorchedTree(tr, sc, camY);
         else if (exploded.has(i + ',' + j)) continue;
         else if (tr.pen) blit(PENITENTE, tr.x - 4, tr.y - camY - PENITENTE.length + 1);
-        else if (tr.ice) blit(ICEBLOCK, tr.x - 4, tr.y - camY - ICEBLOCK.length + 1);
+        else if (tr.ice) { const r = ICE_SHAPES[(tr.i * 7 + tr.j * 3) % 3]; blit(r, tr.x - 4, tr.y - camY - r.length + 1); }
         else if (tr.rock) { const r = ROCKS[tr.rock - 1]; blit(r, tr.x - 4, tr.y - camY - r.length + 1); }
         else if (tr.cherry) blit(CHERRY, tr.x - 4, tr.y - camY - 8);
         else if (tr.rata) blit(RATA, tr.x - 4, tr.y - camY - 8);
@@ -3310,7 +3407,7 @@
         const s = SPRITES[mode] || SPRITES.down;
         drawWind(s.length, camY);
         // Sprites differ in height; they all stand on the same row.
-        blit(s, Math.round(skierX) - 3, Math.round(skierY) - camY + 5 - s.length, VIC.black);
+        if (!fellIn) blit(s, Math.round(skierX) - 3, Math.round(skierY) - camY + 5 - s.length, VIC.black);
         if (onFire() && state !== 'crashed') {
           const frames = runGod ? GOD_FLAMES : FLAMES;
           const fl = frames[Math.floor(performance.now() / 90) % frames.length];
@@ -3332,7 +3429,7 @@
       }
     }
 
-    if (course && state !== 'title') { drawPetals(); drawMoths(); drawBirds(); }
+    if (course && state !== 'title') { drawPetals(); drawStreaks(); drawMoths(); drawBirds(); }
     if (tally && tally.dinged) drawStars(tally.starsShown);
 
     ctx.putImageData(img, 0, 0);
@@ -3539,7 +3636,7 @@
       width: [[0, 34], [0.47, 34], [0.53, 48], [1, 48]] },
     // An ice field: no trees, blocks of ice, crevasses, and penguins
     // (more than you'd really find that far inland, but it's their flag).
-    vinson: { icy: true, crevasses: true, forest: 0.45, wildlife: { odds: 0.03, kinds: { penguin: 1 } } },
+    vinson: { icy: true, crevasses: true, wind: true, forest: 0.45, wildlife: { odds: 0.03, kinds: { penguin: 1 } } },
     // The glacier shrinks: the piste narrows to a strip by the finish.
     // Bare dark rock beyond a snowfield that shrinks to a strip by the
     // finish (it slows you), boulders on it, giant groundsels.
@@ -4040,6 +4137,7 @@
     }
     if (state === 'running' && onFire()) spawnEmbers();
     SFX.updateHeli(heliLevel());
+    SFX.updateWind(windLevel());
     SFX.updateSluff(state === 'running' && sluff && sluff.v > 0 ? Math.max(0.15, Math.min(1, 1 - (skierY - sluff.y) / 120)) : 0);
     if (state === 'running') {
       SFX.updateSwoosh(speed / DOWN_SPEED, snowDepth(skierX, course.centerAt(skierY), skierY), heading !== 'down');
@@ -4049,6 +4147,7 @@
       updateBirds(Math.min(dt, 0.05));
       updateMoths(Math.min(dt, 0.05));
       updatePetals(Math.min(dt, 0.05));
+      updateStreaks(Math.min(dt, 0.05));
     }
     if (particles.length) updateParticles(Math.min(dt, 0.05));
     if (state === 'running' || state === 'crashed' || state === 'finished') paintHud();
