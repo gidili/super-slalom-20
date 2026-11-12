@@ -1766,8 +1766,7 @@
         flag.appendChild(flagCanvas(m ? FLAGS_OF[id][0] : 'random'));
         const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = m ? m.name.split(/ \(| "/)[0] : 'RANDOM';
         const alt = document.createElement('span'); alt.className = 'alt'; alt.textContent = m ? m.height.replace('~', '') : '';
-        const bs = document.createElement('span'); bs.className = 'bs';
-        li.append(flag, nm, alt, bs);
+        li.append(flag, nm, alt);
         li.addEventListener('click', (e) => {
           e.stopPropagation();
           if (state !== 'title') return;
@@ -1776,10 +1775,7 @@
         courseListEl.appendChild(li);
       });
     }
-    [...courseListEl.children].forEach((li, k) => {
-      li.classList.toggle('chosen', k === singleIndex);
-      li.querySelector('.bs').textContent = getBest(k === 0 ? 'single' : 'single:' + SINGLE_COURSES[k]) || '-';
-    });
+    [...courseListEl.children].forEach((li, k) => li.classList.toggle('chosen', k === singleIndex));
     const li = courseListEl.children[singleIndex];
     if (li && li.scrollIntoView) li.scrollIntoView({ block: 'center' });
   }
