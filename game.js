@@ -222,6 +222,7 @@
     fences: 1,                 // fences, times Single's (0: none)
     camp: false,               // a base camp of tents beside the finish
     fans: 5,                   // people cheering at the finish
+    heli: false,               // dropped off by helicopter at the start
     twist: 1,                  // how far the piste wanders
     sway: 1,                   // ...and how often: under 1 is longer, lazier bends
     crowd: 1,                  // trees and pineapples on the piste, times Single's
@@ -521,6 +522,7 @@
   let runStart = 0, runEnd = null;
   let hitWhat = 'TREES';       // what ended a crashed run, for the card
   let sluff = null;            // the loose snow pouring down a couloir behind you
+  let heli = null;             // the helicopter that drops you off, if there is one
   let exploded = new Set();    // pineapples already blown up, by cell
   // Trees and fences set alight on fire, by the same keys, each with when
   // and in which fire's colours. A tree hit is a stump; a tree passed burns
@@ -540,7 +542,7 @@
   // the skis, turns snap, and the ends of runs are wood or pineapple.
   const SFX = (() => {
     const AC = window.AudioContext || window.webkitAudioContext;
-    let ac = null, master = null, noise = null, swoosh = null, hiss = null;
+    let ac = null, master = null, noise = null, swoosh = null, hiss = null, rotor = null;
     let muted = false;
     try { muted = localStorage.getItem('slalom_muted') === '1'; } catch (_) {}
     const VOLUME = 0.45;
@@ -612,6 +614,28 @@
       hiss.g.gain.setTargetAtTime(0.22 * level, t, 0.15);
       hiss.f.frequency.setTargetAtTime(500 + 1400 * level, t, 0.15);
       if (level <= 0) { const h = hiss; h.src.stop(t + 0.8); hiss = null; }
+    }
+
+    // A helicopter: low noise chopped by a square wave, thup-thup-thup,
+    // at `level` 0..1; 0 lets it die away.
+    function updateHeli(level) {
+      if (!ac) return;
+      const t = ac.currentTime;
+      if (level > 0 && !rotor) {
+        rotor = noiseThrough('lowpass', 380, 1.2, t);
+        rotor.src.loop = true;
+        rotor.g.gain.value = 0;
+        const lfo = ac.createOscillator(), depth = ac.createGain();
+        lfo.type = 'square'; lfo.frequency.value = 11;
+        depth.gain.value = 0;
+        lfo.connect(depth); depth.connect(rotor.g.gain);
+        lfo.start(t);
+        rotor.lfo = lfo; rotor.depth = depth;
+      }
+      if (!rotor) return;
+      rotor.g.gain.setTargetAtTime(0.2 * level, t, 0.1);
+      rotor.depth.gain.setTargetAtTime(0.18 * level, t, 0.1);
+      if (level <= 0) { const r = rotor; r.src.stop(t + 0.6); r.lfo.stop(t + 0.6); rotor = null; }
     }
 
     // A change of direction: a short dash of noise sweeping down.
@@ -871,7 +895,7 @@
     // must never be able to stop a run, so every entry point swallows it.
     const safe = f => (...a) => { try { return f(...a); } catch (_) { return undefined; } };
     return {
-      unlock: safe(unlock), updateSluff: safe(updateSluff), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
+      unlock: safe(unlock), updateSluff: safe(updateSluff), updateHeli: safe(updateHeli), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
       stopSwoosh: safe(stopSwoosh), playDash: safe(playDash), playBreak: safe(playBreak),
       playExplosion: safe(playExplosion), playFanfare: safe(playFanfare), toggleMute: safe(toggleMute),
       playCoin: safe(playCoin), playCount: safe(playCount), playTick: safe(playTick), playDing: safe(playDing), playNoBonus: safe(playNoBonus),
@@ -1015,7 +1039,7 @@
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     held = []; tapLeft = 0;
-    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null;
+    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null;
     animals = []; animalSlot = Math.ceil(START_PAD / ANIMAL_SLOT);
     birds = []; birdIn = between(course.endless ? BIRD_EVERY_ENDLESS : BIRD_EVERY);
     passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
@@ -1030,6 +1054,7 @@
     msgEl.classList.add('above-count');
     flash("GOOD LUCK, YOU'RE GONNA NEED IT", 3 * COUNT_BEAT_MS);
     state = 'countdown';
+    if (course.shape.heli) heli = { x: Math.round(skierX), y: Math.round(skierY) - 22, leftAt: null };
     const id = runId;
     const beat = n => {
       if (runId !== id || state !== 'countdown') return;
@@ -1055,6 +1080,7 @@
     last = runStart;
     acc = 0;
     state = 'running';
+    if (heli) heli.leftAt = performance.now();   // off it goes
     SFX.startSwoosh();
     SFX.playCount(true);
     showCount('GO!');
@@ -2139,6 +2165,49 @@
     }
   }
 
+  // The helicopter, from above: nose up, red cabin with a cyan canopy,
+  // skids, a tail boom down towards the skier, and a rotor that's a blur
+  // of spinning blades. It hovers through the countdown, then on GO pulls
+  // up and away off the top of the screen.
+  function heliAt(now) {
+    if (!heli.leftAt) return { x: heli.x, y: heli.y + Math.round(Math.sin(now / 300)), t: 0 };
+    const t = (now - heli.leftAt) / 1000;
+    return { x: Math.round(heli.x + 20 * t * t), y: Math.round(heli.y - 25 * t - 110 * t * t), t };
+  }
+  function drawHeli(camY) {
+    const now = performance.now(), { x, y: wy, t } = heliAt(now), y = wy - camY;
+    if (t > 0 && y < -20) { heli = null; return; }
+    for (let r = 5; r <= 12; r++) put(x, y + r, VIC.black);                 // tail boom
+    const tf = Math.floor(now / 40) % 2;
+    put(x - 1 + 2 * tf, y + 13, VIC.black); put(x, y + 13, VIC.black);      // tail rotor
+    for (let r = -3; r <= 3; r++) { put(x - 5, y + r, VIC.black); put(x + 5, y + r, VIC.black); }   // skids
+    blit(HELI_CAB, x - 3, y - 4);
+    // The rotor: a faint disc where the blades blur, one blade showing.
+    const a = now / 25;
+    for (let k = 0; k < 24; k++) {
+      const b = k * Math.PI / 12;
+      if ((k + Math.floor(now / 60)) % 3) put(Math.round(x + Math.cos(b) * 11), Math.round(y + Math.sin(b) * 11), VIC.lightBlue);
+    }
+    for (let r = -11; r <= 11; r++) {
+      if (Math.abs(r) < 2) continue;
+      put(Math.round(x + Math.cos(a) * r), Math.round(y + Math.sin(a) * r), VIC.black);
+    }
+  }
+  const HELI_CAB = [
+    '..KKK..',
+    '.KCCCK.',
+    'KCCCCCK',
+    'KRRRRRK',
+    'KRRRRRK',
+    'KRRRRRK',
+    'KRRRRRK',
+    '.KRRRK.',
+    '..KKK..',
+  ];
+  // How loud the rotor is: full while hovering, fading as it flies off.
+  const heliLevel = () => !heli || state === 'paused' || state === 'title' ? 0
+    : !heli.leftAt ? 1 : Math.max(0, 1 - (performance.now() - heli.leftAt) / 1800);
+
   // The sluff: a churning white tongue filling the gully behind you, light
   // blue swirling through it, a ragged front with lumps tumbling ahead.
   // Once it stops it lies still.
@@ -2668,6 +2737,7 @@
           blit(fl, Math.round(skierX) - 3, Math.round(skierY) - camY + 5 - s.length - 3);
         }
       }
+      if (heli) drawHeli(camY);
       for (const p of particles) {
         const px = Math.round(p.x), py = Math.round(p.y - camY);
         if (p.flash) {
@@ -2863,7 +2933,7 @@
   function metres(id) { return +mountain(id).height.replace(/[^0-9]/g, ''); }
   const CHARACTER = {
     // A narrow chute near the bottom: the trees close in, no way out.
-    alyeska: { fans: 34, width: [[0, 44], [0.7, 44], [0.76, 27], [0.94, 27], [1, 36]] },
+    alyeska: { fans: 34, heli: true, width: [[0, 44], [0.7, 44], [0.76, 27], [0.94, 27], [1, 36]] },
     // Broad and gentle: long lazy bends, little on the piste.
     kunama: { fans: 34, width: 50, sway: 0.55, twist: 1.2, crowd: 0.3, quick: 0 },
     // The Grand Muret: 76%, right after the start. The slope drops away,
@@ -2890,7 +2960,7 @@
     k2: { quick: 3, offset: 15, offsetLast: 15, gapLast: 54 },
     // The Hornbein Couloir first: steep, narrow, zigzagging between rock
     // walls, no poles; then out onto the North Face.
-    chomolungma: { rocks: 1, fences: 0, camp: true, couloir: { start: 100, rows: 1200, open: 90, hw: 15, slope: 1.6,
+    chomolungma: { rocks: 1, fences: 0, camp: true, heli: true, couloir: { start: 100, rows: 1200, open: 90, hw: 15, slope: 1.6,
       // Gentle swings, then dangerous ones, each just within reach.
       bends: [[0, 0], [160, 18], [300, -20], [420, 22], [600, 5], [700, -26], [820, 16],
         [960, -10], [1080, 20], [1200, 0]],
@@ -3362,6 +3432,7 @@
       if (tally) updateTally(Math.min(dt, 0.05));
     }
     if (state === 'running' && onFire()) spawnEmbers();
+    SFX.updateHeli(heliLevel());
     SFX.updateSluff(state === 'running' && sluff && sluff.v > 0 ? Math.max(0.15, Math.min(1, 1 - (skierY - sluff.y) / 120)) : 0);
     if (state === 'running') {
       SFX.updateSwoosh(speed / DOWN_SPEED, snowDepth(skierX, course.centerAt(skierY), skierY), heading !== 'down');
