@@ -525,7 +525,7 @@
     }
     // Vinson: a crowd of penguins instead, in messy huddles on both sides
     // past the line, chicks among the grown-ups, a few strays, three in a
-    // bobble hat and scarf, and a few tobogganing about on their bellies.
+    // bobble hat and scarf.
     if (S.penguinFans && !endless) {
       const rnd3 = mulberry32((seed % 4294967296) ^ 0xBE6);
       const huddles = Array.from({ length: 6 }, (_, h) => ({ side: h % 2 ? 1 : -1, y: finishY - 26 + rnd3() * 40, off: 12 + rnd3() * 18 }));
@@ -543,12 +543,6 @@
       }
       // Three dressed for the occasion, the rest as nature made them.
       fans.filter(f => !f.chick).slice(0, PENGUIN_WOOL.length).forEach((f, i) => { f.hat = PENGUIN_WOOL[i]; });
-      // Tobogganers: belly-down, sliding to and fro along the crowd's edge.
-      for (let i = 0; i < PENGUIN_SLIDERS; i++) {
-        const side = i % 2 ? 1 : -1, y = Math.round(finishY - 18 + i * 15 + rnd3() * 4);   // all on screen at the finish
-        const x0 = Math.round(centerAt(y) + side * (widthAt(y) + 9)), span = 18 + Math.floor(rnd3() * 14);
-        fans.push({ x: x0, y, x0, x1: x0 + side * span, slide: true, penguin: true, phase: rnd3() * 10 });
-      }
       fans.sort((a, b) => a.y - b.y);   // nearer the bottom draws on top
     }
     const fanCols = Math.ceil(S.fans / 2 / FAN_ROWS.length);
@@ -3084,22 +3078,11 @@
   const CHICK_CHEER = ['.KKK.', 'KWKWK', 'XWOWX', '.XXX.', '.XXX.', '.XXX.', '.O.O.'];
   const PENG_HAT = ['....W....', '...XXX...', '...XXX...'];   // a bobble hat, snug on the crown
   const PENG_SCARF = ['..XXXXX..', '......X..'];
-  const PENGUIN_CROWD = 35, PENGUIN_SLIDERS = 3;
-  // Belly-down, sliding: black back, white front, beak leading, feet behind.
-  const PENG_SLIDE = ['..KKKKKK.', 'OKWWWWWKO', '..WWWWW..'];
-  const SLIDE_SPEED = 22;   // pixels a second
+  const PENGUIN_CROWD = 35;
   const PENGUIN_WOOL = [VIC.crimson, VIC.green, VIC.netOrange];   // one hat-and-scarf set each
   // Always hopping a little; when you cross the line, much higher and faster.
   function drawPenguinFan(f, sy, now) {
     const done = state === 'finished';
-    if (f.slide) {   // to and fro, turning round at each end
-      const span = Math.abs(f.x1 - f.x0), d = (now / 1000 * SLIDE_SPEED + f.phase * span) % (2 * span);
-      const out = d < span, t = out ? d : 2 * span - d, dir = Math.sign(f.x1 - f.x0) * (out ? 1 : -1);
-      const x = Math.round(f.x0 + Math.sign(f.x1 - f.x0) * t);
-      blit(dir > 0 ? PENG_SLIDE : PENG_SLIDE.map(r => r.split('').reverse().join('')), x - 4, sy - 3, VIC.black);
-      if ((Math.floor(now / 90) + f.phase) % 2) put(x - 5 * dir, sy - 1, VIC.cyan);   // a puff of snow behind
-      return;
-    }
     const beat = Math.floor(now / (done ? 130 : 240)) + f.phase;
     const lift = done ? [0, 2, 3, 2][beat % 4] : beat % 3 === 0 ? 1 : 0;
     const up = lift > 0;
