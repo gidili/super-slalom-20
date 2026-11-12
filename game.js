@@ -1750,7 +1750,7 @@
   const chosenMode = () => modeBtns[modeIndex].dataset.mode;
 
   // Single's course: Random (a fresh slope every run, as ever) or one of
-  // the Championship mountains, west to east. Remembered between visits.
+  // the Championship mountains, lowest to highest. Remembered between visits.
   const courseListEl = document.getElementById('course-list');
   const SINGLE_COURSES = ['random'];   // the mountains join once they're defined
   let singleIndex = 0;
@@ -4147,7 +4147,9 @@
     return cv;
   }
   const mountain = id => MOUNTAINS.find(m => m.id === id);
-  SINGLE_COURSES.push(...[...MOUNTAINS].sort((a, b) => a.lon - b.lon).map(m => m.id));
+  // Lowest first, which is also easiest first.
+  const metresOf = m => +m.height.replace(/[^0-9]/g, '');
+  SINGLE_COURSES.push(...[...MOUNTAINS].sort((a, b) => metresOf(a) - metresOf(b)).map(m => m.id));
   try { singleIndex = Math.max(0, SINGLE_COURSES.indexOf(localStorage.getItem('slalom_single_course') || 'random')); } catch (_) {}
   // Names for tight spots: the pick button and result card, and the
   // course list. Most drop the bracket; the finale keeps its famous name.
