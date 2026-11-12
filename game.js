@@ -28,6 +28,7 @@
     blue: [64, 49, 141],       green: [85, 160, 73],
     orange: [170, 116, 73],    lightBlue: [128, 128, 255],
     yellow: [191, 206, 114],
+    paleBlue: [184, 184, 255], // the steep-face tint only
   };
   const css = c => `rgb(${c[0]},${c[1]},${c[2]})`;
 
@@ -209,19 +210,22 @@
   const SHAPE = {
     poles: POLE_COUNT, reds: RED_COUNT,
     gapFirst: POLE_GAP_FIRST, gapLast: POLE_GAP_LAST,   // between poles, top and bottom
+    gaps: null,                // ...or [[t, gap], ...] down the poles (t 0..1), like width
     offset: POLE_OFFSET, offsetLast: POLE_OFFSET,       // how far out they stand
     jitter: 4,                 // ...plus up to this much, at random
     quick: QUICK_SECTIONS,     // bunched-up stretches
     width: PATH_HW,            // piste half width, or [[t, hw], ...] down the course (t 0..1)
+    slope: 1,                  // how steep: speed times this, or [[t, x], ...] like width
+    signs: [],                 // boards by the piste: [{ t, lines: [...] }]
     twist: 1,                  // how far the piste wanders
     sway: 1,                   // ...and how often: under 1 is longer, lazier bends
     crowd: 1,                  // trees and pineapples on the piste, times Single's
     par: PAR_CS, star3: STAR3_CS,
   };
 
-  // A width that changes down the course: straight lines between the
-  // points, flat past the ends.
-  function widthFn(width, finishY) {
+  // A value that changes down the course (a width, a slope): straight
+  // lines between the points, flat past the ends.
+  function alongCourse(width, finishY) {
     if (typeof width === 'number') return () => width;
     return (y) => {
       const t = y / finishY;
@@ -251,6 +255,7 @@
     // that the rest of the course would then ignore.
     const first = rnd() < 0.5 ? -1 : 1;
     const quick = pickQuickPoles(seed, S.poles, S.quick);
+    const gapAt = S.gaps ? alongCourse(S.gaps, 1) : null;
     const poles = [];
     let y = START_PAD;
     for (let i = 0; i < (endless ? 0 : S.poles); i++) {
@@ -258,6 +263,7 @@
       if (i > 0) {
         y += quick.has(i) && quick.has(i - 1)
           ? QUICK_GAP
+          : S.gaps ? gapAt((i - 1) / (S.poles - 2))
           : S.gapFirst + (S.gapLast - S.gapFirst) * (i - 1) / (S.poles - 2);
       }
       y = Math.round(y);
@@ -348,8 +354,13 @@
       while (pts.length > 2 && pts[1].y < at - ENDLESS_BEHIND) pts.shift();
     };
     const lineEnd = endless ? Infinity : poles[poles.length - 1].y;
-    const widthAt = widthFn(S.width, finishY);
-    course = { seed, centerAt, lineAt, poles, finishY, salt, titlePine, endless, lineEnd, extend, levelAt, widthAt, shape: S };
+    const widthAt = alongCourse(S.width, finishY), slopeAt = alongCourse(S.slope, finishY);
+    // Where the slope breaks away: the start of each climb in steepness.
+    const lips = typeof S.slope === 'number' ? [] : S.slope.slice(1)
+      .filter((pt, k) => S.slope[k][1] <= 1 && pt[1] > 1)
+      .map(pt => Math.round(S.slope[S.slope.indexOf(pt) - 1][0] * finishY));
+    const signs = S.signs.map(g => ({ y: Math.round(g.t * finishY), lines: g.lines }));
+    course = { seed, centerAt, lineAt, poles, finishY, salt, titlePine, endless, lineEnd, extend, levelAt, widthAt, slopeAt, lips, signs, shape: S };
     if (endless) extend(0);
     snowRows.clear();            // cached rows belong to the previous slope
   }
@@ -1442,7 +1453,7 @@
 
     // Fresh snow: drag grows with depth, the same depth the speckle shows.
     const depth = snowDepth(skierX, course.centerAt(skierY), skierY);
-    const target = DOWN_SPEED * tuck * (1 - DEEP_SNOW_DRAG * depth);
+    const target = DOWN_SPEED * course.slopeAt(skierY) * tuck * (1 - DEEP_SNOW_DRAG * depth);
     const rate = target > speed ? ACCEL_RATE : DECEL_RATE;
     speed += (target - speed) * Math.min(1, dt * rate);
 
@@ -2043,6 +2054,45 @@
     }
   }
 
+  // A tiny 3x5 font for signs by the piste.
+  const FONT3 = (() => {
+    const g = {
+      A: '010101111101101', B: '110101110101110', C: '011100100100011', D: '110101101101110',
+      E: '111100110100111', F: '111100110100100', G: '011100101101011', H: '101101111101101',
+      I: '111010010010111', J: '001001001101010', K: '101101110101101', L: '100100100100111',
+      M: '101111111101101', N: '110101101101101', O: '010101101101010', P: '110101110100100',
+      Q: '010101101110011', R: '110101110101101', S: '011100010001110', T: '111010010010010',
+      U: '101101101101111', V: '101101101101010', W: '101101111111101', X: '101101010101101',
+      Y: '101101010010010', Z: '111001010100111',
+      0: '111101101101111', 1: '010110010010111', 2: '110001010100111', 3: '110001010001110',
+      4: '101101111001001', 5: '111100110001110', 6: '011100111101111', 7: '111001010010010',
+      8: '111101111101111', 9: '111101111001110',
+      '%': '101001010100101', '!': '010010010000010', '-': '000000111000000', ' ': '000000000000000',
+    };
+    return g;
+  })();
+  function text3(str, x, y, ink) {
+    for (let k = 0; k < str.length; k++) {
+      const bits = FONT3[str[k]] || FONT3[' '];
+      for (let b = 0; b < 15; b++) if (bits[b] === '1') put(x + k * 4 + (b % 3), y + Math.floor(b / 3), ink);
+    }
+  }
+  // A board on two posts, just off the piste on whichever side has room,
+  // its bottom edge on the sign's row.
+  function drawSign(g, camY) {
+    const wd = Math.max(...g.lines.map(l => l.length)) * 4 + 3, ht = g.lines.length * 6 + 3;
+    const by = g.y - camY;
+    if (by < -4 || by - ht - 4 > H) return;
+    const c = course.centerAt(g.y), edge = pisteHW(g.y) + EDGE_WOBBLE + 2;
+    const x0 = c - edge - wd > 2 ? Math.round(c - edge - wd) : Math.round(c + edge);
+    const top = by - ht - 4;
+    for (let y = top; y < top + ht; y++)
+      for (let x = x0; x < x0 + wd; x++)
+        put(x, y, y === top || y === top + ht - 1 || x === x0 || x === x0 + wd - 1 ? VIC.blue : VIC.white);
+    g.lines.forEach((l, i) => text3(l, x0 + 2 + Math.floor((wd - 3 - l.length * 4 + 1) / 2), top + 2 + i * 6, VIC.blue));
+    for (const px of [x0 + 3, x0 + wd - 4]) for (let y = top + ht; y <= by; y++) put(px, y, VIC.black);
+  }
+
   // ------------------------------------------------------------ explosion
   // Like snake-bit's: a burst of pieces flung out and pulled down, here
   // scaled to a 224-pixel screen and kept to the VIC palette. Positions
@@ -2083,6 +2133,27 @@
         size: Math.random() < 0.3 ? 2 : 1,
         color: SPARKLE_COLORS[Math.floor(Math.random() * SPARKLE_COLORS.length)],
       });
+    }
+  }
+
+  // Wind lines streaming back uphill off a fast skier: past WIND_AT times
+  // normal speed (a long tuck, or a steep pitch), longer the faster. Fire
+  // has its own trail, so not then.
+  const WIND_AT = 1.45, WIND_FULL = 2.1, WIND_LEN = 24;
+  function drawWind(spriteH, camY) {
+    const fast = speed / DOWN_SPEED;
+    if (state !== 'running' || fast <= WIND_AT || onFire()) return;
+    const k = Math.min(1, (fast - WIND_AT) / (WIND_FULL - WIND_AT));
+    const len = Math.round(3 + WIND_LEN * k);
+    const lean = -vx / Math.max(20, speed);        // straight back along the way you came
+    const top = Math.round(skierY) - camY + 5 - spriteH;
+    const phase = Math.floor(performance.now() / 45);
+    for (const [dx, dy, l] of [[-4, 4, len], [0, 0, len + 3], [4, 4, len - 2]]) {
+      for (let r = 1; r <= l; r++) {
+        if ((r + phase) % 4 >= 2) continue;       // short dashes, drifting uphill
+        // Dark by the skier, fading to light blue further back.
+        put(Math.round(skierX + dx + lean * r), top + dy - r, r < l * 0.3 ? VIC.blue : VIC.lightBlue);
+      }
     }
   }
 
@@ -2206,6 +2277,9 @@
     row = new Uint8ClampedArray((W + 2 * MARGIN) * 4);
     const c = centerAt(wy);
     const line = lineAt ? lineAt(wy) : null;
+    // Steep pitches look it: the piste's speckle thickens with the slope.
+    const steep = course && course.slopeAt ? 0.3 * Math.max(0, course.slopeAt(wy) - 1) : 0;
+    const lips = (course && course.lips) || [];
     for (let sx = -MARGIN; sx < W + MARGIN; sx++) {
       let col = VIC.white;
       if (sx < 0 || sx >= W) {   // past the edge: forest, densely speckled,
@@ -2231,6 +2305,14 @@
         if (hash(sx, wy) < density) col = VIC.lightBlue;
       } else if (hash(sx + 4441, wy + 17) < 0.005) {
         col = VIC.lightBlue;   // a stray speck, so the piste isn't spotless
+      } else if (hash(sx + 5113, wy + 29) < steep) {
+        col = VIC.paleBlue;    // a steep face, faintly shaded
+      }
+      // The lip where a steep pitch drops away: a broken dark line right
+      // across the slope.
+      for (const lip of lips) {
+        const d = wy - lip - Math.round(1.5 * Math.sin(sx / 7));
+        if (d >= 0 && d <= 1 && hash(sx + 313, wy) < 0.8) col = VIC.blue;
       }
       const i = (sx + MARGIN) * 4;
       row[i] = col[0]; row[i + 1] = col[1]; row[i + 2] = col[2]; row[i + 3] = 255;
@@ -2294,6 +2376,8 @@
       }
     }
 
+    if (course) for (const g of course.signs) drawSign(g, camY);
+
     if (course) {
       for (const p of course.poles) {
         const sy = p.y - camY;
@@ -2312,6 +2396,7 @@
       if (state !== 'title') {
         drawAnimals(camY);
         const s = SPRITES[mode] || SPRITES.down;
+        drawWind(s.length, camY);
         // Sprites differ in height; they all stand on the same row.
         blit(s, Math.round(skierX) - 3, Math.round(skierY) - camY + 5 - s.length, VIC.black);
         if (onFire() && state !== 'crashed') {
@@ -2495,12 +2580,16 @@
     { id: 'k2', name: 'K2', country: 'PAKISTAN', height: '8,611 M', lon: 76.5, seed: 2313,
       unlocks: [],
       fact: 'The 1954 first recorded ascent made two Italians national heroes. Amir Mehdi, a porter from Hunza, had carried their oxygen high up the mountain, then was forced to spend the night at about 8,100 m in a snow hole with no tent or sleeping bag. He lost all his toes, and his story was buried for decades.' },
-    { id: 'chomolungma', name: 'CHOMOLUNGMA (EVEREST) NORTH FACE', country: 'TIBET - CHINA (CONTESTED TERRITORY)', height: '8,849 M', lon: 86.9, seed: 2414,
+    { id: 'chomolungma', name: 'CHOMOLUNGMA (EVEREST NORTH FACE)', short: 'CHOMOLUNGMA (EVEREST NORTH FACE)', list: 'CHOMOLUNGMA (EVEREST)', country: 'TIBET - CHINA (CONTESTED TERRITORY)', height: '8,849 M', lon: 86.9, seed: 2414,
       unlocks: [],
       fact: 'Named in 1865 after George Everest, a British surveyor who probably never saw it and objected to the honour. Only a handful have ever ridden down this face: in 2001 Marco Siffredi, 22, snowboarded the Norton Couloir from the summit, then vanished trying the Hornbein Couloir a year later. In 2025 Jim Morrison finally skied down that line, as you are about to.' },
   ];
   const CHAMP_COURSES = 10, FINALE = 'chomolungma';
   const mountain = id => MOUNTAINS.find(m => m.id === id);
+  // Names for tight spots: the pick button and result card, and the
+  // course list. Most drop the bracket; the finale keeps its famous name.
+  const shortName = m => m.short || m.name.split(' (')[0];
+  const listName = m => m.list || m.name.split(/ \(| "/)[0];
 
   // Each mountain's slope. Difficulty comes from height (0 the lowest, 1
   // the highest): closer poles, wider swings, more bunched-up stretches,
@@ -2514,7 +2603,11 @@
     alyeska: { width: [[0, 44], [0.7, 44], [0.76, 27], [0.94, 27], [1, 36]] },
     // Broad and gentle: long lazy bends, little on the piste.
     kunama: { width: 50, sway: 0.55, twist: 1.2, crowd: 0.3, quick: 0 },
-    pista3: {},
+    // The Grand Muret: 76%, right after the start. The slope drops away,
+    // you fly for a few poles, then it eases.
+    // Room to tuck on the pitch, then the poles close in below it.
+    pista3: { gaps: [[0, 170], [0.42, 160], [0.57, 75], [1, 64]], quick: 0, slope: [[0, 1], [0.05, 1], [0.08, 1.5], [0.6, 1.5], [0.66, 1]],
+      signs: [{ t: 0.05, lines: ['GRAND MURET', '76%'] }] },
     aoraki: {},
     // Even as a metronome: same gap, same swing, no bunching.
     fuji: { gapFirst: 82, gapLast: 82, offset: 13, offsetLast: 13, jitter: 0, quick: 0, twist: 0.5 },
@@ -2537,7 +2630,7 @@
   // Par and three-star times (cs), scaled from Single's by how long the
   // autopilot takes on each. Re-run when a course changes.
   const PAR = {
-    alyeska: [3468, 3342], kunama: [3620, 3489], pista3: [3407, 3283], aoraki: [3371, 3249],
+    alyeska: [3468, 3342], kunama: [3620, 3489], pista3: [3887, 3746], aoraki: [3371, 3249],
     fuji: [3481, 3355], cervino: [2860, 2756], vinson: [3046, 2935], kirinyaga: [3057, 2947],
     iztactepetl: [3017, 2907], kilimanjaro: [4505, 4342], aconcagua: [2703, 2605],
     annapurna: [2716, 2617], k2: [2702, 2604], chomolungma: [2721, 2622],
@@ -2591,7 +2684,7 @@
     // The total time only means something if every course was finished.
     const all = champ.played.every(p => p.finished);
     const totalCs = champ.played.reduce((a, p) => a + p.time_cs, 0);
-    return champ.played.map((p, i) => `<li><span>${i + 1} ${mountain(p.id).name.split(/ \(| "/)[0]}</span>${
+    return champ.played.map((p, i) => `<li><span>${i + 1} ${listName(mountain(p.id))}</span>${
       cols(p.finished ? '*'.repeat(p.stars) : '', p.finished ? fmt(p.time_cs) : 'WIPEOUT', p.points)}</li>`).join('')
       + `<li class="total"><span>TOTAL</span>${cols('', all ? fmt(totalCs) : '', champTotal())}</li>`;
   }
@@ -2607,10 +2700,12 @@
       const opts = champOptions(), m = opts[c.pick % opts.length];
       P.head.textContent = `COURSE ${n} OF ${CHAMP_COURSES}`;
       P.sub.textContent = n === 1 ? 'A WORLD TOUR ON SKIS. WHERE TO FIRST?' : 'WHERE NEXT?';
-      P.go.textContent = m.name.split(' (')[0];
+      // A bracketed part goes on its own, smaller line.
+      const [main, rest] = shortName(m).split(' (');
+      P.go.innerHTML = rest ? `${main}<small>(${rest}</small>` : main;
       const next = m.unlocks.filter(id => !c.open.has(id) && !skied(id));
       P.text.textContent = `${m.country} · ${m.height}` + (m.id === FINALE ? ' · THE FINALE'
-        : next.length ? ` · FINISH TO UNLOCK: ${next.map(id => mountain(id).name.split(' (')[0]).join(', ')}` : '');
+        : next.length ? ` · FINISH TO UNLOCK: ${next.map(id => shortName(mountain(id))).join(', ')}` : '');
       P.text.style.textAlign = 'center';
       P.prompt.textContent = NARROW ? 'ARROWS TO CHOOSE · TAP THE NAME TO GO' : 'LEFT / RIGHT CHOOSES · SPACE GOES';
     } else if (c.stage === 'intro') {
@@ -2623,7 +2718,7 @@
     } else if (c.stage === 'result') {
       const p = c.played[c.played.length - 1];
       P.head.textContent = p.finished ? 'FINISHED' : 'WIPEOUT';
-      P.sub.textContent = `${mountain(p.id).name.split(' (')[0]} +${p.points}` + (p.finished ? ` · TIME ${fmt(p.time_cs)}` : '');
+      P.sub.textContent = `${shortName(mountain(p.id))} +${p.points}` + (p.finished ? ` · TIME ${fmt(p.time_cs)}` : '');
       P.text.textContent = '';
       P.prompt.textContent = (NARROW ? 'TAP' : 'SPACE') + (c.played.length === CHAMP_COURSES ? ' TO SEE HOW YOU DID' : ' FOR THE NEXT MOUNTAIN');
     } else {
