@@ -189,19 +189,20 @@
 
   // The poles in quick sections, by index. Sections never touch: at least
   // two ordinary gaps between them, and one before the finish.
-  function pickQuickPoles(seed, count = POLE_COUNT, sections = QUICK_SECTIONS) {
+  function pickQuickPoles(seed, count = POLE_COUNT, sections = QUICK_SECTIONS, len = QUICK_POLES) {
     if (!sections) return new Set();
     const rnd = mulberry32((seed % 4294967296) ^ 0x0B1C);
-    const last = count - 1 - QUICK_POLES;    // latest start
+    const last = count - 1 - len;    // latest start
+    // (Only shapes that fit are ever asked for, so this always ends.)
     for (;;) {
       const starts = [];
       for (let k = 0; k < sections; k++) {
         starts.push(QUICK_FIRST + Math.floor(rnd() * (last - QUICK_FIRST + 1)));
       }
       starts.sort((a, b) => a - b);
-      if (starts.every((s, k) => k === 0 || s - starts[k - 1] >= QUICK_POLES + 2)) {
+      if (starts.every((s, k) => k === 0 || s - starts[k - 1] >= len + 2)) {
         const set = new Set();
-        for (const s of starts) for (let i = 0; i < QUICK_POLES; i++) set.add(s + i);
+        for (const s of starts) for (let i = 0; i < len; i++) set.add(s + i);
         return set;
       }
     }
@@ -217,7 +218,9 @@
     gaps: null,                // ...or [[t, gap], ...] down the poles (t 0..1), like width
     offset: POLE_OFFSET, offsetLast: POLE_OFFSET,       // how far out they stand
     jitter: 4,                 // ...plus up to this much, at random
-    quick: QUICK_SECTIONS,     // bunched-up stretches
+    quick: QUICK_SECTIONS,     // bunched-up stretches...
+    quickLen: QUICK_POLES,     // ...this many poles each...
+    quickGap: QUICK_GAP,       // ...this far apart
     width: PATH_HW,            // piste half width, or [[t, hw], ...] down the course (t 0..1)
     slope: 1,                  // how steep: speed times this, or [[t, x], ...] like width
     signs: [],                 // boards by the piste: [{ t, lines: [...], flag }]
@@ -253,6 +256,9 @@
     crevasses: false,          // ...and crevasses where fences would be
     wind: false,               // katabatic gusts that push you sideways
     avalanche: null,           // { from, to }: an avalanche chases you from pole `from` to pole `to`
+    night: null,               // how dark it is down the course, [[t, darkness 0..1], ...]; a headlamp
+    serac: null,               // { from, to, side }: a hanging ice cliff shedding chunks across the piste
+    treeline: 0,               // above this t (0..1 down the course) nothing grows: bare rock, sparser
     pines: 1,                  // pineapples, times Single's
     twist: 1,                  // how far the piste wanders
     sway: 1,                   // ...and how often: under 1 is longer, lazier bends
@@ -316,7 +322,7 @@
     // The first pole too: every pole has a flag, so there's no free choice
     // that the rest of the course would then ignore.
     const first = rnd() < 0.5 ? -1 : 1;
-    const quick = pickQuickPoles(seed, S.poles, S.quick);
+    const quick = pickQuickPoles(seed, S.poles, S.quick, S.quickLen);
     const gapAt = S.gaps ? alongCourse(S.gaps, 1) : null;
     const poles = [];
     let y = K ? c2 + START_PAD - 60 : START_PAD;
@@ -324,7 +330,7 @@
       const t = (i - 1) / (S.poles - 2);
       if (i > 0) {
         y += quick.has(i) && quick.has(i - 1)
-          ? QUICK_GAP
+          ? S.quickGap
           : S.gaps ? gapAt((i - 1) / (S.poles - 2))
           : S.gapFirst + (S.gapLast - S.gapFirst) * (i - 1) / (S.poles - 2);
       }
@@ -638,6 +644,7 @@
   let crossed = 0;             // borders crossed so far this run
   let fellIn = false;          // swallowed by a crevasse: no skier left to draw
   let slide = null;            // an avalanche on the way down, if there is one
+  let icefall = [], iceIn = 0; // chunks off a serac, sliding across the piste
   // Championship courses are fixed, so where the animals turn up is
   // shuffled per run instead; Single's come from its seed as ever.
   let animalSalt = 0;
@@ -732,6 +739,19 @@
       hiss.g.gain.setTargetAtTime(0.22 * level, t, 0.15);
       hiss.f.frequency.setTargetAtTime(500 + 1400 * level, t, 0.15);
       if (level <= 0) { const h = hiss; h.src.stop(t + 0.8); hiss = null; }
+    }
+
+    // Ice breaking off: a sharp crack.
+    function playCrack() {
+      if (!ac) return;
+      const t = ac.currentTime, n = noiseThrough('highpass', 3000, 0.7, t);
+      n.g.gain.setValueAtTime(0.25, t);
+      n.g.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+      n.src.stop(t + 0.08);
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'square'; o.frequency.setValueAtTime(180, t); o.frequency.exponentialRampToValueAtTime(60, t + 0.12);
+      g.gain.setValueAtTime(0.1, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.13);
+      o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.14);
     }
 
     // An avalanche: a deep rumble that swells to a roar.
@@ -1089,7 +1109,7 @@
     // must never be able to stop a run, so every entry point swallows it.
     const safe = f => (...a) => { try { return f(...a); } catch (_) { return undefined; } };
     return {
-      unlock: safe(unlock), updateAvalanche: safe(updateAvalanche), playFall: safe(playFall), updateWind: safe(updateWind), playScrape: safe(playScrape), playBark: safe(playBark), updateSluff: safe(updateSluff), updateHeli: safe(updateHeli), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
+      unlock: safe(unlock), playCrack: safe(playCrack), updateAvalanche: safe(updateAvalanche), playFall: safe(playFall), updateWind: safe(updateWind), playScrape: safe(playScrape), playBark: safe(playBark), updateSluff: safe(updateSluff), updateHeli: safe(updateHeli), startSwoosh: safe(startSwoosh), updateSwoosh: safe(updateSwoosh),
       stopSwoosh: safe(stopSwoosh), playDash: safe(playDash), playBreak: safe(playBreak),
       playExplosion: safe(playExplosion), playFanfare: safe(playFanfare), toggleMute: safe(toggleMute),
       playCoin: safe(playCoin), playCount: safe(playCount), playTick: safe(playTick), playDing: safe(playDing), playNoBonus: safe(playNoBonus),
@@ -1233,7 +1253,7 @@
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     held = []; tapLeft = 0;
-    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null; crossed = 0; pan = 0; wind = null; gustLines = []; fellIn = false; slide = null;
+    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null; crossed = 0; pan = 0; wind = null; gustLines = []; fellIn = false; slide = null; icefall = []; iceIn = 0.5;
     animalSalt = champ ? Math.floor(Math.random() * 999983) : 0;
     animals = []; animalSlot = Math.ceil(START_PAD / ANIMAL_SLOT);
     birds = []; birdIn = between(course.endless ? BIRD_EVERY_ENDLESS : BIRD_EVERY);
@@ -1329,7 +1349,7 @@
     state = 'crashed';
     mode = 'crash';
     runEnd = performance.now();
-    hitWhat = hit.avalanche ? 'AVALANCHE' : hit.crevasse ? 'CREVASSE' : hit.ice ? 'ICE' : hit.pen ? 'PENITENTES' : hit.sluff ? 'SLUFF' : hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.net ? 'NETS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
+    hitWhat = hit.icefall ? 'ICEFALL' : hit.avalanche ? 'AVALANCHE' : hit.crevasse ? 'CREVASSE' : hit.ice ? 'ICE' : hit.pen ? 'PENITENTES' : hit.sluff ? 'SLUFF' : hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.net ? 'NETS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
     SFX.stopSwoosh();
     if (hit.crevasse) {   // gone: a puff of snow and a long fall
       fellIn = true;
@@ -1811,6 +1831,11 @@
     if (onFire()) scorchPassed();
     if (course.couloir && moveSluff(dt)) { crash({ sluff: true }); return; }
     if (course.shape.avalanche && moveAvalanche(dt)) { crash({ avalanche: true }); return; }
+    if (course.shape.serac) {
+      const chunk = moveIcefall(dt);
+      if (chunk && onFire()) smashChunk(chunk);
+      else if (chunk && !runGod) { crash({ icefall: true }); return; }
+    }
     if (crossed < course.borders.length && skierY >= course.borders[crossed]) { crossed++; flash(course.shape.welcome, 1800); }
     if (skierY >= course.finishY) finish();
   }
@@ -1910,6 +1935,44 @@
     slide.y += slide.v * dt;
     return !runGod && slide.y >= skierY - 2;
   }
+  // The Bottleneck: along one stretch a serac hangs over one side of the
+  // piste, and every second or so a chunk breaks off (with a crack) a
+  // little way ahead of you and slides across. Time your way through.
+  const ICE_EVERY = [0.8, 1.5], ICE_SPEED = [30, 42];
+  const CHUNK = ['.VV.', 'VCWV', 'VCCV', '.BB.'];
+  function seracRows() {
+    const sr = course.shape.serac;
+    return [sr.from * course.finishY, sr.to * course.finishY];
+  }
+  // Returns the chunk that hit you, if one did.
+  function moveIcefall(dt) {
+    const sr = course.shape.serac, [y0, y1] = seracRows();
+    iceIn -= dt;
+    if (iceIn <= 0 && skierY > y0 - 120 && skierY < y1) {
+      iceIn = between(ICE_EVERY);
+      const y = Math.round(skierY + 70 + Math.random() * 70);
+      if (y > y0 && y < y1) {
+        const c = course.centerAt(y);
+        icefall.push({ x: c + sr.side * (course.widthAt(y) + 6), y, v: -sr.side * between(ICE_SPEED) });
+        SFX.playCrack();
+      }
+    }
+    for (const k of icefall) k.x += k.v * dt;
+    icefall = icefall.filter(k => Math.abs(k.x - course.centerAt(k.y)) < course.widthAt(k.y) + 30);
+    return icefall.find(k => Math.abs(k.x - skierX) <= 2.5 && skierY >= k.y - 3 && skierY <= k.y + 2) || null;
+  }
+  function smashChunk(k) {
+    icefall.splice(icefall.indexOf(k), 1);
+    burned.tree++;
+    SFX.playExplosion();
+    spawnExplosion(k.x, k.y - 2, PEN_PIECES);
+    pop(`ICE +${BURN_POINTS.tree}`);
+    paintHud();
+  }
+  function drawIcefall(camY) {
+    for (const k of icefall) blit(CHUNK, Math.round(k.x) - 2, k.y - camY - 3);
+  }
+
   // How loud and shaky it is, 0..1.
   const slideLevel = () => !slide || state !== 'running' ? 0
     : slide.rumble > 0 ? 0.3 + 0.5 * (1 - slide.rumble / SLIDE_RUMBLE)
@@ -1992,6 +2055,10 @@
     if (course && Math.abs(x - course.titlePine.x) < 10 && Math.abs(y - course.titlePine.y) < 12) return null;
     if (course && course.inCouloir && course.inCouloir(y)) return null;   // nothing grows on the rock
     if (course && course.fanZone && course.fanZone(x, y)) return null;
+    if (course && course.shape && course.shape.serac) {   // nothing on the serac's ice
+      const sr = course.shape.serac;
+      if (y > sr.from * course.finishY - 30 && y < sr.to * course.finishY + 30 && sr.side * (x - centerAt(y)) > pisteHW(y)) return null;
+    }
     if (course && course.signs && course.signs.some(g => x > g.x0 - 6 && x < g.x0 + g.wd + 6 && y > g.top - 10 && y < g.y + 10)) return null;
     const cp = course && course.camp;
     if (cp && x > cp.x - 10 && x < cp.x + cp.w + 10 && y > cp.y - 4 && y < cp.y + cp.h + 12) return null;
@@ -2012,6 +2079,7 @@
       if (hash(i * 92821 + salt, j) >= PISTE_TREE * more + debris || !lineIsClear(x, y)) return null;
     } else {
       let chance = (TREE_EDGE + (TREE_MAX - TREE_EDGE) * depth) * (course && course.shape ? course.shape.forest : 1);
+      if (course && course.shape && y < course.shape.treeline * course.finishY) chance *= 0.55;   // above the treeline
       if (course && course.penField && course.penField(x, y)) chance = Math.max(chance, 0.6);   // a field is packed
       if (hash(i * 92821 + salt, j) >= chance) return null;
     }
@@ -2025,7 +2093,8 @@
     // Some mountains swap trees for boulders: one of three shapes.
     // In a penitente field, whatever stands there is a cluster of blades.
     const pen = !pine && !!(course && course.penField && course.penField(x, y));
-    const rock = !pine && !pen && course && course.shape && (debris > 0 || hash(i * 3571 + salt, j * 7 + 2) < course.shape.rocks)
+    const above = !!(course && course.shape && y < course.shape.treeline * course.finishY);
+    const rock = !pine && !pen && course && course.shape && (debris > 0 || above || hash(i * 3571 + salt, j * 7 + 2) < course.shape.rocks)
       ? 1 + Math.floor(hash(i * 911 + salt, j * 5 + 3) * ROCKS.length) : 0;
     // Cherries grow in groves: patches of smooth noise, which spread and
     // join up as the course's share of them rises.
@@ -2095,6 +2164,8 @@
     const x0 = Math.min(a, b), x1 = Math.max(a, b);
     // Never in a crowd, nor across a safety net: such a fence just isn't there.
     if (course && course.fanZone && course.fanZone((x0 + x1) / 2, y)) return null;
+    const sr = course && course.shape && course.shape.serac;
+    if (sr && y > sr.from * course.finishY - 30 && y < sr.to * course.finishY + 30 && side === sr.side) return null;
     if (course && course.nets && course.nets.some(n => y >= n.y0 - 6 && y <= n.y1 + 6 &&
       netX(y, n.side) >= x0 - 3 && netX(y, n.side) <= x1 + 3)) return null;
     return { y, x0, x1 };
@@ -2716,6 +2787,38 @@
   // How loud the rotor is: full while hovering, fading as it flies off.
   const heliLevel = () => !heli || state === 'paused' || state === 'title' ? 0
     : !heli.leftAt ? 1 : Math.max(0, 1 - (performance.now() - heli.leftAt) / 1800);
+
+  // Night: every row of the frame dims toward a deep night blue, more the
+  // further down the course (never all the way: you can always read the
+  // slope). A headlamp throws a cone of full light ahead down the hill,
+  // leaning with your turns.
+  const NIGHT = [12, 10, 60], LAMP_LEN = 95, LAMP_HALF = 0.42;
+  function nightfall(camY) {
+    const dark = alongCourse(course.shape.night, course.finishY);
+    const sx0 = Math.round(skierX) - camX, sy0 = Math.round(skierY) - camY - 2;
+    const aim = Math.atan2(Math.max(speed, 20), vx * 0.8), lit = state === 'running' || state === 'finished' || state === 'countdown';
+    const d = img.data;
+    for (let sy = 0; sy < H; sy++) {
+      const base = dark(camY + sy);
+      if (base <= 0) continue;
+      for (let sx = 0; sx < VW; sx++) {
+        let light = 0;
+        if (lit && !fellIn) {
+          const dx = sx - sx0, dy = sy - sy0, r = Math.hypot(dx, dy);
+          if (r < 7) light = 1;   // the glow around the skier
+          else if (dy > 0 && r < LAMP_LEN) {
+            const off = Math.abs(Math.atan2(dy, dx) - aim);
+            if (off < LAMP_HALF) light = Math.min(1, (LAMP_HALF - off) / 0.12) * Math.min(1, (LAMP_LEN - r) / 25);
+          }
+        }
+        light = light > 0.6 ? 1 : light > 0.25 ? 0.5 : 0;   // in hard steps, VIC-20 style
+        const k = base * (1 - light);
+        if (k <= 0) continue;
+        const i = (sy * VW + sx) * 4;
+        d[i] += (NIGHT[0] - d[i]) * k; d[i + 1] += (NIGHT[1] - d[i + 1]) * k; d[i + 2] += (NIGHT[2] - d[i + 2]) * k;
+      }
+    }
+  }
 
   // The avalanche: churning snow from the top of the screen down to a
   // ragged front, a powder cloud dithered over it, big lumps tumbling
@@ -3345,6 +3448,16 @@
       } else if (hash(sx + 5113, wy + 29) < steep) {
         col = VIC.paleBlue;    // a steep face, faintly shaded
       }
+      // The serac: a wall of blue ice just off the piste on one side.
+      if (course && course.shape.serac) {
+        const sr = course.shape.serac, y0 = sr.from * course.finishY, y1 = sr.to * course.finishY;
+        if (wy > y0 - 20 && wy < y1 + 20) {
+          const ramp = Math.min(1, (wy - y0 + 20) / 30, (y1 + 20 - wy) / 30);
+          const into = sr.side * (sx - c) - (pisteHW(wy) + 4 + 12 * (1 - ramp) + 3 * noise2(wy / 6, 51));
+          if (into > 0 && into <= 2) col = VIC.white;
+          else if (into > 2) col = hash(sx * 5 + 1, Math.floor(wy / 3)) < 0.1 ? VIC.cyan : into < 8 ? VIC.paleBlue : VIC.lightBlue;
+        }
+      }
       const ice = course && course.iceDepth ? course.iceDepth(sx, wy) : -99;
       if (ice > -2 && ice <= 0 && course.shape.ice) {
         col = VIC.blue;   // the cliff's shadow on the snow
@@ -3477,6 +3590,7 @@
         }
       }
       if (slide && slide.y !== null) drawAvalanche(camY);   // over the poles it buries
+      if (icefall.length) drawIcefall(camY);
       if (state !== 'title') {
         drawAnimals(camY);
         const s = SPRITES[mode] || SPRITES.down;
@@ -3507,6 +3621,7 @@
     if (course && state !== 'title') { drawPetals(); drawStreaks(); drawMoths(); drawBirds(); }
     if (tally && tally.dinged) drawStars(tally.starsShown);
 
+    if (course && course.shape.night && state !== 'title') nightfall(camY);
     ctx.putImageData(img, 0, 0);
   }
 
@@ -3698,7 +3813,7 @@
     // boulders strewn across the piste high up, and rocks among the trees
     // all the way down.
     // Below it, clumps of southern rātā flowering crimson.
-    aoraki: { wildlife: { odds: 0.025, kinds: { kea: 1 } }, rocks: 0.3, rata: 0.4, debris: [[0, 0], [0.1, 0], [0.13, 0.1], [0.3, 0.1], [0.34, 0]],
+    aoraki: { treeline: 0.5, wildlife: { odds: 0.025, kinds: { kea: 1 } }, rocks: 0.3, rata: 0.4, debris: [[0, 0], [0.1, 0], [0.13, 0.1], [0.3, 0.1], [0.34, 0]],
       signs: [{ t: 0.1, lines: ['ROCKFALL'] }] },
     // Even as a metronome: same gap, same swing, no bunching.
     // ...and cherry trees in bloom down the lower half.
@@ -3706,7 +3821,7 @@
     // the finish it's nearly all blossom. Photographers at the bottom.
     fuji: { cherry: [[0, 0], [0.25, 0], [0.45, 0.25], [0.75, 0.55], [0.95, 0.95]], fans: 8, cameras: 5, gapFirst: 82, gapLast: 82, offset: 13, offsetLast: 13, jitter: 0, quick: 0, twist: 0.5 },
     // Swiss top tight and technical; Italian bottom opens into long turns.
-    cervino: { fans: 120, cameras: 45, edgeNets: 0.5, lift: true, arena: true, borders: [0.5], signs: [{ t: 0.5, lines: ['ITALIA'], flag: 'it' }],
+    cervino: { treeline: 0.7, fans: 120, cameras: 45, edgeNets: 0.5, lift: true, arena: true, borders: [0.5], signs: [{ t: 0.5, lines: ['ITALIA'], flag: 'it' }],
       welcome: 'BENVENUTI IN ITALIA !!!', gapFirst: 62, gapLast: 92, offset: 15, offsetLast: 11,
       width: [[0, 34], [0.47, 34], [0.53, 48], [1, 48]] },
     // An ice field: no trees, blocks of ice, crevasses, and penguins
@@ -3720,7 +3835,7 @@
       groundsels: true, rocks: 0.45, forest: 0.4 },
     // The serpent: the twistiest piste, long S-bends.
     // ...run at first light: warm snow and long shadows.
-    iztactepetl: { twist: 1.8, sway: 0.6, dawn: true },
+    iztactepetl: { twist: 1.8, sway: 0.6, dawn: true, treeline: 1.1 },
     // The long one: steady, not tricky.
     // Mostly bare volcanic rock now: scree patches all over, boulders, few
     // trees, and ice cliffs of the last glaciers up top.
@@ -3730,9 +3845,14 @@
     // tussock grass, no trees.
     aconcagua: { penitentes: 0.6, rocks: 1, forest: 0.4, tussock: true, dogs: 0.06 },
     // Long the deadliest 8,000er, mostly to avalanches; and "full of food".
-    annapurna: { wildlife: { odds: 0.016, kinds: { leopard: 1 } }, avalanche: { from: 9, to: 17 }, pines: 1.6 },
+    annapurna: { wildlife: { odds: 0.016, kinds: { leopard: 1 } }, avalanche: { from: 9, to: 17 }, pines: 1.6, treeline: 1.1 },
     // The Savage Mountain: the most technical slalom of all.
-    k2: { wildlife: { odds: 0.016, kinds: { leopard: 1 } }, quick: 3, offset: 15, offsetLast: 15, gapLast: 54 },
+    // ...run at night: dim all round, a headlamp ahead.
+    // The Bottleneck: a serac over the piste for a long stretch, shedding
+    // ice. Above any treeline: rock only. Longer, tighter bunched runs.
+    k2: { night: [[0, 0.65], [1, 0.65]], wildlife: { odds: 0.016, kinds: { leopard: 1 } },
+      serac: { from: 0.4, to: 0.7, side: 1 }, rocks: 1, forest: 0.5,
+      quick: 2, quickLen: 7, quickGap: 36, offset: 15, offsetLast: 15, gapFirst: 82, gapLast: 50 },
     // The Hornbein Couloir first: steep, narrow, zigzagging between rock
     // walls, no poles; then out onto the North Face.
     chomolungma: { rocks: 1, fences: 0, camp: true, heli: true, couloir: { start: 100, rows: 1200, open: 90, hw: 15, slope: 1.6,
@@ -3747,7 +3867,7 @@
     alyeska: [3468, 3342], kunama: [3620, 3489], pista3: [3887, 3746], aoraki: [3371, 3249],
     fuji: [3481, 3355], cervino: [2860, 2756], vinson: [3046, 2935], kirinyaga: [3057, 2947],
     iztactepetl: [3017, 2907], kilimanjaro: [4597, 4430], aconcagua: [2703, 2605],
-    annapurna: [2716, 2617], k2: [2702, 2604], chomolungma: [4170, 4018],
+    annapurna: [2716, 2617], k2: [2532, 2440], chomolungma: [4170, 4018],
   };
   function shapeOf(m) {
     const d = BY_HEIGHT.indexOf(m.id) / (BY_HEIGHT.length - 1);
@@ -3922,7 +4042,7 @@
     if (finished) paintCardStars(stars());
     // What happened on the run, never how it was scored: the arithmetic
     // stays in the server's check, not on screen as a recipe.
-    breakdownEl.textContent = finished ? `TIME ${fmt(runCs())}` : ranOut ? 'OUT OF MISSES' : hitWhat === 'SLUFF' ? 'CAUGHT BY THE SLUFF' : hitWhat === 'AVALANCHE' ? 'CAUGHT BY THE AVALANCHE' : `INTO THE ${hitWhat}`;
+    breakdownEl.textContent = finished ? `TIME ${fmt(runCs())}` : ranOut ? 'OUT OF MISSES' : hitWhat === 'SLUFF' ? 'CAUGHT BY THE SLUFF' : hitWhat === 'AVALANCHE' ? 'CAUGHT BY THE AVALANCHE' : hitWhat === 'ICEFALL' ? 'HIT BY THE ICEFALL' : `INTO THE ${hitWhat}`;
     breakdownEl.hidden = false;
     lastSubmittedId = null;
     submitStatusEl.classList.remove('error');
