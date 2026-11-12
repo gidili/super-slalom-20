@@ -236,6 +236,7 @@
     camp: false,               // a base camp of tents beside the finish
     fans: 5,                   // people cheering at the finish
     cameras: 0,                // ...of whom this many are taking photos
+    penguinFans: false,        // ...or penguins instead of people, jumping for joy
     heli: false,               // dropped off by helicopter at the start
     moths: false,              // Bogong moth swarms fluttering past
     cherry: 0,                 // share of trees that are cherries in bloom, or [[t, share], ...]
@@ -522,8 +523,37 @@
         ink: FAN_INKS[Math.floor(hash(k * 29 + salt, 11) * FAN_INKS.length)], phase: Math.floor(hash(k * 17 + salt, 3) * 8),
         camera: k < S.cameras });
     }
+    // Vinson: a crowd of penguins instead, in messy huddles on both sides
+    // past the line, chicks among the grown-ups, a few strays, three in a
+    // bobble hat and scarf, and a few tobogganing about on their bellies.
+    if (S.penguinFans && !endless) {
+      const rnd3 = mulberry32((seed % 4294967296) ^ 0xBE6);
+      const huddles = Array.from({ length: 6 }, (_, h) => ({ side: h % 2 ? 1 : -1, y: finishY - 26 + rnd3() * 40, off: 12 + rnd3() * 18 }));
+      for (let k = 0, tries = 0; k < PENGUIN_CROWD && tries < PENGUIN_CROWD * 60; tries++) {
+        const stray = rnd3() < 0.1, h = huddles[Math.floor(rnd3() * huddles.length)];
+        const y = Math.round(stray ? finishY - 34 + rnd3() * 56 : h.y + (rnd3() + rnd3() - 1) * 9);
+        const off = stray ? 8 + rnd3() * 40 : h.off + (rnd3() + rnd3() - 1) * 10;
+        const side = stray ? (rnd3() < 0.5 ? -1 : 1) : h.side;
+        if (off < 7) continue;
+        const x = Math.round(centerAt(y) + side * (widthAt(y) + off));
+        const chick = rnd3() < 0.33;
+        if (fans.some(f => Math.abs(f.x - x) < (chick || f.chick ? 5 : 7) && Math.abs(f.y - y) < (chick || f.chick ? 5 : 7))) continue;
+        fans.push({ x, y, chick, hat: null, phase: Math.floor(rnd3() * 12), penguin: true });
+        k++;
+      }
+      // Three dressed for the occasion, the rest as nature made them.
+      fans.filter(f => !f.chick).slice(0, PENGUIN_WOOL.length).forEach((f, i) => { f.hat = PENGUIN_WOOL[i]; });
+      // Tobogganers: belly-down, sliding to and fro along the crowd's edge.
+      for (let i = 0; i < PENGUIN_SLIDERS; i++) {
+        const side = i % 2 ? 1 : -1, y = Math.round(finishY - 18 + i * 15 + rnd3() * 4);   // all on screen at the finish
+        const x0 = Math.round(centerAt(y) + side * (widthAt(y) + 9)), span = 18 + Math.floor(rnd3() * 14);
+        fans.push({ x: x0, y, x0, x1: x0 + side * span, slide: true, penguin: true, phase: rnd3() * 10 });
+      }
+      fans.sort((a, b) => a.y - b.y);   // nearer the bottom draws on top
+    }
     const fanCols = Math.ceil(S.fans / 2 / FAN_ROWS.length);
-    const fanZone = (x, y) => arena ? y > finishY - 40 && y < finishY + arena.ry + 80 && Math.abs(x - arena.cx) < arena.rx + 76
+    const fanZone = (x, y) => S.penguinFans && !endless ? y > finishY - 30 && y < finishY + 66 && Math.abs(x - centerAt(y)) < widthAt(y) + 56
+      : arena ? y > finishY - 40 && y < finishY + arena.ry + 80 && Math.abs(x - arena.cx) < arena.rx + 76
       : fans.length > 0 && y > finishY - 28 && y < finishY + 56 && Math.abs(x - centerAt(y)) < widthAt(y) + 15 + fanCols * 7;
     // Safety nets on the outside of the sharpest bends: the share of
     // slots that bend most, a run of net following the edge through each.
@@ -2321,6 +2351,32 @@
     stand: ['.........XX', 'X......XXXK', 'XXXKXXKXXX.', '.XKXXXXKX..', '.X.X...X.X.'],
     walk: [['...........', 'X.......XXX', 'XXXKXXKXXXK', '.XKXXXXKX..', 'X..X.X..X..'],
            ['...........', 'X.......XXX', 'XXXKXXKXXXK', '.XKXXXXKX..', '.XX...XX...']] };
+  // The four-legged ones seen from above, heading down the slope: tail
+  // at the top, head at the bottom, legs trotting in diagonal pairs.
+  // Drawn when they're moving more up or down than sideways (flipped,
+  // head first, going up).
+  function topDown(bodyW, len, tail, head, coat = null) {
+    const W = bodyW + 2, pad = '.';
+    const frame = (a) => {
+      const body = [];
+      for (let r = 0; r < len; r++) {
+        const mid = coat ? coat[r % coat.length] : 'X'.repeat(bodyW);
+        // back legs on the first two rows, front legs on the last two
+        const legRow = r < 2 ? r : r >= len - 2 ? r - (len - 2) : -1;
+        const b = r < 2 ? a : !a;   // front legs opposite the back: a trot
+        const left = legRow >= 0 && (legRow === 0) === b, right = legRow >= 0 && (legRow === 1) === b;
+        body.push((left ? 'X' : pad) + mid + (right ? 'X' : pad));
+      }
+      return [...tail, ...body, ...head];
+    };
+    return [frame(true), frame(false)].map(f => f.map(r => r.padEnd(W, '.')));
+  }
+  ANIMALS.wolf.top = topDown(3, 5, ['..X..', '..X..'], ['X.X.X', 'XXXXX', '.XXX.', '..K..']);
+  ANIMALS.fox.top = topDown(3, 3, ['..W..', '.XXX.'], ['X.X.X', '.XXX.', '..K..']);
+  ANIMALS.bear.top = topDown(5, 6, ['...X...'], ['.X.X.X.', '.XXXXX.', '..XXX..', '...K...']);
+  ANIMALS.dog.top = topDown(3, 4, ['..X..'], ['XXXXX', '.XXX.', '..K..']);
+  ANIMALS.leopard.top = topDown(3, 5, ['...X.', '..X..', '..X..'], ['X.X.X', 'XXXXX', '.XKX.'], ['XKX', 'XXX', 'KXX', 'XXK', 'XKX']);
+
   const ANIMAL_SLOT = 70;           // at most one per side per this many rows
   const ANIMAL_ODDS = 0.005;        // chance per slot and side, extremely rare...
   const ANIMAL_ODDS_ENDLESS = 0.024; // ...and more often here
@@ -2470,10 +2526,22 @@
   function drawAnimals(camY) {
     for (const a of animals) {
       const k = ANIMALS[a.kind];
-      const rows = a.mode === 'walk' || a.mode === 'chase' || a.mode === 'escort' || a.mode === 'leave'
-        ? k.walk[Math.floor(performance.now() / (a.mode === 'chase' ? 80 : 160)) % 2] : k.stand;
-      const flip = a.face < 0 ? rows.map(r => r.split('').reverse().join('')) : rows;
-      blit(flip, Math.round(a.x) - (rows[0].length >> 1), Math.round(a.y) - camY - rows.length + 1, a.ink || k.ink);
+      const moving = a.mode === 'walk' || a.mode === 'chase' || a.mode === 'escort' || a.mode === 'leave';
+      // Which way it's actually going, smoothed, with a little give so it
+      // doesn't flicker between views on a diagonal.
+      const dx = a.x - (a.ox ?? a.x), dy = a.y - (a.oy ?? a.y);
+      a.ox = a.x; a.oy = a.y;
+      a.mx = (a.mx || 0) * 0.85 + dx * 0.15; a.my = (a.my || 0) * 0.85 + dy * 0.15;
+      if (Math.abs(a.my) > 1.15 * Math.abs(a.mx)) a.vert = true;
+      else if (Math.abs(a.mx) > 1.15 * Math.abs(a.my)) a.vert = false;
+      const frame = Math.floor(performance.now() / (a.mode === 'chase' ? 80 : 160)) % 2;
+      let rows;
+      if (moving && a.vert && k.top) rows = a.my < 0 ? k.top[frame].slice().reverse() : k.top[frame];
+      else {
+        rows = moving ? k.walk[frame] : k.stand;
+        if (a.face < 0) rows = rows.map(r => r.split('').reverse().join(''));
+      }
+      blit(rows, Math.round(a.x) - (rows[0].length >> 1), Math.round(a.y) - camY - rows.length + 1, a.ink || k.ink);
     }
   }
 
@@ -3008,6 +3076,45 @@
       for (const d of [0, 1]) put(Math.round(cx + (rx + d) * Math.cos(th)), Math.round(y + (ry + d) * Math.sin(th)) - camY, board);
     }
   }
+  // Penguins at the Vinson finish, facing up the piste: grown-ups with the
+  // yellow neck patch, fluffy grey chicks, flippers up when they jump.
+  const PENG_STAND = ['...KKK...', '..KKKKK..', '..YKOKY..', '..KWWWK..', '.KKWWWKK.', '.KKWWWKK.', '..KWWWK..', '...WWW...', '..OO.OO..'];
+  const PENG_CHEER = ['...KKK...', '..KKKKK..', 'K.YKOKY.K', '.KKWWWKK.', '..KWWWK..', '..KWWWK..', '..KWWWK..', '...WWW...', '..OO.OO..'];
+  const CHICK_STAND = ['.KKK.', 'KWKWK', '.WOW.', 'XXXXX', 'XXXXX', '.XXX.', '.O.O.'];
+  const CHICK_CHEER = ['.KKK.', 'KWKWK', 'XWOWX', '.XXX.', '.XXX.', '.XXX.', '.O.O.'];
+  const PENG_HAT = ['....W....', '...XXX...', '...XXX...'];   // a bobble hat, snug on the crown
+  const PENG_SCARF = ['..XXXXX..', '......X..'];
+  const PENGUIN_CROWD = 35, PENGUIN_SLIDERS = 3;
+  // Belly-down, sliding: black back, white front, beak leading, feet behind.
+  const PENG_SLIDE = ['..KKKKKK.', 'OKWWWWWKO', '..WWWWW..'];
+  const SLIDE_SPEED = 22;   // pixels a second
+  const PENGUIN_WOOL = [VIC.crimson, VIC.green, VIC.netOrange];   // one hat-and-scarf set each
+  // Always hopping a little; when you cross the line, much higher and faster.
+  function drawPenguinFan(f, sy, now) {
+    const done = state === 'finished';
+    if (f.slide) {   // to and fro, turning round at each end
+      const span = Math.abs(f.x1 - f.x0), d = (now / 1000 * SLIDE_SPEED + f.phase * span) % (2 * span);
+      const out = d < span, t = out ? d : 2 * span - d, dir = Math.sign(f.x1 - f.x0) * (out ? 1 : -1);
+      const x = Math.round(f.x0 + Math.sign(f.x1 - f.x0) * t);
+      blit(dir > 0 ? PENG_SLIDE : PENG_SLIDE.map(r => r.split('').reverse().join('')), x - 4, sy - 3, VIC.black);
+      if ((Math.floor(now / 90) + f.phase) % 2) put(x - 5 * dir, sy - 1, VIC.cyan);   // a puff of snow behind
+      return;
+    }
+    const beat = Math.floor(now / (done ? 130 : 240)) + f.phase;
+    const lift = done ? [0, 2, 3, 2][beat % 4] : beat % 3 === 0 ? 1 : 0;
+    const up = lift > 0;
+    if (f.chick) {
+      blit(up ? CHICK_CHEER : CHICK_STAND, f.x - 2, sy - 7 - lift, VIC.lightBlue);
+      return;
+    }
+    const x = f.x - 4, y = sy - 9 - lift;
+    blit(up ? PENG_CHEER : PENG_STAND, x, y, VIC.black);
+    if (f.hat) {
+      blit(PENG_HAT, x, y - 2, f.hat);
+      blit(PENG_SCARF, x, y + 3, f.hat);
+    }
+  }
+
   function drawFans(camY) {
     if (course.arena) drawBarrier(camY);
     const now = performance.now();
@@ -3015,6 +3122,7 @@
       const sy = f.y - camY;
       if (sy < -6 || sy > H + 6) continue;
       if (f.camera) { drawPhotographer(f, sy, now); continue; }
+      if (f.penguin) { drawPenguinFan(f, Math.round(sy), now); continue; }
       let spr = FAN_STAND, lift = 0;
       if (state === 'finished') {
         const beat = Math.floor(now / 170) + f.phase;
@@ -4201,7 +4309,7 @@
       width: [[0, 34], [0.47, 34], [0.53, 48], [1, 48]] },
     // An ice field: no trees, blocks of ice, crevasses, and penguins
     // (more than you'd really find that far inland, but it's their flag).
-    vinson: { icy: true, crevasses: true, wind: true, forest: 0.45, wildlife: { odds: 0.03, kinds: { penguin: 1 } } },
+    vinson: { icy: true, crevasses: true, wind: true, forest: 0.45, fans: 0, penguinFans: true, wildlife: { odds: 0.03, kinds: { penguin: 1 } } },
     // The glacier shrinks: the piste narrows to a strip by the finish.
     // Bare dark rock beyond a snowfield that shrinks to a strip by the
     // finish (it slows you), boulders on it, giant groundsels.
