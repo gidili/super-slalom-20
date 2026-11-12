@@ -249,6 +249,8 @@
     tussock: false,            // yellow tussock grass off the piste
     dogs: 0,                   // stray dogs: chance per slot and side that one's about
     wildlife: null,            // this mountain's own animals: { odds, kinds: { kind: weight } }
+    icy: false,                // an ice field: blocks of ice for trees, glinting cyan edges...
+    crevasses: false,          // ...and crevasses where fences would be
     twist: 1,                  // how far the piste wanders
     sway: 1,                   // ...and how often: under 1 is longer, lazier bends
     crowd: 1,                  // trees and pineapples on the piste, times Single's
@@ -1271,7 +1273,7 @@
     state = 'crashed';
     mode = 'crash';
     runEnd = performance.now();
-    hitWhat = hit.pen ? 'PENITENTES' : hit.sluff ? 'SLUFF' : hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.net ? 'NETS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
+    hitWhat = hit.crevasse ? 'CREVASSE' : hit.ice ? 'ICE' : hit.pen ? 'PENITENTES' : hit.sluff ? 'SLUFF' : hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.net ? 'NETS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
     SFX.stopSwoosh();
     if (hit.pine) SFX.playExplosion(); else SFX.playBreak();
     if (hit.pine) {
@@ -1297,7 +1299,7 @@
     const key = hit.tent ? 'tent' + hit.n : hit.net ? 'e' + hit.k : hit.fence ? `f${hit.k},${hit.side}` : hit.i + ',' + hit.j;
     exploded.add(key);
     const fire = fireColors(runGod);
-    if (kind === 'tree' && !hit.rock && !hit.pen) scorched.set(key, { at: performance.now(), god: runGod, hit: true });
+    if (kind === 'tree' && !hit.rock && !hit.pen && !hit.ice) scorched.set(key, { at: performance.now(), god: runGod, hit: true });
     if (hit.tent) scorched.set(key, { at: performance.now(), god: runGod });
     else if (hit.net) {   // torn open where you went through
       const y = Math.round(hit.y);
@@ -1308,13 +1310,13 @@
     }
     burned[kind]++;
     SFX.playExplosion();
-    spawnExplosion(hit.x, hit.y - 4, hit.pen ? PEN_PIECES : hit.rock ? ROCK_PIECES : hit.tent ? [...fire, ...fire, VIC.orange, VIC.yellow] : kind === 'tree' ? [...fire, ...fire, ...TREE_PIECES]
+    spawnExplosion(hit.x, hit.y - 4, hit.pen || hit.ice ? PEN_PIECES : hit.rock ? ROCK_PIECES : hit.tent ? [...fire, ...fire, VIC.orange, VIC.yellow] : kind === 'tree' ? [...fire, ...fire, ...TREE_PIECES]
       : kind === 'fence' ? [...fire, ...fire, ...FENCE_PIECES] : PIECE_COLORS);
     // A pineapple smashed on fire takes back a miss, or banks one: Endless
     // can go above 4 LEFT, Single below 0 misses, which takes time off.
     const forgive = kind === 'pine';
     if (forgive) { missed--; forgiven++; SFX.playForgiven(); }
-    pop(`${hit.pen ? 'PENITENTE' : hit.rock ? 'ROCK' : hit.tent ? 'TENT' : hit.net ? 'NET' : { pine: 'PINEAPPLE', tree: 'TREE', fence: 'FENCE' }[kind]} +${BURN_POINTS[kind]}${forgive ? '  MISS FORGIVEN' : ''}`);
+    pop(`${hit.ice ? 'ICE' : hit.pen ? 'PENITENTE' : hit.rock ? 'ROCK' : hit.tent ? 'TENT' : hit.net ? 'NET' : { pine: 'PINEAPPLE', tree: 'TREE', fence: 'FENCE' }[kind]} +${BURN_POINTS[kind]}${forgive ? '  MISS FORGIVEN' : ''}`);
     paintHud();
   }
 
@@ -1702,7 +1704,9 @@
     // The couloir's walls: no fire gets through rock. Only a god does.
     if (course.wall(skierX, skierY) && !runGod) { crash({ wall: true }); return; }
     const hit = hitTree(skierX, skierY) || hitFence(skierX, skierY) || hitEdgeNet(skierX, skierY) || hitTent(skierX, skierY) || hitAnimal(skierX, skierY);
-    if (hit && onFire()) burn(hit);
+    // A crevasse can't be burned through; only a god walks over it.
+    if (hit && hit.crevasse && runGod) { /* across */ }
+    else if (hit && onFire() && !hit.crevasse) burn(hit);
     else if (hit) { crash(hit); return; }
 
     // Holding a straight line builds speed: quickly at first, then more
@@ -1795,7 +1799,7 @@
         const key = i + ',' + j;
         if (scorched.has(key) || exploded.has(key)) continue;
         const tr = treeAt(i, j, salt, centerAt);
-        if (!tr || tr.pine || tr.rock || tr.pen) continue;
+        if (!tr || tr.pine || tr.rock || tr.pen || tr.ice) continue;
         if (Math.abs(skierX - tr.x) <= SCORCH_REACH && skierY > tr.y + 2 && skierY <= tr.y + 10) {
           scorched.set(key, { at: performance.now(), god: runGod, hit: false });
         }
@@ -1903,7 +1907,8 @@
       noise2(i / 2 + 300 + (salt % 61), j / 2 + 41) < course.shape.rata;
     const bush = !pine && !rock && !cherry && !rata && !!(course && course.shape && course.shape.bushes);
     const groundsel = !pine && !rock && !cherry && !rata && !!(course && course.shape && course.shape.groundsels);
-    return { i, j, x, y, pine, rock, cherry, rata, bush: bush && !pen, groundsel: groundsel && !pen, pen };
+    const iceBlock = !pine && !rock && !cherry && !rata && !!(course && course.shape && course.shape.icy);
+    return { i, j, x, y, pine, rock, cherry, rata, bush: bush && !pen, groundsel: groundsel && !pen, pen, ice: iceBlock && !pen };
   }
 
   // True if something deadly at (x, y) leaves the racing line and the
@@ -2002,6 +2007,11 @@
   ANIMALS.kea = { ink: VIC.green, reach: 3, tall: 4, odds: 0.85, radius: 50, patience: 4, bonus: 0, escort: true, flies: true,
     stand: ['..XXK', '.XXX.', 'XXXX.', '.O.O.'],
     walk: [['O.XXK', '.XXXO', 'XXXX.', '.O.O.'], ['..XXK', 'OXXX.', 'XXXXO', '.O.O.']] };
+  // Penguins (Vinson): black backs, white fronts, orange beaks and feet.
+  // They waddle and watch; that's all.
+  ANIMALS.penguin = { ink: VIC.black, reach: 3, tall: 6, odds: 0, radius: 40, patience: 0, bonus: 0,
+    stand: ['.XX..', 'XWWXO', 'XWWX.', 'XWWX.', '.XX..', 'O..O.'],
+    walk: [['.XX..', 'XWWXO', 'XWWX.', 'XWWX.', '.XX..', 'O....'], ['.XX..', 'XWWXO', 'XWWX.', 'XWWX.', '.XX..', '...O.']] };
   // Snow leopards (the Himalaya and Karakoram): pale, spotted, very shy.
   // They watch; they never chase.
   ANIMALS.leopard = { ink: VIC.lightBlue, reach: 5, tall: 5, odds: 0, radius: 46, patience: 0, bonus: 0,
@@ -2316,7 +2326,7 @@
       for (const side of [-1, 1]) {
         const f = fenceAt(k, side, salt, centerAt);
         if (f && !exploded.has(`f${k},${side}`) && y >= f.y - 7 && y <= f.y + 1 && x >= f.x0 - 2 && x <= f.x1 + 2) {
-          return { fence: true, k, side, x, y: f.y };
+          return { fence: true, crevasse: !!course.shape.crevasses, k, side, x, y: f.y };
         }
       }
     }
@@ -2335,7 +2345,7 @@
         const tr = treeAt(i, j, salt, centerAt);
         if (!tr || exploded.has(i + ',' + j) || scorched.has(i + ',' + j)) continue;
         // A pineapple is two pixels shorter and four narrower than a tree.
-        const reach = tr.pine ? 3 : 5, top = tr.pine ? 8 : tr.rock ? ROCKS[tr.rock - 1].length + 1 : tr.bush ? 6 : tr.groundsel ? GROUNDSEL.length + 1 : tr.pen ? PENITENTE.length + 1 : 10;
+        const reach = tr.pine ? 3 : 5, top = tr.pine ? 8 : tr.rock ? ROCKS[tr.rock - 1].length + 1 : tr.bush ? 6 : tr.groundsel ? GROUNDSEL.length + 1 : tr.pen ? PENITENTE.length + 1 : tr.ice ? ICEBLOCK.length + 1 : 10;
         if (Math.abs(x - tr.x) <= reach && y >= tr.y - top && y <= tr.y + 2) return tr;
       }
     }
@@ -2718,6 +2728,16 @@
     'BBBBBBBBB',
   ];
   const PEN_PIECES = [VIC.white, VIC.white, VIC.cyan, VIC.lightBlue];
+  // A block of glacier ice: blue edges, cyan and white faces.
+  const ICEBLOCK = [
+    '.VVVVVV..',
+    'VCCWWCCV.',
+    'VCWWCCCVV',
+    'VCCCCCCVV',
+    'VCCCCCWVV',
+    'VVVVVVVVV',
+    '.BBBBBBB.',
+  ];
   // A tuft of tussock grass, drawn into the snow itself.
   const TUFT = ['Y.Y.Y', 'YYYYY', '.OYO.'];
 
@@ -3080,7 +3100,7 @@
       for (let i = iMin; i < iMax; i++) {
         const tr = treeAt(i, j, salt, centerAt);
         if (!tr || exploded.has(i + ',' + j) || scorched.has(i + ',' + j)) continue;
-        const rows = tr.pine ? PINEAPPLE : tr.pen ? PENITENTE : tr.rock ? ROCKS[tr.rock - 1] : tr.cherry ? CHERRY : tr.rata ? RATA
+        const rows = tr.pine ? PINEAPPLE : tr.pen ? PENITENTE : tr.ice ? ICEBLOCK : tr.rock ? ROCKS[tr.rock - 1] : tr.cherry ? CHERRY : tr.rata ? RATA
           : tr.bush ? BUSH : tr.groundsel ? GROUNDSEL : TREE;
         shadowOf(rows, tr.x - (tr.pine ? 2 : 4), tr.y - camY - rows.length + 1);
       }
@@ -3150,7 +3170,7 @@
         const drift = (noise2(sx / 13, wy / 13) - 0.5) * 0.5 * (1 - depth);
         // (On a TV with forest past the edges, the strip melts into it.)
         const density = depth > 0.92 ? (MARGIN ? 0.6 : 1) : Math.max(0, 0.7 * depth ** 2 + drift);
-        if (hash(sx, wy) < density) col = VIC.lightBlue;
+        if (hash(sx, wy) < density) col = course && course.shape.icy && hash(sx + 9, wy) < 0.7 ? VIC.cyan : VIC.lightBlue;
       } else if (hash(sx + 4441, wy + 17) < 0.005) {
         col = VIC.lightBlue;   // a stray speck, so the piste isn't spotless
       } else if (hash(sx + 5113, wy + 29) < steep) {
@@ -3220,6 +3240,7 @@
         if (sc) drawScorchedTree(tr, sc, camY);
         else if (exploded.has(i + ',' + j)) continue;
         else if (tr.pen) blit(PENITENTE, tr.x - 4, tr.y - camY - PENITENTE.length + 1);
+        else if (tr.ice) blit(ICEBLOCK, tr.x - 4, tr.y - camY - ICEBLOCK.length + 1);
         else if (tr.rock) { const r = ROCKS[tr.rock - 1]; blit(r, tr.x - 4, tr.y - camY - r.length + 1); }
         else if (tr.cherry) blit(CHERRY, tr.x - 4, tr.y - camY - 8);
         else if (tr.rata) blit(RATA, tr.x - 4, tr.y - camY - 8);
@@ -3242,6 +3263,14 @@
         if (!f) continue;
         const sc = scorched.get(`f${k},${side}`);
         const sy = f.y - camY;
+        if (course && course.shape.crevasses) {
+          // A crevasse: a jagged black crack, blue at its lips.
+          for (let x = f.x0; x <= f.x1; x++) {
+            const yo = Math.round(1.5 * Math.sin(x * 0.7 + k)) + (hash(x, k) < 0.3 ? 1 : 0);
+            put(x, sy - 3 + yo, VIC.blue); put(x, sy - 2 + yo, VIC.black); put(x, sy - 1 + yo, VIC.black); put(x, sy + yo, VIC.blue);
+          }
+          continue;
+        }
         for (let x = f.x0; x <= f.x1; x++) {
           const state = sc ? fenceState(sc, x) : 'wood';
           if (state === 'gone') continue;
@@ -3508,7 +3537,9 @@
     cervino: { fans: 120, cameras: 45, edgeNets: 0.5, lift: true, arena: true, borders: [0.5], signs: [{ t: 0.5, lines: ['ITALIA'], flag: 'it' }],
       welcome: 'BENVENUTI IN ITALIA !!!', gapFirst: 62, gapLast: 92, offset: 15, offsetLast: 11,
       width: [[0, 34], [0.47, 34], [0.53, 48], [1, 48]] },
-    vinson: {},
+    // An ice field: no trees, blocks of ice, crevasses, and penguins
+    // (more than you'd really find that far inland, but it's their flag).
+    vinson: { icy: true, crevasses: true, forest: 0.45, wildlife: { odds: 0.03, kinds: { penguin: 1 } } },
     // The glacier shrinks: the piste narrows to a strip by the finish.
     // Bare dark rock beyond a snowfield that shrinks to a strip by the
     // finish (it slows you), boulders on it, giant groundsels.
