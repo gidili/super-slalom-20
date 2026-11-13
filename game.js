@@ -548,12 +548,13 @@
       fans.filter(f => !f.chick).slice(0, PENGUIN_WOOL.length).forEach((f, i) => { f.hat = PENGUIN_WOOL[i]; });
       fans.sort((a, b) => a.y - b.y);   // nearer the bottom draws on top
     }
-    // Tourists (Fuji): groups of one to three just off the piste, every so
-    // often all the way down, cameras out.
+    // Tourists (Fuji): a few groups of one to three just off the piste,
+    // only where the cherry blossom is, cameras out.
     const tourists = [];
     if (S.tourists && !endless) {
       const rnd4 = mulberry32((seed % 4294967296) ^ 0x70C);
-      for (let y = finishY * 0.08; y < finishY * 0.88; y += 110 + rnd4() * 80) {
+      for (let y = finishY * 0.08; y < finishY * 0.88; y += 190 + rnd4() * 110) {
+        if (cherryAt(y) < 0.3) continue;   // no blossom here, no tourists
         const side = rnd4() < 0.5 ? -1 : 1, n = 1 + Math.floor(rnd4() * 3), yy = Math.round(y);
         const base = centerAt(yy) + side * (widthAt(yy) + 7 + rnd4() * 6);
         for (let k = 0; k < n; k++) {
@@ -1238,6 +1239,7 @@
     forgiven,
     burned,
     survived,
+    moths: mothsCaught,
     finished: state === 'finished',
   });
 
@@ -1251,7 +1253,8 @@
     passed * POLE_POINTS + reds * RED_POINTS + clipPoints +
     burned.pine * BURN_POINTS.pine + burned.tree * BURN_POINTS.tree + burned.fence * BURN_POINTS.fence +
     survived.fox * ANIMALS.fox.bonus + survived.wolf * ANIMALS.wolf.bonus + survived.bear * ANIMALS.bear.bonus +
-    (state === 'finished' ? FINISH_POINTS : 0);
+    mothsCaught * MOTH_POINTS +
+    (state === 'finished' ? FINISH_POINTS + (mothsCaught ? MOTHMAN_POINTS : 0) : 0);
   const bonusCs = () => runCs() + missed * MISS_CS;
   const timeBonus = () =>
     missed > MISS_LIMIT ? 0 : Math.max(0, (course.shape.par - bonusCs()) * BONUS_PER_CS);
@@ -1311,7 +1314,7 @@
     bonusEl.hidden = true;
     passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
     streak = 0; streaks = []; clipPoints = 0; burned = { pine: 0, tree: 0, fence: 0 };
-    survived = { fox: 0, wolf: 0, bear: 0 }; forgiven = 0;
+    survived = { fox: 0, wolf: 0, bear: 0 }; forgiven = 0; mothsCaught = 0; caughtSwarms = new Set();
     msgEl.textContent = '';
     paintHud();
   }
@@ -1361,7 +1364,7 @@
     moths = []; mothIn = 2; petals = [];
     passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
     streak = 0; streaks = []; clipPoints = 0; burned = { pine: 0, tree: 0, fence: 0 };
-    survived = { fox: 0, wolf: 0, bear: 0 }; forgiven = 0;
+    survived = { fox: 0, wolf: 0, bear: 0 }; forgiven = 0; mothsCaught = 0; caughtSwarms = new Set();
     shownBonus = 0;
     runEnd = null;
     pausedMs = 0;
@@ -1535,6 +1538,7 @@
     SFX.stopSwoosh();
     SFX.playFanfare();
     flash(`FINISH +${FINISH_POINTS}`);
+    if (mothsCaught) setTimeout(() => { if (state === 'finished') pop(`MOTHMAN SPECIAL BONUS +${MOTHMAN_POINTS}`); }, 500);
     runEnd = performance.now();
     closeSession();
     // Time to glide to a stop past the line before the bonus counts up.
@@ -2803,16 +2807,21 @@
   // Bogong moths: every so often a loose cloud of specks, a pixel each,
   // drifts across the screen, every moth fluttering on its own. Scenery.
   const MOTH_EVERY = [5, 10];
-  let moths = [], mothIn = 3;
+  let moths = [], mothIn = 3, swarms = 0;
+  // A swarm drawn into your flame: MOTH TO THE FIRE, once a swarm; finish
+  // with one or more and it's the MOTHMAN SPECIAL BONUS. Also in the
+  // server's checks (at most MOTH_MAX a run).
+  const MOTH_POINTS = 100, MOTHMAN_POINTS = 300, MOTH_MAX = 12;
+  let mothsCaught = 0, caughtSwarms = new Set();
   function updateMoths(dt) {
     if (!course.shape.moths) { moths = []; return; }
     mothIn -= dt;
     if (mothIn <= 0) {
       mothIn = between(MOTH_EVERY);
       const dir = Math.random() < 0.5 ? 1 : -1, cy = 15 + Math.random() * (H - 60), v = dir * (18 + Math.random() * 12);
-      const n = 14 + Math.floor(Math.random() * 14);
+      const n = 14 + Math.floor(Math.random() * 14), sw = ++swarms;
       for (let i = 0; i < n; i++) {
-        moths.push({ x: (dir > 0 ? -6 : VW + 6) - dir * Math.random() * 40, y: cy + (Math.random() - 0.5) * 26,
+        moths.push({ sw, x: (dir > 0 ? -6 : VW + 6) - dir * Math.random() * 40, y: cy + (Math.random() - 0.5) * 26,
           v: v * (0.8 + Math.random() * 0.4), ph: Math.random() * 6.3, ink: Math.random() < 0.6 ? VIC.orange : VIC.black });
       }
     }
@@ -2823,7 +2832,15 @@
       const dx = m.x - px, dy = m.y - py, d = Math.hypot(dx, dy) || 1;
       // Moths to a flame: on fire, any that come near are drawn in and
       // circle you for a few seconds, then peel off.
-      if (fire && !m.orbit && !m.done && d < 40) m.orbit = { a: Math.atan2(dy, dx), r: 5 + Math.random() * 7, left: 2.5 + Math.random() * 2 };
+      if (fire && !m.orbit && !m.done && d < 40) {
+        m.orbit = { a: Math.atan2(dy, dx), r: 5 + Math.random() * 7, left: 2.5 + Math.random() * 2 };
+        if (!caughtSwarms.has(m.sw) && mothsCaught < MOTH_MAX) {
+          caughtSwarms.add(m.sw); mothsCaught++;
+          pop(`MOTH TO THE FIRE +${MOTH_POINTS}`);
+          SFX.playCoin();
+          paintHud();
+        }
+      }
       if (m.orbit) {
         m.orbit.a += (5 + m.ph) * dt; m.orbit.left -= dt;
         m.x = px + Math.cos(m.orbit.a) * m.orbit.r; m.y = py + Math.sin(m.orbit.a) * m.orbit.r * 0.8;
@@ -4891,7 +4908,7 @@
     // A narrow chute near the bottom: the trees close in, no way out.
     alyeska: { wildlife: { odds: 0.02, kinds: { bear: 1, wolf: 1 } }, fans: 120, cameras: 45, heli: true, edgeNets: 0.5, lift: true, arena: true, width: [[0, 44], [0.7, 44], [0.76, 27], [0.94, 27], [1, 36]] },
     // Broad and gentle: long lazy bends, little on the piste.
-    kunama: { wind: true, windPower: [0.25, 0.5], fans: 120, cameras: 45, moths: true, edgeNets: 0.5, lift: true, arena: true, width: 50, sway: 0.55, twist: 1.2, crowd: 0.3, quick: 0 },
+    kunama: { fans: 120, cameras: 45, moths: true, edgeNets: 0.5, lift: true, arena: true, width: 50, sway: 0.55, twist: 1.2, crowd: 0.3, quick: 0 },
     // The Grand Muret: 76%, right after the start. The slope drops away,
     // you fly for a few poles, then it eases.
     // Room to tuck on the pitch, then the poles close in below it.
@@ -4914,7 +4931,7 @@
       width: [[0, 34], [0.47, 34], [0.53, 48], [1, 48]] },
     // An ice field: no trees, blocks of ice, crevasses, and penguins
     // (more than you'd really find that far inland, but it's their flag).
-    vinson: { icy: true, crevasses: true, wind: true, forest: 0.45, fans: 0, penguinFans: true, wildlife: { odds: 0.03, kinds: { penguin: 1 } } },
+    vinson: { icy: true, crevasses: true, wind: true, windPower: [0.95, 1.5], forest: 0.45, fans: 0, penguinFans: true, wildlife: { odds: 0.03, kinds: { penguin: 1 } } },
     // The glacier shrinks: the piste narrows to a strip by the finish.
     // Bare dark rock beyond a snowfield that shrinks to a strip by the
     // finish (it slows you), boulders on it, giant groundsels.
@@ -4938,12 +4955,12 @@
     // ...run at night: dim all round, a headlamp ahead.
     // The Bottleneck: a serac over the piste for a long stretch, shedding
     // ice. Above any treeline: rock only. Longer, tighter bunched runs.
-    k2: { night: [[0, 0.88], [1, 0.88]], wind: true, wildlife: { odds: 0.016, kinds: { leopard: 1 } },
+    k2: { night: [[0, 0.88], [1, 0.88]], wind: true, windPower: [0.95, 1.5], wildlife: { odds: 0.016, kinds: { leopard: 1 } },
       serac: { from: 0.4, to: 0.7, side: 1 }, rocks: 1, forest: 0.5,
       quick: 2, quickLen: 7, quickGap: 36, offset: 15, offsetLast: 15, gapFirst: 82, gapLast: 50 },
     // The Hornbein Couloir first: steep, narrow, zigzagging between rock
     // walls, no poles; then out onto the North Face.
-    chomolungma: { wind: 'wild', rocks: 1, fences: 0, camp: true, heli: true, couloir: { start: 100, rows: 1200, open: 90, hw: 15, slope: 1.6,
+    chomolungma: { wind: 'wild', windPower: [0.95, 1.5], rocks: 1, fences: 0, camp: true, heli: true, couloir: { start: 100, rows: 1200, open: 90, hw: 15, slope: 1.6,
       // Gentle swings, then dangerous ones, each just within reach.
       bends: [[0, 0], [160, 18], [300, -20], [420, 22], [600, 5], [700, -26], [820, 16],
         [960, -10], [1080, 20], [1200, 0]],
