@@ -66,7 +66,7 @@
   #title-card h1 { font-size: clamp(14px, 3.6vw, 26px); margin: 0 0 1.2em; letter-spacing: 2px; }
   /* The game's own pineapple sprite, scaled up in whole VIC pixels. */
   #title-card h1 canvas {
-    height: 1.4em; width: 1em; vertical-align: baseline; margin-left: 0.25em;   /* standing on the line, a space before it */
+    height: 1.4em; width: 1em; vertical-align: baseline;   /* standing on the line; the &nbsp; before it is the gap */
     image-rendering: pixelated; image-rendering: crisp-edges;
   }
   #title-card p { font-size: clamp(6px, 1.3vw, 9px); line-height: 2; margin: 0; }
@@ -165,7 +165,7 @@
   #map-tip ol { list-style: none; margin: 2px 0 0; padding: 0; }
   #map-tip li { display: flex; justify-content: space-between; }
   #map-tip li.note { justify-content: flex-start; opacity: 0.7; }
-  #map-title canvas { height: 1.4em; width: 1em; vertical-align: baseline; margin: 0 0.25em; image-rendering: pixelated; image-rendering: crisp-edges; }
+  #map-title canvas { height: 1.4em; width: 1em; vertical-align: baseline; image-rendering: pixelated; image-rendering: crisp-edges; }
   /* Desktop: your scorecard so far, a panel of its own, bottom left. */
   #map-score { position: fixed; z-index: 11; pointer-events: none; left: 3vw; bottom: 3vh;
     background: var(--vic-white); border: 2px solid var(--vic-blue); padding: 12px 14px; width: 340px; box-sizing: border-box; }
@@ -448,7 +448,7 @@
     </div>
 
     <div id="title-card" class="ontv">
-      <h1>SUPER SLALOM VS <canvas id="title-pineapple" class="pine-icon" width="5" height="7" aria-label="PINEAPPLE"></canvas></h1>
+      <h1>SUPER SLALOM VS&nbsp;<canvas id="title-pineapple" class="pine-icon" width="5" height="7" aria-label="PINEAPPLE"></canvas></h1>
       <div id="mode-row">
         <button type="button" class="mode-btn" data-mode="single">SINGLE</button>
         <button type="button" class="mode-btn" data-mode="championship">CHAMPIONSHIP</button>
@@ -490,7 +490,7 @@
   <canvas id="map-screen" hidden></canvas>
   <div id="map-score" hidden><div class="ms-head">YOUR CHAMPIONSHIP</div><ol></ol></div>
   <div id="map-tip" hidden></div>
-  <div id="map-title" hidden>SUPER SLALOM VS <canvas class="pine-icon" width="5" height="7" aria-label="PINEAPPLE"></canvas> CHAMPIONSHIP</div>
+  <div id="map-title" hidden>SUPER SLALOM VS&nbsp;<canvas class="pine-icon" width="5" height="7" aria-label="PINEAPPLE"></canvas>&nbsp;CHAMPIONSHIP</div>
   <div id="overlay" hidden>
     <div class="card">
       <div id="champ" hidden>
