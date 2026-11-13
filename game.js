@@ -631,6 +631,17 @@
   const missLabelEl = document.getElementById('hud-miss-label');
   const bestEl = document.getElementById('hud-best');
   const msgEl = document.getElementById('message');
+  const bannerEl = document.getElementById('banner');
+  // A big moment, flashing across the middle for a while; nothing covers it.
+  let bannerTimer = null;
+  function banner(text, ms, small = false) {
+    if (!bannerEl) return;
+    bannerEl.textContent = text;
+    bannerEl.classList.toggle('small', small);
+    bannerEl.hidden = false;
+    clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(() => { bannerEl.hidden = true; }, ms);
+  }
   const overlayEl = document.getElementById('overlay');
   const overlayTitleEl = document.getElementById('overlay-title');
   const overlayWordEl = document.getElementById('overlay-word');
@@ -1303,6 +1314,7 @@
     state = 'title';
     ranOut = false;
     // The last run's weather and wildlife go with it.
+    if (bannerEl) bannerEl.hidden = true;
     sluff = null; slide = null; snowballs = []; rockfall = []; heli = null; icefall = []; wind = null; gustLines = []; fellIn = false; pan = 0;
     if (!keep) { champ = null; prepareRun(); }
     particles = [];
@@ -1441,7 +1453,12 @@
       straighten();
       SFX.stopSwoosh();
       tellServer('slalom_pause');
-      msgEl.textContent = 'PAUSED';
+      // What you're playing, and where.
+      const where = runClassic ? `SINGLE · ${withLand(plainName(mountain(runClassic)), runClassic)}`
+        : champ && champ.current ? `CHAMPIONSHIP · COURSE ${champ.played.length + 1} OF ${CHAMP_COURSES} · ${withLand(plainName(champ.current), champ.current.id)}`
+        : course.endless ? 'ENDLESS' : 'SINGLE · RANDOM COURSE';
+      msgEl.innerHTML = 'PAUSED<small></small>';
+      msgEl.querySelector('small').textContent = where;
     } else if (state === 'paused') {
       state = 'running';
       pausedMs += performance.now() - pausedAt;
@@ -2623,8 +2640,11 @@
   // Worth more the rarer the animal; also in slalom_submit.
   function survivedChase(a) {
     survived[a.kind]++;
-    pop(`SURVIVED ${a.kind.toUpperCase()} CHASE !!! +${ANIMALS[a.kind].bonus}`);
-    SFX.playDing();
+    // A bear is a big deal: a banner and the jingle. Wolves and foxes, a
+    // smaller one and a ding.
+    const big = a.kind === 'bear';
+    banner(`${a.kind.toUpperCase()} SURVIVED! +${ANIMALS[a.kind].bonus}`, big ? 2500 : 1600, !big);
+    if (big) SFX.playJingle(); else SFX.playDing();
     paintHud();
   }
 
@@ -4518,14 +4538,19 @@
     if (wide) {
       // Thick lines, outlined in black: [on, off] pixels for dashes, none
       // for solid. Outlines first, then the colour on top, so they cross cleanly.
-      const line = (a, b, col, dash) => {
-        const n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]))), pts = [];
-        for (let k = 0; k <= n; k++) if (!dash || k % (dash[0] + dash[1]) < dash[0]) pts.push([Math.round(a[0] + (b[0] - a[0]) * k / n), Math.round(a[1] + (b[1] - a[1]) * k / n)]);
-        return { pts, col };
+      // Flights follow the arc the plane flies; the unlock lines are straight.
+      const line = (a, b, col, dash, arc = false, u1 = 1) => {
+        const all = arc ? curvePoints(a, b, w, 0, u1) : curvePoints(a, b, 0);   // w 0: no lift, a straight line
+        return { pts: dash ? all.filter((_, k) => k % (dash[0] + dash[1]) < dash[0]) : all, col };
       };
+      const parked = id => { const [x, y] = at(id); return [x + PARKED[0], y + PARKED[1]]; };
       const lines = [];
-      for (let k = 1; k < c.played.length; k++) lines.push(line(at(c.played[k - 1].id), at(c.played[k].id), VIC.white, [2, 3]));   // the way you came
-      if (!flying && c.played.length) lines.push(line(at(c.played[c.played.length - 1].id), at(pick.id), VIC.white, null));   // where you'd fly
+      for (let k = 1; k < c.played.length; k++) lines.push(line(parked(c.played[k - 1].id), at(c.played[k].id), VIC.white, [2, 3], true));   // the way you came
+      if (!flying && c.played.length) lines.push(line(parked(c.played[c.played.length - 1].id), at(pick.id), VIC.white, null, true));   // where you'd fly
+      if (flying) {   // the trail it lays down behind it, along its arc, and only so far
+        const [fa, fb] = flightEnds(w, h), t = Math.min(1, (performance.now() - c.fly.at) / flightTime());
+        lines.push(line([x0 + fa[0], y0 + fa[1]], [x0 + fb[0], y0 + fb[1]], VIC.white, [2, 3], true, t * t * (3 - 2 * t)));
+      }
       for (const id of unlocks) lines.push(line(at(pick.id), at(id), PLANE_INKS.Y, [5, 4]));   // what it would open
       for (const l of lines) for (const [x, y] of l.pts) for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) px(x + dx, y + dy, VIC.black);
       for (const l of lines) for (const [x, y] of l.pts) px(x, y, l.col);
@@ -4618,8 +4643,8 @@
     };
     if (flying) {
       // The plane, its dotted trail behind it, nose along the way it's going.
-      const [sx, sy, ang] = planeAt(w, h, 0), [fx, fy] = planeAt(w, h, -1);
-      dots([x0 + fx, y0 + fy], [x0 + sx, y0 + sy], VIC.white, 3);
+      const [sx, sy, ang] = planeAt(w, h, 0);
+      if (!wide) { const [fx, fy] = planeAt(w, h, -1); dots([x0 + fx, y0 + fy], [x0 + sx, y0 + sy], VIC.white, 3); }
       plane(x0 + sx, y0 + sy, ang, true);
     } else if (c.played.length) {
       // Where you are: the plane parked by the mountain you've just skied,
@@ -4765,8 +4790,25 @@
   }
   // The plane's spot at t (0..1 of the hop): eased, on a gentle arc.
   function flightPos(w, h, t) {
-    const [a, b] = flightEnds(w, h), e = t * t * (3 - 2 * t);
-    return [a[0] + (b[0] - a[0]) * e, a[1] + (b[1] - a[1]) * e - Math.sin(Math.PI * t) * 8];
+    const [a, b] = flightEnds(w, h);
+    return flightCurve(a, b, t * t * (3 - 2 * t), w);
+  }
+  // The way a hop goes, from a to b (u from 0 to 1): a gentle arc, higher
+  // the further it is. The plane and every path drawn on the map follow it.
+  function flightCurve(a, b, u, w) {
+    const lift = Math.min(0.15 * Math.hypot(b[0] - a[0], b[1] - a[1]), 0.05 * w);
+    return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u - Math.sin(Math.PI * u) * lift];
+  }
+  // Points along it, about a pixel apart, from u0 to u1.
+  function curvePoints(a, b, w, u0 = 0, u1 = 1) {
+    const n = Math.max(2, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) * 1.6)), pts = [];
+    let last = null;
+    for (let k = 0; k <= n; k++) {
+      const p = flightCurve(a, b, u0 + (u1 - u0) * k / n, w).map(Math.round);
+      if (!last || p[0] !== last[0] || p[1] !== last[1]) pts.push(p);
+      last = p;
+    }
+    return pts;
   }
   // Now: where the plane is and which way it points; back < 0: where it set off.
   function planeAt(w, h, back) {

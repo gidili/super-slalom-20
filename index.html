@@ -102,6 +102,13 @@
   #course-list .alt { width: 7.5em; text-align: right; white-space: nowrap; }
   #message { top: 62%; font-size: clamp(8px, 1.9vw, 13px); }
   #message.above-count { top: 39%; }
+  #message small { display: block; margin-top: 0.8em; font-size: 0.6em; }
+  /* A big moment (a bear survived): a flashing banner across the middle,
+     its own element, so nothing else can cover it. */
+  #tv #banner { top: 46%; left: 8%; right: 8%; padding: 0.6em 0; font-size: clamp(11px, 2.6vw, 20px);
+    text-shadow: none; animation: row-flash 0.4s step-end infinite; }
+  #tv #banner.small { left: 20%; right: 20%; font-size: clamp(9px, 1.8vw, 14px); }
+  #tv #banner[hidden] { display: none; }
   /* What just happened, right under the skier, where the eyes are. */
   #tv #pop { right: auto; white-space: nowrap; transform: translateX(-50%); font-size: clamp(7px, 1.5vw, 11px); }
   /* Below the skier, who stands at about 30% down the screen. */
@@ -433,6 +440,7 @@
     </div>
 
     <div id="message" class="ontv"></div>
+    <div id="banner" class="ontv" hidden></div>
     <div id="pop" class="ontv" hidden></div>
 
     <div id="countdown" class="ontv" hidden></div>
