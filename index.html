@@ -292,9 +292,12 @@
   body.narrow .narrow-only { display: inline; }
   body.narrow .wide-only { display: none; }
   body.narrow #hud { font-size: 9px; top: calc(8px + env(safe-area-inset-top, 0px)); }
-  body.narrow #title-card { top: 26%; padding: 0 12px; }
+  body.narrow #title-card { top: 17%; padding: 0 12px; }
   body.narrow #title-card h1 { font-size: 15px; }
   body.narrow #title-card p { font-size: 8px; }
+  /* A phone: the mountain list big enough to read and tap; it scrolls. */
+  body.narrow #course-list { font-size: 9px; max-height: 30vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  body.narrow #course-list li { height: 2.6em; }
   body.narrow .mode-btn { font-size: 9px; padding: 14px 0.7em; }
   body.narrow #message { top: 58%; font-size: 11px; }
   body.narrow #message.above-count { top: 34%; }

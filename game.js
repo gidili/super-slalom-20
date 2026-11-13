@@ -1892,7 +1892,7 @@
         const li = document.createElement('li'), m = id === 'random' ? null : mountain(id);
         const flag = document.createElement('span'); flag.className = 'flag-cell';
         flag.append(...(m ? FLAGS_OF[id] : ['random']).map(flagCanvas));   // both, where a mountain has two
-        const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = m ? m.short || m.name.split(/ \(| "/)[0] : 'RANDOM';
+        const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = m ? (NARROW && m.list) || m.short || m.name.split(/ \(| "/)[0] : 'RANDOM';   // a phone: the shorter name
         const alt = document.createElement('span'); alt.className = 'alt'; alt.textContent = m ? m.height.replace('~', '') : '';
         li.append(flag, nm, alt);
         li.addEventListener('click', (e) => {
