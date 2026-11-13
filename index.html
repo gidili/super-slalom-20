@@ -81,13 +81,44 @@
   .mode-btn.chosen { color: var(--vic-white); background: var(--vic-blue); }
   /* Room for the longest explanation, so changing mode moves nothing. */
   #title-card p#mode-text { min-height: 4em; margin-bottom: 1em; }
+  /* Single's courses: Random, then every mountain, all on show. */
+  #course-list {
+    list-style: none; margin: -0.4em auto 1.2em; padding: 0; max-width: 440px;
+    border: 2px solid var(--vic-blue); background: var(--vic-white); pointer-events: auto; scrollbar-width: none;
+    font-size: clamp(6px, 1.25vw, 9px);
+  }
+  #course-list::-webkit-scrollbar { display: none; }
+  #course-list[hidden] { display: none; }
+  /* A mountain's board shows its flag under the title. */
+  h3 .flag-row { display: flex; justify-content: center; gap: 8px; margin-top: 4px; }
+  h3 canvas.flag { display: block; height: 18px; width: auto; image-rendering: pixelated; image-rendering: crisp-edges; outline: 2px solid var(--vic-blue); }
+  #course-list li { display: flex; align-items: center; gap: 0.8em; height: 1.75em; padding: 0 0.7em; cursor: pointer; text-shadow: none; }
+  #course-list li.chosen { background: var(--vic-blue); color: var(--vic-white); }
+  #course-list .flag-cell { width: 4.4em; display: flex; justify-content: flex-start; gap: 0.3em; }
+  #course-list .flag-cell canvas { height: 1.2em; width: auto; image-rendering: pixelated; image-rendering: crisp-edges; outline: 1px solid var(--vic-blue); }
+  #course-list .flag-cell canvas.shaped, #course-list li.chosen .flag-cell canvas { outline-color: transparent; }
+  #course-list li.chosen .flag-cell canvas:not(.shaped) { outline-color: var(--vic-white); }
+  #course-list .nm { flex: 1; text-align: left; white-space: nowrap; overflow: hidden; }
+  #course-list .alt { width: 7.5em; text-align: right; white-space: nowrap; }
   #message { top: 62%; font-size: clamp(8px, 1.9vw, 13px); }
   #message.above-count { top: 39%; }
+  #message small { display: block; margin-top: 0.8em; font-size: 0.6em; }
+  /* A big moment (a bear survived): a flashing banner across the middle,
+     its own element, so nothing else can cover it. */
+  #tv #banner { top: 46%; left: 8%; right: 8%; padding: 0.6em 0; font-size: clamp(11px, 2.6vw, 20px);
+    text-shadow: none; animation: row-flash 0.4s step-end infinite; }
+  #tv #banner.small { left: 20%; right: 20%; font-size: clamp(9px, 1.8vw, 14px); }
+  #tv #banner[hidden] { display: none; }
   /* What just happened, right under the skier, where the eyes are. */
   #tv #pop { right: auto; white-space: nowrap; transform: translateX(-50%); font-size: clamp(7px, 1.5vw, 11px); }
   /* Below the skier, who stands at about 30% down the screen. */
   #countdown { top: 45%; font-size: clamp(20px, 5.5vw, 38px); }
   #bonus { top: 20%; }
+  /* A night course: the words on the slope in white, or they vanish in the dark. */
+  body.night #tv #message, body.night #tv #pop, body.night #tv #countdown, body.night #tv #bonus {
+    color: var(--vic-white);
+    text-shadow: 2px 0 0 var(--vic-blue), -2px 0 0 var(--vic-blue), 0 2px 0 var(--vic-blue), 0 -2px 0 var(--vic-blue);
+  }
   #bonus-time { font-size: clamp(8px, 1.9vw, 13px); margin-bottom: 0.8em; }
   #bonus-score { font-size: clamp(14px, 3.6vw, 26px); margin-bottom: 0.4em; }
   #bonus-points { font-size: clamp(8px, 1.9vw, 13px); }
@@ -101,6 +132,76 @@
     opacity: 0; pointer-events: none; transition: opacity 0.45s ease;
   }
   #overlay.visible { opacity: 1; pointer-events: auto; }
+  /* Over the world map: no wash, and the card tucked in below the map. */
+  #overlay.map-mode { background: none; align-items: flex-end; padding-bottom: 4vh; }
+  /* Desktop: the map fills the window; the choosing card sits beside the
+     mountain you're choosing, your scorecard bottom left. */
+  #map-screen { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; z-index: 9;
+    background: var(--vic-blue); image-rendering: pixelated; image-rendering: crisp-edges; }
+  #map-screen[hidden] { display: none; }
+  /* The map's title, across the top above the Arctic. */
+  #map-title { position: fixed; top: 1.6vh; left: 0; right: 0; z-index: 11; pointer-events: none; text-align: center;
+    font-size: clamp(11px, 1.7vw, 22px); letter-spacing: 2px; color: var(--vic-white); text-shadow: 3px 3px 0 var(--vic-black); }
+  #map-title[hidden] { display: none; }
+  #map-title canvas { height: 1.4em; width: 1em; vertical-align: middle; image-rendering: pixelated; image-rendering: crisp-edges; }
+  /* Desktop: your scorecard so far, a panel of its own, bottom left. */
+  #map-score { position: fixed; z-index: 11; pointer-events: none; left: 3vw; bottom: 3vh;
+    background: var(--vic-white); border: 2px solid var(--vic-blue); padding: 12px 14px; width: 340px; box-sizing: border-box; }
+  #map-score[hidden] { display: none; }
+  #map-score .ms-head { font-size: 9px; text-align: center; margin-bottom: 8px; }
+  #map-score ol { list-style: none; padding: 0; margin: 0; font-size: 8px; line-height: 1.9; }
+  #map-score li { display: flex; justify-content: space-between; gap: 8px; }
+  #map-score .cols { display: flex; flex-shrink: 0; }
+  #map-score .cols b { font-weight: normal; text-align: right; }
+  #map-score .cols b:nth-child(1) { width: 3.5em; }
+  #map-score .cols b:nth-child(2) { width: 7.5em; }
+  #map-score .cols b:nth-child(3) { width: 6.5em; }
+  #map-score li.total { border-top: 2px solid var(--vic-blue); margin-top: 4px; padding-top: 4px; }
+  #map-score li.tip { justify-content: center; margin-top: 6px; color: var(--vic-red); }
+  body:not(.narrow) #overlay.map-mode { justify-content: flex-start; padding: 0 0 3vh; }
+  body:not(.narrow) #overlay.map-mode .card { position: fixed; margin: 0; }   /* placed beside the mountain you're choosing */
+  #overlay.map-mode .card { margin: 0 auto; }
+  body.map-mode #hud { visibility: hidden; }
+  #overlay.flying .card { visibility: hidden; }
+  #overlay.map-mode #champ-list { display: none; }
+  #overlay.map-mode #champ-head { font-size: 11px; margin-bottom: 4px; }
+  #overlay.map-mode #champ-sub { margin-bottom: 8px; }
+  #overlay.map-mode #champ-text { text-align: center; margin-bottom: 8px; }
+  /* The Championship's own screens take the card over. */
+  #overlay .card.champ-mode > :not(#champ) { display: none !important; }
+  #champ-head { font-size: 13px; margin: 0 0 8px; line-height: 1.5; }
+  #champ-sub { font-size: 8px; margin-bottom: 12px; opacity: 0.8; line-height: 1.6; }
+  #champ-text { font-size: 8px; line-height: 1.8; text-align: left; margin: 0 0 12px; }
+  /* On the map card: what finishing the pick opens, a row each with flags. */
+  #champ-text .unlock-head { margin-top: 8px; }
+  #champ-text .unlock-note { margin-top: 6px; opacity: 0.7; }
+  #champ-text .unlock-row { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 4px; }
+  #champ-text .unlock-flags { display: flex; gap: 4px; }
+  #champ-text .unlock-flags canvas { height: 12px; width: auto; image-rendering: pixelated; image-rendering: crisp-edges; outline: 1px solid var(--vic-blue); }
+  #champ-list { list-style: none; padding: 0; margin: 0 0 12px; font-size: 8px; line-height: 1.9; }
+  #champ-list li { display: flex; justify-content: space-between; gap: 8px; }
+  #champ-list .cols { display: flex; flex-shrink: 0; }
+  #champ-list .cols b { font-weight: normal; text-align: right; }
+  #champ-list .cols b:nth-child(1) { width: 3.5em; }
+  #champ-list .cols b:nth-child(2) { width: 7.5em; }
+  #champ-list .cols b:nth-child(3) { width: 6.5em; }
+  #champ-list li.total { border-top: 2px solid var(--vic-blue); margin-top: 4px; padding-top: 4px; }
+  #champ-prompt { font-size: 8px; opacity: 0.7; }
+  #champ-go { line-height: 1.6; }
+  #champ-flags { display: flex; justify-content: center; align-items: flex-end; gap: 10px; margin: -4px 0 12px; }
+  #champ-flags[hidden] { display: none; }
+  #champ-flags .flag { height: 30px; width: auto; image-rendering: pixelated; image-rendering: crisp-edges;
+    outline: 2px solid var(--vic-blue); }
+  #champ-flags .flag.shaped { outline: none; }
+  /* Venus, the morning star: a little pixel star that shimmers. */
+  #champ-text .venus { display: inline-block; position: relative; width: 2px; height: 2px; margin: 0 8px; vertical-align: middle;
+    background: var(--vic-blue); box-shadow: 0 -2px #bfce72, 0 2px #bfce72, -2px 0 #bfce72, 2px 0 #bfce72;
+    animation: venus 1.1s steps(1) infinite; }
+  @keyframes venus {
+    0% { box-shadow: 0 -2px #bfce72, 0 2px #bfce72, -2px 0 #bfce72, 2px 0 #bfce72; }
+    50% { box-shadow: 0 -4px #bfce72, 0 4px #bfce72, -4px 0 #bfce72, 4px 0 #bfce72, 0 -2px #8080ff, 0 2px #8080ff, -2px 0 #8080ff, 2px 0 #8080ff; }
+  }
+  #champ-go small { display: block; font-size: 7px; opacity: 0.85; }
   #overlay .card {
     background: var(--vic-white); border: 2px solid var(--vic-blue);
     padding: 20px; width: 100%; max-width: 320px; margin: auto;
@@ -144,14 +245,18 @@
   #overlay button:disabled { opacity: 0.5; cursor: default; }
   #submit-status { font-size: 8px; margin: 0 0 8px; min-height: 10px; line-height: 1.6; }
   #submit-status.error { color: var(--vic-red); }
-  /* Reverse video, the VIC-20's way of setting a title apart. */
-  #leaderboard h3 {
-    font-size: 11px; margin: 4px 0 10px; padding: 6px 0;
-    background: var(--vic-blue); color: var(--vic-white);
-  }
+  /* Which piste the run was on, under WIPEOUT / GAME OVER. */
+  #run-piste { font-size: 10px; line-height: 1.6; color: var(--vic-blue); margin: -4px 0 10px; }
+  #run-piste .flag-row { display: flex; justify-content: center; gap: 8px; margin-top: 4px; }
+  #run-piste canvas.flag { display: block; height: 16px; width: auto; image-rendering: pixelated; image-rendering: crisp-edges; outline: 2px solid var(--vic-blue); }
+  #leaderboard h3 { font-size: 11px; margin: 4px 0 10px; padding: 0; }
+  /* The board's name on the card's white, in blue. */
+  #leaderboard h3 .board-name { color: var(--vic-blue); line-height: 1.6; padding: 0 0 6px; }
+  #leaderboard h3.god .board-name { font-size: 9px; }
+  /* TOP 10 alone in reverse video, the VIC-20's way of setting a title apart. */
+  #leaderboard h3 .board-bar { padding: 6px 0; background: var(--vic-blue); color: var(--vic-white); }
   /* The secret board, in god mode's blue fire. */
-  #leaderboard h3.god {
-    font-size: 9px; line-height: 1.6;
+  #leaderboard h3.god .board-bar {
     background: rgb(128, 128, 255); color: var(--vic-white);
     box-shadow: inset 0 0 0 2px var(--vic-cyan);
   }
@@ -321,8 +426,9 @@
         <button type="button" class="mode-btn" data-mode="endless">ENDLESS</button>
       </div>
       <p id="mode-text"></p>
+      <ol id="course-list" hidden></ol>
       <p>
-        <span class="wide-only">LEFT / RIGHT CHOOSES &middot; SPACE OR ENTER STARTS<br>
+        <span class="wide-only">LEFT / RIGHT: MODE &middot; UP / DOWN (W / S): COURSE &middot; SPACE STARTS<br>
         <br>
         HOLD A / L, THE SHIFTS OR THE ARROWS TO TURN<br>
         SPACE PAUSES &middot; R RESTARTS &middot; M MUTES</span>
@@ -334,6 +440,7 @@
     </div>
 
     <div id="message" class="ontv"></div>
+    <div id="banner" class="ontv" hidden></div>
     <div id="pop" class="ontv" hidden></div>
 
     <div id="countdown" class="ontv" hidden></div>
@@ -351,9 +458,26 @@
     </div>
   </div>
 
+  <canvas id="map-screen" hidden></canvas>
+  <div id="map-score" hidden><div class="ms-head">YOUR CHAMPIONSHIP</div><ol></ol></div>
+  <div id="map-title" hidden>SUPER SLALOM VS <canvas class="pine-icon" width="5" height="7" aria-label="PINEAPPLE"></canvas> CHAMPIONSHIP</div>
   <div id="overlay" hidden>
     <div class="card">
+      <div id="champ" hidden>
+        <h2 id="champ-head"></h2>
+        <div id="champ-sub"></div>
+        <div id="champ-flags" hidden></div>
+        <div class="btn-row" id="champ-pick">
+          <button id="champ-prev" type="button" class="secondary">&lt;</button>
+          <button id="champ-go" type="button"></button>
+          <button id="champ-next" type="button" class="secondary">&gt;</button>
+        </div>
+        <p id="champ-text"></p>
+        <ol id="champ-list"></ol>
+        <div id="champ-prompt"></div>
+      </div>
       <h2 id="overlay-title"><span id="overlay-word">FINISH</span><canvas class="pine-icon" width="5" height="7"></canvas></h2>
+      <div id="run-piste" hidden></div>
       <div id="final-score">SCORE <b id="final-score-val">0</b></div>
       <canvas id="final-stars" width="41" height="11"></canvas>
       <div id="breakdown"></div>
