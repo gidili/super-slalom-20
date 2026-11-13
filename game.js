@@ -3795,7 +3795,7 @@
   // Wind lines streaming back uphill off a fast skier: past WIND_AT times
   // normal speed (a long tuck, or a steep pitch), longer the faster. Fire
   // has its own trail, so not then.
-  const WIND_AT = 1.45, WIND_FULL = 2.1, WIND_LEN = 24;
+  const WIND_AT = 1.4, WIND_FULL = 2.1, WIND_LEN = 24;
   function drawWind(spriteH, camY) {
     const fast = speed / DOWN_SPEED;
     if (state !== 'running' || fast <= WIND_AT || onFire()) return;
@@ -5461,7 +5461,7 @@
     const status = m.id === hereId ? 'YOU ARE HERE' + (p ? ': ' + skiedLine : '')
       : p ? `SKIED: ${skiedLine}`
       : open ? 'OPEN: YOU CAN FLY HERE'
-      : 'LOCKED: UNLOCKED BY ' + MOUNTAINS.filter(o => o.unlocks.includes(m.id)).map(o => plainName(o)).join(' OR ');
+      : 'LOCKED: UNLOCKED BY ' + MOUNTAINS.filter(o => o.unlocks.includes(m.id)).map(o => `<span class="tip-by-name"><span class="tip-by" data-id="${o.id}"></span>${plainName(o)}</span>`).join(' OR ');
     const board = boardOf(false, c.god, m.id), top = leaderboardCache[board];
     const rows = !top ? '<li class="note">LOADING...</li>' : !top.length ? '<li class="note">NO SCORES YET</li>'
       : top.slice(0, 5).map((r, i) => `<li><span>${i + 1}. ${r.initials}</span><span>${r.score}</span></li>`).join('');
@@ -5472,10 +5472,15 @@
     if (tipFor !== m) {
       tipFor = m;
       const board = boardOf(false, champ.god, m.id);
-      if (!leaderboardCache[board] && juicer) fetchLeaderboard(board).then(() => { if (tipFor === m) mapTipEl.querySelector('.tip-body').innerHTML = mapTipHtml(m); });
+      const fillBody = () => {
+        const body = mapTipEl.querySelector('.tip-body');
+        body.innerHTML = mapTipHtml(m);
+        body.querySelectorAll('.tip-by').forEach(el => el.append(...FLAGS_OF[el.dataset.id].map(flagCanvas)));   // whose flags open it
+      };
+      if (!leaderboardCache[board] && juicer) fetchLeaderboard(board).then(() => { if (tipFor === m) fillBody(); });
       mapTipEl.innerHTML = '<div class="tip-flags"></div><div class="tip-body"></div>';
       mapTipEl.querySelector('.tip-flags').append(...FLAGS_OF[m.id].map(flagCanvas));
-      mapTipEl.querySelector('.tip-body').innerHTML = mapTipHtml(m);
+      fillBody();
       mapTipEl.hidden = false;
     }
     // Beside the pointer, on whichever side has room.
