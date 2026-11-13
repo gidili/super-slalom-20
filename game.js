@@ -4516,6 +4516,7 @@
     if (!MAP_WIDE || !mapCanvas) return false;
     mapCanvas.hidden = !on;
     if (mapTitleEl) mapTitleEl.hidden = !on;
+    if (!on && tipFor) hideMapTip();
     if (on && NARROW) {
       // The map fills the screen down to the card, as wide as that makes it,
       // panned to keep the focus in the middle.
@@ -4536,7 +4537,9 @@
         cardSide = sx + gap + cw < window.innerWidth - 8 ? 1 : -1;
         const left = cardSide > 0 ? sx + gap : sx - gap - cw;
         cardEl.style.left = Math.round(Math.max(8, left)) + 'px';
-        cardEl.style.top = Math.round(Math.max(8, Math.min(window.innerHeight - ch - 8, sy - ch / 2))) + 'px';
+        // Never over the title at the top.
+        const below = mapTitleEl ? mapTitleEl.getBoundingClientRect().bottom + 10 : 8;
+        cardEl.style.top = Math.round(Math.max(below, Math.min(window.innerHeight - ch - 8, sy - ch / 2))) + 'px';
       }
     } else { cardEl.style.left = ''; cardEl.style.top = ''; }
     if (mapScoreEl && !NARROW) {   // your scorecard so far, bottom left (a phone keeps it on the result card)
@@ -5430,9 +5433,66 @@
   }
   cardEl.addEventListener('click', (e) => { if (introUp() && !e.target.closest('button')) introGo(); });
 
+  // Desktop: hover a mountain on the map for a card about it: flags, name
+  // and country, height, what it throws at you, how it stands in this
+  // Championship (skied, open, or what opens it) and its top 5.
+  const mapTipEl = document.getElementById('map-tip');
+  const HAZARDS = {
+    alyeska: 'BEARS AND WOLVES', kunama: 'MOTH SWARMS', pista3: 'THE DROP, SAFETY NETS', aoraki: 'ROCKFALL, WIND',
+    fuji: 'TOURISTS IN THE BLOSSOM', cervino: 'THE BORDER, SAFETY NETS', vinson: 'CREVASSES, WIND', kirinyaga: 'DARK ROCK',
+    iztactepetl: 'DAWN, LONG SHADOWS', kilimanjaro: 'SCREE', aconcagua: 'PENITENTES, DOGS, WIND', annapurna: 'AVALANCHE',
+    k2: 'NIGHT, ICEFALL, WIND', chomolungma: 'THE COULOIR, SLUFF, WIND',
+  };
+  const mapPoint = e => {
+    const r = mapCanvas.getBoundingClientRect(), k = Math.min(r.width / MAP_W, r.height / MAP_H);
+    return [(e.clientX - r.left - (r.width - MAP_W * k) / 2) / k, (e.clientY - r.top - (r.height - MAP_H * k) / 2) / k];
+  };
+  const nearestMountain = (gx, gy, among = MOUNTAINS) => {
+    let best = null, bestD = 12;
+    for (const m of among) { const [x, y] = mapSpots[m.id] || [-99, -99], d = Math.hypot(gx - x, gy - (y - 3)); if (d < bestD) { bestD = d; best = m; } }
+    return best;
+  };
+  let tipFor = null;
+  function hideMapTip() { if (mapTipEl) mapTipEl.hidden = true; tipFor = null; overlayEl.style.cursor = ''; }
+  function mapTipHtml(m) {
+    const c = champ, p = c.played.find(q => q.id === m.id), open = champOptions().includes(m);
+    const status = p ? `SKIED: ${p.points} POINTS` + (p.finished ? ` · ${fmt(p.time_cs)} · ${'*'.repeat(p.stars) || 'NO STARS'}` : ' · WIPEOUT')
+      : open ? 'OPEN: YOU CAN FLY HERE'
+      : 'LOCKED: UNLOCKED BY ' + MOUNTAINS.filter(o => o.unlocks.includes(m.id)).map(o => plainName(o)).join(' OR ');
+    const board = boardOf(false, c.god, m.id), top = leaderboardCache[board];
+    const rows = !top ? '<li class="note">LOADING...</li>' : !top.length ? '<li class="note">NO SCORES YET</li>'
+      : top.slice(0, 5).map((r, i) => `<li><span>${i + 1}. ${r.initials}</span><span>${r.score}</span></li>`).join('');
+    return `<div class="tip-name">${withLand(plainName(m), m.id)}</div><div class="tip-row">${m.height} · ${HAZARDS[m.id] || ''}</div>`
+      + `<div class="tip-status ${p ? 'done' : open ? 'open' : 'locked'}">${status}</div><div class="tip-top">TOP 5</div><ol>${rows}</ol>`;
+  }
+  function showMapTip(m, e) {
+    if (tipFor !== m) {
+      tipFor = m;
+      const board = boardOf(false, champ.god, m.id);
+      if (!leaderboardCache[board] && juicer) fetchLeaderboard(board).then(() => { if (tipFor === m) mapTipEl.querySelector('.tip-body').innerHTML = mapTipHtml(m); });
+      mapTipEl.innerHTML = '<div class="tip-flags"></div><div class="tip-body"></div>';
+      mapTipEl.querySelector('.tip-flags').append(...FLAGS_OF[m.id].map(flagCanvas));
+      mapTipEl.querySelector('.tip-body').innerHTML = mapTipHtml(m);
+      mapTipEl.hidden = false;
+    }
+    // Beside the pointer, on whichever side has room.
+    const w = mapTipEl.offsetWidth, h = mapTipEl.offsetHeight;
+    const x = e.clientX + 18 + w < window.innerWidth - 8 ? e.clientX + 18 : e.clientX - 18 - w;
+    mapTipEl.style.left = Math.max(8, x) + 'px';
+    mapTipEl.style.top = Math.max(8, Math.min(window.innerHeight - h - 8, e.clientY - h / 2)) + 'px';
+  }
+  overlayEl.addEventListener('mousemove', (e) => {
+    if (NARROW || !mapTipEl || !champUp() || champ.stage !== 'pick' || e.target.closest('.card')) { hideMapTip(); return; }
+    const [gx, gy] = mapPoint(e), m = nearestMountain(gx, gy);
+    if (!m) { hideMapTip(); return; }
+    overlayEl.style.cursor = champOptions().includes(m) ? 'pointer' : 'default';   // a hand where you can fly
+    showMapTip(m, e);
+  });
+  overlayEl.addEventListener('mouseleave', hideMapTip);
+
   overlayEl.addEventListener('click', (e) => {
     if (!champUp()) return;
-    if (champ.stage === 'fly') { champGo(); return; }   // a tap skips the flight
+    if (champ.stage === 'fly') { hideMapTip(); champGo(); return; }   // a tap skips the flight
     if (champ.stage !== 'pick' || e.target.closest('.card')) return;
     // A tap on the map: pick the nearest open mountain; tap it again to go.
     let gx, gy;
