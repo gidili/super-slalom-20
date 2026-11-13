@@ -3478,7 +3478,7 @@
       0: '111101101101111', 1: '010110010010111', 2: '110001010100111', 3: '110001010001110',
       4: '101101111001001', 5: '111100110001110', 6: '011100111101111', 7: '111001010010010',
       8: '111101111101111', 9: '111101111001110',
-      '%': '101001010100101', '!': '010010010000010', '-': '000000111000000', ' ': '000000000000000',
+      '%': '101001010100101', '!': '010010010000010', '-': '000000111000000', '/': '001001010100100', ' ': '000000000000000',
     };
     return g;
   })();
@@ -4233,11 +4233,21 @@
   const MAP_WIDE = !NARROW, MAP_W = 520, MAP_H = 272;
   const mapCanvas = document.getElementById('map-screen');
   const mapTitleEl = document.getElementById('map-title');
+  const mapScoreEl = document.getElementById('map-score'), mapScoreList = mapScoreEl && mapScoreEl.querySelector('ol');
+  let mapScoreHtml = '';
   let mapCtx = null, mapImg = null;
   function showMap(on) {
     if (!MAP_WIDE || !mapCanvas) return false;
     mapCanvas.hidden = !on;
     if (mapTitleEl) mapTitleEl.hidden = !on;
+    if (mapScoreEl) {   // your scorecard so far, bottom left
+      mapScoreEl.hidden = !on;
+      if (on) {
+        const html = champListHtml() + champTip();
+        if (html !== mapScoreHtml) mapScoreList.innerHTML = mapScoreHtml = html;
+        mapScoreEl.hidden = !html;
+      }
+    }
     if (on && !mapCtx) {
       mapCanvas.width = MAP_W; mapCanvas.height = MAP_H;
       mapCtx = mapCanvas.getContext('2d');
@@ -4284,13 +4294,37 @@
     };
     const c = champ, opts = champOptions(), blink = Math.floor(performance.now() / 300) % 2;
     const flying = c.stage === 'fly', pick = flying ? c.current : opts[c.pick % opts.length];
-    for (let k = 1; k < c.played.length; k++) dots(at(c.played[k - 1].id), at(c.played[k].id), VIC.white, 2);
-    if (!flying) for (const id of pick.unlocks.filter(id => !c.open.has(id) && !skied(id))) dots(at(pick.id), at(id), VIC.yellow, 3);
+    const unlocks = flying ? [] : pick.unlocks.filter(id => !c.open.has(id) && !skied(id));
+    if (wide) {
+      // Thick lines, outlined in black: [on, off] pixels for dashes, none
+      // for solid. Outlines first, then the colour on top, so they cross cleanly.
+      const line = (a, b, col, dash) => {
+        const n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]))), pts = [];
+        for (let k = 0; k <= n; k++) if (!dash || k % (dash[0] + dash[1]) < dash[0]) pts.push([Math.round(a[0] + (b[0] - a[0]) * k / n), Math.round(a[1] + (b[1] - a[1]) * k / n)]);
+        return { pts, col };
+      };
+      const lines = [];
+      for (let k = 1; k < c.played.length; k++) lines.push(line(at(c.played[k - 1].id), at(c.played[k].id), VIC.white, [2, 3]));   // the way you came
+      if (!flying && c.played.length) lines.push(line(at(c.played[c.played.length - 1].id), at(pick.id), VIC.white, null));   // where you'd fly
+      for (const id of unlocks) lines.push(line(at(pick.id), at(id), PLANE_INKS.Y, [5, 4]));   // what it would open
+      for (const l of lines) for (const [x, y] of l.pts) for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) px(x + dx, y + dy, VIC.black);
+      for (const l of lines) for (const [x, y] of l.pts) px(x, y, l.col);
+    } else {
+      for (let k = 1; k < c.played.length; k++) dots(at(c.played[k - 1].id), at(c.played[k].id), VIC.white, 2);
+      for (const id of unlocks) dots(at(pick.id), at(id), VIC.yellow, 3);
+    }
     for (const m of MOUNTAINS) {
       const [mx, base] = at(m.id), open = opts.includes(m), picked = m === pick;
       // The ones you can pick bob gently, each to its own beat.
       const bob = wide ? 2 : 1;
       const my = base - (open && !picked && !flying && Math.sin(performance.now() / 260 + mx) > 0 ? bob : 0);
+      if (skied(m.id) && wide) {   // done: a big cartoony red X over its peak
+        BIG_PEAK.forEach((row, r) => [...row].forEach((ch, k) => { if (ch !== '.') px(mx + k - 5, my + r - 6, ch === 'K' ? VIC.black : VIC.white); }));
+        DONE_X.forEach((row, r) => [...row].forEach((ch, k) => {
+          if (ch !== '.') px(mx + k - 6, my + r - 9, ch === 'K' ? VIC.black : ch === 'W' ? VIC.white : VIC.crimson);
+        }));
+        continue;
+      }
       if (skied(m.id)) {   // a little flag planted
         const pole = wide ? 8 : 4;
         for (let r = -pole; r <= 0; r++) px(mx, my + r, VIC.black);
@@ -4298,7 +4332,7 @@
         for (let y = 0; y < fh; y++) for (let x = 1; x <= fw - y; x++) px(mx + x, my - pole + y, VIC.red);
         continue;
       }
-      const ink = picked ? (blink ? VIC.yellow : VIC.white) : open ? VIC.white : null;
+      const ink = picked ? (wide ? (blink ? PLANE_INKS.Y : VIC.white) : blink ? VIC.yellow : VIC.white) : open ? VIC.white : null;
       if (wide && (open || picked)) {
         // On the big map: a bigger peak, thickly outlined in black.
         BIG_PEAK.forEach((row, r) => [...row].forEach((ch, k) => {
@@ -4311,19 +4345,23 @@
         }
         for (const [dx, dy] of [[0, -3], [-1, -2], [1, -2], [-2, -1], [2, -1], [-3, 0], [3, 0]]) px(mx + dx, my + dy, VIC.black);
       }
-      if (picked && wide) {   // a big red arrow bouncing over it, outlined white then black
-        const b = Math.round(2.5 * Math.abs(Math.sin(performance.now() / 200)));
-        PICK_ARROW.forEach((row, r) => [...row].forEach((ch, k) => {
-          if (ch !== '.') px(mx + k - 6, my - 21 - b + r, ch === 'K' ? VIC.black : ch === 'W' ? VIC.white : VIC.crimson);
-        }));
-      } else if (picked) {   // ▼ over it
+      if (picked && !wide) {   // ▼ over it
         for (let r = 0; r < 3; r++) for (let q = r - 2; q <= 2 - r; q++) px(mx + q, my - 9 + r, blink ? VIC.crimson : VIC.white);
       }
     }
+    // The red arrow: where you are; before the first mountain, the one you'd start on.
+    const arrowAt = (ax, ay) => {
+      const b = Math.round(2.5 * Math.abs(Math.sin(performance.now() / 200)));
+      PICK_ARROW.forEach((row, r) => [...row].forEach((ch, k) => {
+        if (ch !== '.') px(ax + k - 6, ay - 22 - b + r, ch === 'K' ? VIC.black : ch === 'W' ? VIC.white : VIC.crimson);
+      }));
+    };
+    const startArrow = wide && !flying && !c.played.length;
+    if (startArrow) { const [ax, ay] = at(pick.id); arrowAt(ax, ay); }
     if (!flying) {
       // The pick's name on the map, white on a black shadow, above its ▼.
-      const [mx, my] = at(pick.id), label = pick.name.split(/ \(| "/)[0];
-      const lw = label.length * 4 - 1, lx = Math.max(2, Math.min(VW_ - lw - 2, mx - (lw >> 1))), ly = Math.max(1, my - (wide ? 30 : 16));
+      const [mx, my] = at(pick.id), label = withLand(pick.name.split(/ \(| "/)[0], pick.id).replace(/ \/ /g, '/');
+      const lw = label.length * 4 - 1, lx = Math.max(2, Math.min(VW_ - lw - 2, mx - (lw >> 1))), ly = Math.max(1, my - (startArrow ? 31 : wide ? 15 : 16));
       for (const [dx, dy, c] of [[1, 1, VIC.black], [0, 0, VIC.white]]) {
         for (let k = 0; k < label.length; k++) {
           const bitsK = FONT3[label[k]] || FONT3[' '];
@@ -4331,12 +4369,13 @@
         }
       }
     }
-    const plane = (sx, sy, ang) => {
+    const plane = (sx, sy, ang, spin = false) => {
       const cs = Math.cos(ang), sn = Math.sin(ang);
       if (wide) {   // the big one: every pixel round it looked up in the sprite, turned back
-        const S = BIG_PLANE, k = PLANE_SCALE, cx = (S[0].length - 1) / 2, cy = (S.length - 1) / 2, R = Math.ceil(Math.hypot(cx, cy) * k) + 1;
+        const S = BIG_PLANE[spin ? Math.floor(performance.now() / 60) % 2 : 0];
+        const cx = (S[0].length - 1) / 2, cy = (S.length - 1) / 2, R = Math.ceil(Math.hypot(cx, cy)) + 1;
         for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
-          const u = Math.round((dx * cs + dy * sn) / k + cx), v = Math.round((-dx * sn + dy * cs) / k + cy);
+          const u = Math.round(dx * cs + dy * sn + cx), v = Math.round(-dx * sn + dy * cs + cy);
           const ch = S[v] && S[v][u];
           if (ch && ch !== '.') px(Math.round(sx) + dx, Math.round(sy) + dy, PLANE_INKS[ch]);
         }
@@ -4352,13 +4391,14 @@
       // The plane, its dotted trail behind it, nose along the way it's going.
       const [sx, sy, ang] = planeAt(w, h, 0), [fx, fy] = planeAt(w, h, -1);
       dots([x0 + fx, y0 + fy], [x0 + sx, y0 + sy], VIC.white, 3);
-      plane(x0 + sx, y0 + sy, ang);
+      plane(x0 + sx, y0 + sy, ang, true);
     } else if (c.played.length) {
       // Where you are: the plane parked by the mountain you've just skied,
       // its name underneath in white. It takes off from here.
       const here = c.played[c.played.length - 1].id, [hx, hy] = at(here);
+      if (wide) arrowAt(hx, hy);   // you are here
       plane(hx + PARKED[0], hy + PARKED[1], 0);
-      const label = mountain(here).name.split(/ \(| "/)[0], lw = label.length * 4 - 1;
+      const label = withLand(mountain(here).name.split(/ \(| "/)[0], here).replace(/ \/ /g, '/'), lw = label.length * 4 - 1;
       const lx = Math.max(2, Math.min(VW_ - lw - 2, hx - (lw >> 1))), ly = hy + 3;
       for (const [dx, dy, col] of [[1, 1, VIC.black], [0, 0, VIC.white]]) {
         for (let k = 0; k < label.length; k++) {
@@ -4370,28 +4410,43 @@
   }
   // A little plane from above, pointing right: wings, tail, a dark nose.
   const PLANE = ['...X.....', '...XX....', 'X..XXX...', 'XXXXXXXXK', 'X..XXX...', '...XX....', '...X.....'];
-  const PARKED = [12, -4];   // where it waits, beside the mountain's flag
-  // The big map's plane: bright gold, red tips and tail, outlined in black.
-  const BIG_PLANE = [
-    '.........KK........',
-    '........KRK........',
-    '........KYK........',
-    '.......KYYK........',
-    '..KK...KYYK........',
-    '..KRK..KYYYK.......',
-    '..KYYKKKYYYYKKKKK..',
-    '.KRYYYYYYYYYYYYYYKK',
-    '..KYYKKKYYYYKKKKK..',
-    '..KRK..KYYYK.......',
-    '..KK...KYYK........',
-    '.......KYYK........',
-    '........KYK........',
-    '........KRK........',
-    '.........KK........',
-  ];
-  const PLANE_INKS = { K: VIC.black, Y: [236, 200, 60], R: VIC.crimson };
-  const PLANE_SCALE = 1;
-  // The big map's marker on the mountain you're choosing: a red arrow.
+  const PARKED = [16, -9];   // where it waits, beside the mountain's flag
+  // The big map's plane: a cartoony twin-prop, top-down, nose right. Gold
+  // with red engines, nose and tips, a cockpit window, outlined in black;
+  // two frames, so the propellers spin while it flies.
+  function buildPlane() {
+    const Wd = 23, Ht = 19, g = Array.from({ length: Ht }, () => Array(Wd).fill('.'));
+    const fill = (r0, r1, c0, c1, ch) => { for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) g[r][c] = ch; };
+    const M = 9;                         // the fuselage's middle row
+    fill(M - 1, M + 1, 3, 18, 'Y');      // fuselage
+    fill(M - 2, M + 2, 8, 15, 'Y');      // fatter in the middle
+    fill(M - 1, M + 1, 19, 19, 'R'); g[M][20] = 'R';   // round red nose
+    g[M][15] = g[M][16] = 'C'; g[M - 1][16] = 'C';      // cockpit window
+    fill(1, Ht - 2, 10, 13, 'Y');        // straight wings
+    fill(1, 1, 10, 13, 'R'); fill(Ht - 2, Ht - 2, 10, 13, 'R');   // red tips
+    fill(3, 5, 14, 16, 'R'); fill(Ht - 6, Ht - 4, 14, 16, 'R');   // engines
+    fill(M - 5, M + 5, 2, 4, 'Y');       // tailplane
+    fill(M - 5, M - 5, 2, 4, 'R'); fill(M + 5, M + 5, 2, 4, 'R');
+    fill(M - 1, M + 1, 6, 6, 'R');       // a stripe
+    // Black outline round everything.
+    const out = g.map(r => r.slice());
+    for (let r = 0; r < Ht; r++) for (let c = 0; c < Wd; c++) if (g[r][c] === '.')
+      for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const v = g[r + dr] && g[r + dr][c + dc]; if (v && v !== '.') { out[r][c] = 'K'; break; } }
+    // Propellers in front of the engines: a blade, then a blur.
+    const frames = [0, 1].map(f => {
+      const o = out.map(r => r.slice());
+      for (const e of [4, Ht - 5]) {
+        if (f === 0) for (let r = e - 2; r <= e + 2; r++) o[r][18] = 'K';
+        else { o[e - 2][18] = o[e + 2][18] = 'B'; o[e - 1][18] = o[e + 1][18] = 'W'; }
+        o[e][18] = 'K';
+      }
+      return o.map(r => r.join(''));
+    });
+    return frames;
+  }
+  const BIG_PLANE = buildPlane();
+  const PLANE_INKS = { K: VIC.black, Y: [236, 200, 60], R: VIC.crimson, C: VIC.cyan, W: VIC.white, B: VIC.lightBlue };
+  // The big map's marker on where you are: a red arrow.
   const PICK_ARROW = [
     '...KKKKKKK...',
     '...KWWWWWK...',
@@ -4406,6 +4461,21 @@
     '....KWRWK....',
     '.....KWK.....',
     '......K......',
+  ];
+  // The big map's mark on a mountain you've skied: a fat red X.
+  const DONE_X = [
+    '.KKK.....KKK.',
+    'KWWWK...KWWWK',
+    'KWRRWK.KWRRWK',
+    '.KWRRWKWRRWK.',
+    '..KWRRWRRWK..',
+    '...KWRRRWK...',
+    '...KWRRRWK...',
+    '..KWRRWRRWK..',
+    '.KWRRWKWRRWK.',
+    'KWRRWK.KWRRWK',
+    'KWWWK...KWWWK',
+    '.KKK.....KKK.',
   ];
   // The big map's peak: snow inside a thick black outline.
   const BIG_PEAK = [
@@ -4556,6 +4626,13 @@
   // course list. Most drop the bracket; the finale keeps its famous name.
   const shortName = m => m.short || m.name.split(' (')[0];
   const listName = m => m.list || m.name.split(/ \(| "/)[0];
+  // Each mountain's country, short, to go next to its name.
+  const LAND = {
+    alyeska: 'USA', kunama: 'AUSTRALIA', pista3: 'ITALY', aoraki: 'NEW ZEALAND', fuji: 'JAPAN',
+    cervino: 'SWITZERLAND / ITALY', vinson: 'ANTARCTICA', kirinyaga: 'KENYA', iztactepetl: 'MEXICO',
+    kilimanjaro: 'TANZANIA', aconcagua: 'ARGENTINA', annapurna: 'NEPAL', k2: 'PAKISTAN', chomolungma: 'TIBET / CHINA',
+  };
+  const withLand = (name, id) => `${name} - ${LAND[id]}`;
 
   // Each mountain's slope. Difficulty comes from height (0 the lowest, 1
   // the highest): closer poles, wider swings, more bunched-up stretches,
@@ -4724,7 +4801,7 @@
     // The total time only means something if every course was finished.
     const all = champ.played.every(p => p.finished);
     const totalCs = champ.played.reduce((a, p) => a + p.time_cs, 0);
-    return champ.played.map((p, i) => `<li><span>${i + 1} ${listName(mountain(p.id))}</span>${
+    return champ.played.map((p, i) => `<li><span>${i + 1} ${withLand(listName(mountain(p.id)), p.id)}</span>${
       cols(p.finished ? '*'.repeat(p.stars) : '', p.finished ? fmt(p.time_cs) : 'WIPEOUT', p.points)}</li>`).join('')
       + `<li class="total"><span>TOTAL</span>${cols('', all ? fmt(totalCs) : '', champTotal())}</li>`;
   }
@@ -4767,14 +4844,13 @@
           flags.className = 'unlock-flags';
           flags.append(...FLAGS_OF[id].map(flagCanvas));
           const nm = document.createElement('span');
-          nm.textContent = shortName(mountain(id));
+          nm.textContent = withLand(shortName(mountain(id)), id);
           row.append(flags, nm);
           P.text.appendChild(row);
         }
       }
       P.text.style.textAlign = 'center';
       P.prompt.textContent = NARROW ? 'ARROWS TO CHOOSE · TAP THE NAME TO GO' : 'LEFT / RIGHT CHOOSES · SPACE GOES';
-      if (MAP_WIDE) P.list.innerHTML = champListHtml() + champTip();   // your scorecard so far
     } else if (c.stage === 'intro') {
       const m = c.current;
       P.head.textContent = `COURSE ${n}: ${m.name}`;
@@ -4792,7 +4868,7 @@
       const p = c.played[c.played.length - 1];
       P.head.textContent = p.finished ? 'FINISHED' : 'WIPEOUT';
       P.flags.replaceChildren(...FLAGS_OF[p.id].map(flagCanvas));
-      P.sub.textContent = `${shortName(mountain(p.id))} +${p.points}` + (p.finished ? ` · TIME ${fmt(p.time_cs)}` : '') + (c.ranked ? '' : ' · UNRANKED');
+      P.sub.textContent = `${withLand(shortName(mountain(p.id)), p.id)} +${p.points}` + (p.finished ? ` · TIME ${fmt(p.time_cs)}` : '') + (c.ranked ? '' : ' · UNRANKED');
       P.text.textContent = '';
       P.prompt.textContent = (NARROW ? 'TAP' : 'SPACE') + (c.played.length === CHAMP_COURSES ? ' TO SEE HOW YOU DID' : ' FOR THE NEXT MOUNTAIN');
       if (c.leg) lendRunCard();
