@@ -110,12 +110,12 @@
   #tv #banner.small { left: 20%; right: 20%; font-size: clamp(9px, 1.8vw, 14px); }
   #tv #banner[hidden] { display: none; }
   /* What just happened, right under the skier, where the eyes are. */
-  #tv #pop { right: auto; white-space: nowrap; transform: translateX(-50%); font-size: clamp(7px, 1.5vw, 11px); }
+  #tv #pop, #tv .pop { right: auto; white-space: nowrap; transform: translateX(-50%); font-size: clamp(7px, 1.5vw, 11px); }
   /* Below the skier, who stands at about 30% down the screen. */
   #countdown { top: 45%; font-size: clamp(20px, 5.5vw, 38px); }
   #bonus { top: 20%; }
   /* A night course: the words on the slope in white, or they vanish in the dark. */
-  body.night #tv #message, body.night #tv #pop, body.night #tv #countdown, body.night #tv #bonus {
+  body.night #tv #message, body.night #tv #pop, body.night #tv .pop, body.night #tv #countdown, body.night #tv #bonus {
     color: var(--vic-white);
     text-shadow: 2px 0 0 var(--vic-blue), -2px 0 0 var(--vic-blue), 0 2px 0 var(--vic-blue), 0 -2px 0 var(--vic-blue);
   }
@@ -294,7 +294,7 @@
   body.narrow .mode-btn { font-size: 9px; padding: 14px 0.7em; }
   body.narrow #message { top: 58%; font-size: 11px; }
   body.narrow #message.above-count { top: 34%; }
-  body.narrow #tv #pop { font-size: 9px; }
+  body.narrow #tv #pop, body.narrow #tv .pop { font-size: 9px; }
   body.narrow #countdown { font-size: 34px; top: 40%; }
   body.narrow #bonus-time, body.narrow #bonus-points { font-size: 11px; }
   body.narrow #bonus-score { font-size: 22px; }
