@@ -633,14 +633,20 @@
   const msgEl = document.getElementById('message');
   const bannerEl = document.getElementById('banner');
   // A big moment, flashing across the middle for a while; nothing covers it.
-  let bannerTimer = null;
+  // Two at once take turns: the next waits for the one up to finish.
+  let bannerTimer = null, bannerQueue = [];
   function banner(text, ms, small = false) {
     if (!bannerEl) return;
+    if (!bannerEl.hidden) { bannerQueue.push([text, ms, small]); return; }
     bannerEl.textContent = text;
     bannerEl.classList.toggle('small', small);
     bannerEl.hidden = false;
     clearTimeout(bannerTimer);
-    bannerTimer = setTimeout(() => { bannerEl.hidden = true; }, ms);
+    bannerTimer = setTimeout(() => {
+      bannerEl.hidden = true;
+      const next = bannerQueue.shift();
+      if (next) banner(...next);
+    }, ms);
   }
   const overlayEl = document.getElementById('overlay');
   const overlayTitleEl = document.getElementById('overlay-title');
@@ -1314,7 +1320,7 @@
     state = 'title';
     ranOut = false;
     // The last run's weather and wildlife go with it.
-    if (bannerEl) bannerEl.hidden = true;
+    if (bannerEl) { bannerEl.hidden = true; bannerQueue = []; clearTimeout(bannerTimer); }
     sluff = null; slide = null; snowballs = []; rockfall = []; heli = null; icefall = []; wind = null; gustLines = []; fellIn = false; pan = 0;
     if (!keep) { champ = null; prepareRun(); }
     particles = [];
@@ -1555,7 +1561,7 @@
     SFX.stopSwoosh();
     SFX.playFanfare();
     flash(`FINISH +${FINISH_POINTS}`);
-    if (mothsCaught) setTimeout(() => { if (state === 'finished') pop(`MOTHMAN SPECIAL BONUS +${MOTHMAN_POINTS}`); }, 500);
+    if (mothsCaught) setTimeout(() => { if (state === 'finished') { banner(`MOTHMAN SPECIAL BONUS +${MOTHMAN_POINTS}`, 2500); SFX.playJingle(); } }, 500);
     runEnd = performance.now();
     closeSession();
     // Time to glide to a stop past the line before the bonus counts up.
@@ -4238,26 +4244,43 @@
   // POP_DRIFT of the slope's speed, only half following, and blinks out at
   // POP_MS.
   const POP_MS = 1700, POP_STAY = 450, POP_GAP = 18, POP_DRIFT = 0.7, POP_FOLLOW = 0.5, POP_BLINK = 350;
+  // Several can be up at once: a new one slides in below the others, each
+  // keeps its own time, and the rest close up when one goes. At most
+  // POP_MAX; past that the oldest goes early.
+  const POP_MAX = 4, POP_LINE = 8;   // rows apart on the slope
   const popEl = document.getElementById('pop');
-  let popUntil = 0, popFrom = { x: 0, side: 1 };
+  let pops = [];
   function pop(text) {
-    popEl.textContent = text;
-    popEl.hidden = false;
-    popUntil = performance.now() + POP_MS;
-    popFrom = { x: skierX - camX, side: skierX - camX < VW / 2 ? 1 : -1 };
-    placePop();
+    const el = (pops.length || !popEl.hidden) && popEl.cloneNode ? popEl.cloneNode(false) : popEl;
+    if (el !== popEl) { el.removeAttribute('id'); popEl.parentElement.appendChild(el); }
+    el.classList.add('pop');
+    el.textContent = text;
+    el.hidden = false;
+    pops.push({ el, until: performance.now() + POP_MS, from: { x: skierX - camX, side: skierX - camX < VW / 2 ? 1 : -1 } });
+    while (pops.length > POP_MAX) dropPop(pops[0]);
+    placePops();
   }
-  function placePop() {
-    const left = Math.max(0, popUntil - performance.now()), age = POP_MS - left;
-    const behind = Math.max(0, age - POP_STAY) / 1000;   // seconds since it let go
-    if (!behind) popFrom.x = skierX - camX;   // still riding along
-    const tvW = popEl.parentElement.clientWidth, w = popEl.offsetWidth, scale = tvW / VW;
-    const sx = popFrom.x + (skierX - camX - popFrom.x) * POP_FOLLOW;
-    const x = (sx + popFrom.side * POP_GAP) * scale;
-    popEl.style.left = (popFrom.side > 0 ? Math.min(x, tvW - w - 4) : Math.max(x, w + 4)) + 'px';
-    popEl.style.transform = popFrom.side > 0 ? 'none' : 'translateX(-100%)';
-    popEl.style.top = ((SKIER_Y - 4 - speed * POP_DRIFT * behind) / H * 100) + '%';
-    popEl.style.visibility = left < POP_BLINK && Math.floor(left / 75) % 2 ? 'hidden' : 'visible';
+  function dropPop(p) {
+    pops.splice(pops.indexOf(p), 1);
+    if (p.el === popEl) popEl.hidden = true; else p.el.remove();
+  }
+  function placePops() {
+    const now = performance.now();
+    for (const p of pops.filter(p => now > p.until || state === 'title')) dropPop(p);
+    pops.forEach((p, k) => {
+      const el = p.el, left = Math.max(0, p.until - now), age = POP_MS - left;
+      const behind = Math.max(0, age - POP_STAY) / 1000;   // seconds since it let go
+      if (!behind) p.from.x = skierX - camX;   // still riding along
+      const tvW = el.parentElement.clientWidth, w = el.offsetWidth, scale = tvW / VW;
+      const sx = p.from.x + (skierX - camX - p.from.x) * POP_FOLLOW;
+      const x = (sx + p.from.side * POP_GAP) * scale;
+      el.style.left = (p.from.side > 0 ? Math.min(x, tvW - w - 4) : Math.max(x, w + 4)) + 'px';
+      el.style.transform = p.from.side > 0 ? 'none' : 'translateX(-100%)';
+      // Stacked: the newest lowest, none drifting up into the one above.
+      const below = (k - (pops.length - 1)) * POP_LINE;
+      el.style.top = ((SKIER_Y - 4 + below - speed * POP_DRIFT * behind) / H * 100) + '%';
+      el.style.visibility = left < POP_BLINK && Math.floor(left / 75) % 2 ? 'hidden' : 'visible';
+    });
   }
 
   // Each mode keeps its own BEST; the box shows the highlighted mode's on
@@ -4577,7 +4600,8 @@
         for (let y = 0; y < fh; y++) for (let x = 1; x <= fw - y; x++) px(mx + x, my - pole + y, VIC.red);
         continue;
       }
-      const ink = picked ? (wide ? (blink ? PLANE_INKS.Y : VIC.white) : blink ? VIC.yellow : VIC.white) : open ? VIC.white : null;
+      // Ones you can pick: red, so they stand out; the one you're on blinks gold.
+      const ink = picked ? (wide ? (blink ? PLANE_INKS.Y : VIC.white) : blink ? VIC.yellow : VIC.white) : open ? VIC.crimson : null;
       if (wide && (open || picked)) {
         // On the big map: a bigger peak, thickly outlined in black.
         BIG_PEAK.forEach((row, r) => [...row].forEach((ch, k) => {
@@ -5758,7 +5782,7 @@
     if (particles.length) updateParticles(Math.min(dt, 0.05));
     if (state === 'running' || state === 'crashed' || state === 'finished') paintHud();
     if (now > flashUntil && state !== 'paused') msgEl.textContent = cardClosed ? startPrompt() : '';
-    if (!popEl.hidden) { if (now > popUntil || state === 'title') popEl.hidden = true; else placePop(); }
+    if (pops.length) placePops();
     render();
     requestAnimationFrame(frame);
   }
