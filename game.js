@@ -3834,9 +3834,10 @@
 
   function render() {
     // Between Championship courses, the world map instead of the slope.
-    if (champ && (champ.stage === 'pick' || champ.stage === 'fly') && !overlayEl.hidden) {
-      drawMap();
-      ctx.putImageData(img, 0, 0);
+    const onMap = !!champ && (champ.stage === 'pick' || champ.stage === 'fly') && !overlayEl.hidden;
+    if (showMap(onMap)) { drawMap(true); mapCtx.putImageData(mapImg, 0, 0); }
+    if (onMap) {
+      if (!MAP_WIDE) { drawMap(); ctx.putImageData(img, 0, 0); }
       if (champ.stage === 'fly' && performance.now() - champ.fly.at >= flightTime()) champGo();   // touchdown
       return;
     }
@@ -4145,6 +4146,8 @@
   // with sea, in base 36.
   const WORLD = {
     big: { w: 220, h: 107, runs: '2o.4.57.1.2.3.1.2.1.4.2.j.c.4.u.2.3q.4.2.1.1.1.1.5.8.f.u.2.b.a.9.4.33.8.2.3.2.3.1.1.9.c.v.1.6.1.1.1.2.j.4.3.2l.9.4.1.5.7.1.3.3.7.5.d.i.5.f.2.1.z.5.1.1z.2.5.z.2.1.1.4.4.9.k.b.2.1.1.a.1.19.1t.3.2.z.6.3.6.6.7.4.b.4.2.4.2.1p.1u.1.3.w.8.3.6.5.m.5.1.1x.1u.x.7.3.a.3.l.6.2.1p.1.7.1u.4.1.1.4.l.8.4.y.7.4.1m.3.2.1y.1.a.j.8.7.q.1.7.3.3.1j.8.2.1v.1.d.l.5.8.q.2.5.1.1.1.3.1k.8.3.28.n.1.b.o.1.1.2.4.1.3.1.1.1k.a.2.26.o.1.c.m.2.1.3.1.1x.6.1.26.z.r.20.1.1.2c.u.5.1.s.1z.1.1.2b.s.1.2.3.3.p.21.2d.v.1.1.u.j.2.6.2.18.2b.u.1.2.v.7.2.8.1.8.2.19.2.1.27.t.10.5.1.2.1.7.6.4.2.18.4.2.25.s.x.7.4.2.2.5.7.4.2.16.6.1.24.s.y.5.4.1.3.5.1.1.1.b.2.10.1.4.5.1.25.q.10.5.b.2.1.d.2.10.1.1.1.1.7.1.24.q.10.5.7.1.4.1.2.c.2.10.4.2.5.1.24.p.12.1.4.5.6.1.3.1.1.1.1.1b.3.2.3.3.23.p.13.1.1.7.7.2.3.1.1.1a.4.2.2.4.24.m.14.a.e.1c.6.2.26.l.14.d.4.1.7.1c.5.1.28.1.1.i.14.f.2.5.1.1.1.1e.2d.1.1.d.2.3.15.w.2.15.2c.1.1.9.7.2.14.y.1.15.2c.1.1.8.8.2.12.r.2.8.2.13.2e.7.9.1.13.s.1.8.4.11.2c.1.2.6.b.1.10.t.2.8.2.1.6.u.2e.1.1.6.1c.u.2.c.5.t.2h.4.8.1.1.2.10.w.1.c.6.c.1.d.1o.1.u.4.5.2.5.1.z.w.1.c.8.9.3.8.1s.1.t.6.3.2.8.2.w.w.2.a.9.8.5.7.2.1.2k.9.6.1.2.3.1.1.t.x.2.9.a.6.6.7.2p.7.17.x.2.8.b.5.8.7.8.1.2h.1.1.3.1.1.15.y.2.5.d.4.b.6.7.1.2j.6.13.10.1.4.f.3.b.7.6.1.2l.4.14.z.1.2.h.3.b.7.8.1.2l.1.7.1.x.10.j.3.e.4.9.1.2k.1.6.4.w.z.3.2.f.2.f.3.9.1.2l.1.4.2.1.6.t.13.f.2.g.1.9.1.2m.2.1.c.s.13.t.1.f.1.2o.b.s.12.j.1.o.1.1.1.2o.c.s.8.2.r.v.1.9.1.4.1.2o.f.q.2.7.q.t.2.1.2.7.2.2t.g.11.n.u.1.2.1.6.3.2s.h.11.m.w.1.1.1.5.4.2s.h.11.l.x.3.4.5.6.1.2k.i.11.k.z.2.4.5.2r.l.x.l.z.3.3.4.2.2.5.2.2h.n.w.j.11.3.2.4.2.1.9.3.2d.p.v.h.12.3.5.1.3.1.2.1.3.7.2a.r.u.h.13.2.i.6.3.1.26.s.t.g.15.1.i.6.1.1.2.1.24.s.t.g.15.4.f.6.2a.r.t.g.19.1.1.1.1.2.1.1.8.2.2.1.2a.q.u.g.1c.1.2.1.d.2.6.1.23.p.u.h.44.o.v.g.1k.3.3.1.2f.n.v.g.5.1.1d.3.3.2.2f.n.u.i.4.1.19.2.1.3.4.2.2g.m.u.h.3.3.19.7.3.2.2i.k.u.g.3.4.17.a.1.3.2j.i.v.f.4.3.18.e.2j.i.w.d.5.3.17.g.2j.h.w.d.5.3.14.j.9.1.29.h.w.d.5.2.13.l.a.1.28.f.y.d.5.2.13.m.2i.d.11.b.6.2.12.n.2i.d.11.a.1b.n.2i.d.11.a.1b.n.2i.d.11.a.1b.m.2j.c.13.8.1c.m.2j.c.13.7.1d.l.2l.a.14.6.1d.6.5.a.2m.a.14.4.1f.4.7.9.2n.8.31.7.c.1.2b.9.30.6.d.1.2b.8.31.2.1.1.f.2.2a.6.3l.1.2c.6.3k.1.2d.5.35.1.c.2.2g.5.3g.1.2i.4.3e.3.2j.4.3e.1.2l.5.60.4.1x.1.43.3.62.1.64.3.10s.1.62.1.1c.6.1.1.7.r.3k.1.1.2.x.1.5.g.2.z.35.2.c.2.k.22.2n.v.i.20.2l.1.2.t.b.2.3.26.2r.3b.1c' },
+    // The desktop's map, filling the window: enough pixels for Italy's boot.
+    huge: { w: 520, h: 253, runs: 'jo.h.e.n.cl.5.2.2.2.c.3.18.z.1.l.3.11.5.98.1.6.3.2.2.2.6.1.a.5.19.s.8.21.4.8s.3.q.7.a.1a.u.3.25.3.8s.5.2.3.3.5.4.3.s.11.20.6.q.j.m.5.7u.2.k.8.n.z.1y.3.q.m.8b.8.9.2.3.4.1.4.3.2.2.7.k.w.20.3.m.11.4.4.c.3.7c.5.1.a.1.2.4.4.2.1.4.e.j.u.21.3.d.4.4.3.1.19.b.9.5n.2.k.2.u.2.4.d.8.3.4.h.i.q.1.3.1b.2.o.3.a.5.1.1j.2.j.q.1.57.j.c.1.1.2.a.f.5.4.6.6.1.b.c.w.16.a.10.5.1.2d.a.1.5a.q.1.i.4.7.2.3.3.3.2.3.1.1.3.5.4.9.g.p.17.j.o.5.3.4.1.2m.2.9.4i.3.b.1f.7.3.1.1.4.b.2.4.5.2.2.6.e.l.1b.p.4.2.5.m.2.2x.4e.5.c.2b.4.1.3.a.a.k.1c.s.2.2.3.o.2.2z.4a.a.5.2.2.25.c.7.1.5.8.j.c.2.2.1.2.2.s.m.3.3.1.2.1.3v.4a.4.6.2a.1.1.a.8.3.2.b.d.i.9.q.a.4.a.5.40.4a.2.7.1.1.1.1.25.1.5.4.3.1.9.e.c.j.8.q.b.3.b.2.43.4m.22.4.3.2.2.9.7.e.b.m.2.s.c.2.4k.4f.25.9.1.c.4.i.8.1g.c.3.4o.49.26.d.1.2.6.o.8.1e.e.4.47.1.c.4b.25.h.7.o.7.1f.e.4.41.4.2.2.a.4b.e.1.3.3.1k.i.9.q.2.1h.e.4.4.3.3t.8.6.2.1.4e.9.2.2.b.1e.i.9.4.2.24.e.b.3u.6.4.4j.1.1.7.h.1d.h.a.3.3.24.4.2.7.7.3m.b.1.8.3.4m.4.m.1a.h.h.1r.2.h.6.8.3l.k.4.4j.2.2.3.l.1a.h.h.1q.5.d.1.1.5.6.2.1.3l.j.7.4f.2.s.1e.d.h.1q.4.c.3.2.4.6.3n.k.8.4a.3.u.1g.b.i.1r.4.b.2.2.3.8.3n.l.7.47.2.z.1j.5.l.1q.4.c.1.2.1.a.3n.m.7.43.1.12.1k.3.p.1k.3.3.3.b.2.7.2.2.3q.l.6.52.2.2.1j.4.p.1j.4.4.3.a.48.i.5.51.1.3.1j.4.q.1i.4.2.5.5.4h.f.4.51.1.3.1j.3.r.1i.3.3.7.3.4i.f.3.55.1j.2.r.1j.1.4.7.4.4j.g.1.54.2a.2.1.1p.6.1.4k.2.2.5i.2.1.26.3.1.1p.2.6.4l.2.2.5h.20.3.2.6.3.1u.4o.2.2.5h.2.1.1u.2.2.8.6.1q.4q.2.2.1.1.5g.1.1.1s.2.4.7.7.1n.4u.2.1.5h.2.1.1r.1.5.7.8.1n.4u.3.1.5g.1t.1.6.b.1.1.2.1p.1e.1.3d.4.2.5d.22.3.1.20.14.1.4.3.f.4.2w.5.2.5c.22.2.2.21.12.4.2.4.d.5.2w.5i.1z.2.4.22.h.2.k.3.i.5.2y.6.1.5a.1y.2.3.25.h.4.h.5.2.4.b.6.2x.7.2.57.1x.4.1.27.c.2.4.3.h.d.a.4.2y.7.5.53.1w.25.k.4.4.4.e.f.a.4.2x.8.5.51.1w.25.g.7.1.1.5.4.d.h.8.6.2r.b.5.52.1w.26.f.7.1.2.5.5.b.i.8.5.2q.d.1.2.1.52.1w.26.e.8.1.4.4.5.b.5.5.7.9.6.2o.5i.1s.1.1.29.c.a.1.6.4.3.a.2.q.7.2n.d.2.51.1s.2c.b.b.2.6.2.1.1.2.6.2.1.1.t.3.2f.2.9.e.2.50.1s.2b.c.b.1.8.1.5.3.5.t.5.2d.3.2.2.4.g.2.4z.1q.2d.c.b.1.9.1.4.4.4.t.6.2b.4.1.4.3.g.3.4y.1o.1.1.2d.c.k.1.6.3.4.t.7.2a.a.4.e.3.4y.1o.2g.a.h.5.6.4.3.u.6.2b.9.5.d.3.4y.1o.2g.9.j.3.8.2.5.u.5.2d.1.3.5.4.c.3.4y.1o.2j.5.a.6.6.1.8.2.6.v.2.2i.6.4.9.6.4x.1o.2j.1.8.d.p.1.2.3.2.33.7.4.9.6.4x.1o.2j.1.5.g.x.32.9.4.6.1.1.7.4w.1n.2k.m.i.3.8.2.2.32.a.3.4.b.4w.1l.2l.n.x.33.9.1.6.7.52.1i.2l.o.x.35.d.2.1.5.53.1f.2m.q.w.35.c.3.1.1.1.1.55.1e.2m.u.t.36.c.3.58.1c.2n.x.7.4.g.37.c.2.57.1c.2o.y.6.7.c.39.c.1.58.2.2.17.2o.z.5.b.2.4.2.3a.b.1.58.1.3.16.2p.12.1.3t.5l.1.3.v.5.2.1.3.2p.27.2.2o.5k.2.2.o.4.3.8.3.2o.27.3.2p.5j.2.2.n.h.2.2n.1n.1.l.3.2p.5j.1.2.l.i.3.2m.2a.4.2o.5i.2.3.i.k.3.2k.1r.1.1.1.i.4.2n.5i.3.3.i.k.3.2k.1s.3.j.4.2l.5k.2.2.i.k.3.2.1.2g.1t.4.j.5.2.2.2f.5k.2.3.g.m.2.2i.1v.3.j.8.1.1.2e.5l.1.3.g.m.2.2i.1v.4.i.1.1.9.2c.5l.2.4.f.q.1.2f.1w.3.k.5.2.e.20.3.1.5h.2.4.e.r.1.2e.1y.3.j.4.3.f.1z.3.1.5i.2.4.d.r.1.2d.1z.4.q.e.1y.4.1.5j.1.4.c.36.1z.5.s.d.1v.5.1.5j.1.4.c.k.5.2g.21.4.s.e.1t.6.1.5p.b.j.1.2.5.2e.22.3.t.e.t.2.u.5z.b.i.1.5.4.2c.23.3.t.e.r.4.t.3y.1.21.b.b.4.b.3.2b.24.3.s.f.o.7.l.3.2.42.1.1y.c.a.4.d.3.2a.24.3.r.h.1.2.k.7.l.4.1.61.c.9.5.e.4.29.23.4.p.l.j.9.j.48.1.1y.d.8.4.k.4.24.23.5.o.l.i.b.i.4.3.41.1.1z.c.7.5.l.5.22.23.6.n.l.h.d.h.4.2.63.c.4.7.l.6.21.24.5.m.n.g.d.h.4.2.64.l.e.2.3.1.2.2.5.2.1y.25.5.l.n.f.f.h.k.2.5p.i.2u.26.4.j.p.e.g.i.j.3.5p.h.2u.26.5.i.q.c.i.h.j.3.5r.f.2u.26.5.f.t.c.i.3.1.e.i.3.5s.4.1.8.2v.27.5.d.u.b.j.2.2.g.g.3.5z.d.2n.28.5.d.v.9.p.f.g.3.5z.e.2m.29.4.b.x.9.p.g.g.2.60.d.2l.2c.2.9.10.8.p.g.g.2.61.b.2n.2b.2.7.12.8.q.g.g.4.61.8.2n.2c.2.5.14.7.q.g.g.1.2.2.62.6.2n.2d.1.2.17.8.q.2.1.c.g.1.3.1.63.5.g.1.26.2e.19.7.r.2.3.a.m.1.61.4.g.2.27.2d.a.1.z.6.r.2.4.9.m.2.61.3.f.2.2.3.24.2c.7.4.z.6.r.2.4.9.j.1.2.2.61.3.c.5.1.4.a.1.1u.2c.4.6.10.5.r.1.6.7.k.3.63.4.b.5.1.8.2.2.2.1.1u.2m.10.5.r.1.8.4.g.1.5.2.65.2.a.6.1.e.1w.2l.10.4.s.1.9.2.h.1.5.1.67.2.3.3.3.6.1.f.1w.2k.11.4.1.1.p.1.8.2.h.1.6.1.3.1.63.6.1.2.1.n.1w.2j.12.2.3.2.o.3.z.2.65.2.4.q.1v.2j.13.1.3.2.o.3.w.6.65.2.2.s.1u.2j.17.3.p.1.w.6.6a.s.1u.2h.18.3.p.2.u.1.3.3.6a.t.1v.2f.18.3.q.2.m.1.a.3.6b.s.1v.j.3.1t.19.1.r.3.k.3.9.2.6b.z.1r.e.7.1r.22.4.j.4.9.1.6b.10.1q.7.1.5.9.1q.1v.4.4.4.h.6.6k.11.1r.2.i.1p.1x.3.4.4.g.6.6l.12.2f.1k.1y.3.3.4.f.6.6m.12.2g.1i.20.3.3.3.f.6.6m.13.2f.1i.20.4.2.3.e.7.6l.14.2f.1h.22.4.2.3.b.9.6k.15.2f.1g.24.5.1.2.b.9.6k.16.2e.1f.26.5.1.2.7.d.9.1.3.2.63.17.2e.1e.27.5.9.f.2.2.3.1.4.2.62.17.2f.1d.28.6.8.d.3.7.4.2.62.17.2e.1d.2a.6.7.d.3.1.a.1.63.1a.2b.1c.2b.6.8.c.l.1.5v.1e.28.1c.2c.5.8.b.4.1.1.2.c.5.5t.1g.26.1b.2d.6.8.9.4.5.d.4.5t.1h.26.19.2f.5.8.9.4.4.f.3.4.3.5o.1h.24.18.2g.7.6.9.4.4.g.2.2.7.5l.1n.20.17.2h.6.8.7.4.2.1.2.8.3.3.4.1.9.5j.1o.1z.17.2h.6.c.3.4.5.5.1.5.1.3.f.5g.1q.1z.15.2j.5.k.1.1.2.h.f.b.1.52.1r.1z.14.2k.4.k.1.1.1.1.1.i.e.9.2.52.1u.1w.13.2m.3.j.2.2.2.k.c.6.1.1.1.54.1u.1w.13.2n.2.1a.c.3.4.5.1.4z.1v.1w.12.2o.3.12.1.5.e.2.2.6.1.50.1u.1w.12.2o.4.3.2.12.d.c.2.4z.1t.1w.13.2o.9.12.c.5e.1s.1x.11.2r.1.1.7.y.a.1.3.g.1.4x.1s.1x.11.2w.6.3.1.6.1.l.2.1.5.4.3.g.1.4x.1r.1x.12.33.3.1.4.4.2.k.4.4.3.5e.1q.1y.12.3d.2.o.1.6.3.h.1.4w.1p.1y.12.36.2.4.2.x.3.e.2.4x.1o.1z.13.4c.2.f.1.4x.1m.21.12.9r.1m.21.12.3n.1.d.1.5p.1l.22.12.3o.1.c.2.5p.1k.21.13.c.1.38.9.6.3.5q.1i.21.14.c.1.37.9.7.3.5q.1i.21.14.b.2.37.8.8.3.5q.1i.21.14.a.3.31.1.4.9.8.3.5r.1h.20.15.a.3.30.3.2.9.8.5.5r.1g.20.15.9.5.2y.f.8.6.5r.1f.20.14.9.6.2x.g.8.5.5t.1e.20.14.7.7.2x.j.5.6.5v.1c.20.13.7.8.2w.k.5.6.1b.2.4j.1b.20.12.7.8.2v.1.1.m.2.7.5x.1a.20.10.9.8.2v.x.18.2.4o.18.21.z.a.8.2u.y.18.2.4p.17.21.y.b.7.2u.z.5z.17.22.w.c.7.2u.10.5y.17.22.v.d.7.2s.13.5y.16.22.v.d.6.2r.15.m.1.5b.15.24.u.c.7.2n.19.m.2.5a.15.24.u.c.6.2n.1b.m.1.5a.15.25.t.b.7.2l.1d.m.2.59.14.26.t.b.7.2j.1f.5x.14.26.t.b.6.2k.1g.5w.10.2a.t.c.5.2k.1f.5x.y.2c.t.c.5.2j.1h.5x.w.2d.s.d.4.2k.1h.5x.v.2e.q.f.3.2l.1i.5w.v.2e.p.34.1i.5w.u.2g.o.33.1i.5x.u.2g.o.33.1i.5x.v.2f.o.33.1h.5y.v.2f.n.34.1h.5y.v.2g.m.34.1h.5y.u.2h.l.35.1g.5z.u.2i.j.36.1g.60.s.2j.j.35.1g.61.s.2k.h.36.1f.62.s.2k.g.37.1f.62.r.2l.f.38.i.4.s.63.q.2m.f.38.d.b.p.65.p.2m.d.39.c.d.o.66.p.2m.c.3a.b.e.m.68.o.2n.6.3e.7.k.2.1.i.69.i.2.4.2o.2.3i.4.m.1.3.g.t.1.5g.j.74.1.1.h.t.1.5g.k.75.f.v.1.5g.k.76.e.v.1.5g.l.74.e.6c.m.74.d.w.2.5g.k.75.a.y.5.5e.j.79.1.2.2.10.4.5g.e.8g.4.5i.e.8g.3.5j.e.8g.2.5k.b.1.2.7c.2.1.2.u.1.3.1.5m.c.7e.4.u.3.5p.1.1.a.1.1.7b.4.t.4.5r.c.7c.3.t.3.5v.a.7c.1.t.3.5x.a.83.4.5y.b.81.5.5z.9.81.5.61.9.80.5.62.a.80.2.65.a.e6.b.e5.b.e5.a.4k.2.9l.9.4j.1.9n.8.e9.7.ea.7.9.4.dx.6.ec.6.ea.7.eb.7.ec.3.1.1.4f9.2.ec.1.ed.2.ed.4.38.5.1a.3.7.3.k.2.8p.2.37.a.r.1.1.3.1.1.2.1.5.j.2.q.8g.2.33.o.b.1w.8e.1.2.4.2o.2.5.t.8.25.88.2.1.6.1w.1.5.1.2.5.8.12.5.2d.85.a.1h.1.8.1t.3.2m.76.5.l.2.1.3.2.5.1c.25.1.2p.76.5.4.2.2.4.d.a.17.4w.6f.n.b.z.18.4q.6e.21.17.4q.69.1.1.2.3.1w.15.4x.68.3.4.1y.p.6.7.52.6o.1u.6.5.5.7.f.4o.6s.2a.3.5d.65.8m.2x' },
   };
   const worldBits = {};
   function worldMap(size) {
@@ -4178,23 +4181,39 @@
   // On a phone the detailed map is wider than the screen, so the view
   // glides sideways to keep the mountain you've picked in the middle.
   let mapPan = null, mapSpots = {};
-  function drawMap() {
-    const { w, h, bits } = worldMap('big');
-    let x0 = Math.floor((VW - w) / 2);
-    const y0 = NARROW ? 30 : 8;
-    if (w > VW) {
+  // On a desktop the map leaves the TV and fills the window, on its own
+  // canvas with more (but still chunky) pixels; a phone keeps it in the TV.
+  const MAP_WIDE = !NARROW, MAP_W = 520, MAP_H = 272;
+  const mapCanvas = document.getElementById('map-screen');
+  let mapCtx = null, mapImg = null;
+  function showMap(on) {
+    if (!MAP_WIDE || !mapCanvas) return false;
+    mapCanvas.hidden = !on;
+    if (on && !mapCtx) {
+      mapCanvas.width = MAP_W; mapCanvas.height = MAP_H;
+      mapCtx = mapCanvas.getContext('2d');
+      mapImg = mapCtx.createImageData(MAP_W, MAP_H);
+    }
+    return on;
+  }
+  function drawMap(wide = false) {
+    const VW_ = wide ? MAP_W : VW, H_ = wide ? MAP_H : H, buf = wide ? mapImg : img;
+    const { w, h, bits } = worldMap(wide ? 'huge' : 'big');
+    let x0 = Math.floor((VW_ - w) / 2);
+    const y0 = wide ? 16 : NARROW ? 30 : 8;
+    if (w > VW_) {
       const o = champOptions(), sel = champ.stage === 'fly' ? champ.current : o[champ.pick % o.length], [lon, lat, dx = 0] = PLACES[sel.id];
       const focus = champ.stage === 'fly' ? planeAt(w, h, 0)[0] : equalEarth(lon, lat, w, h)[0] + dx;
-      const want = Math.max(VW - w, Math.min(0, Math.round(VW / 2 - focus)));
+      const want = Math.max(VW_ - w, Math.min(0, Math.round(VW_ / 2 - focus)));
       mapPan = mapPan === null ? want : mapPan + (want - mapPan) * 0.15;
       x0 = Math.round(mapPan);
     }
     const px = (x, y, c) => {
-      if (x < 0 || x >= VW || y < 0 || y >= H) return;
-      const i = (y * VW + x) * 4; img.data[i] = c[0]; img.data[i + 1] = c[1]; img.data[i + 2] = c[2]; img.data[i + 3] = 255;
+      if (x < 0 || x >= VW_ || y < 0 || y >= H_) return;
+      const i = (y * VW_ + x) * 4; buf.data[i] = c[0]; buf.data[i + 1] = c[1]; buf.data[i + 2] = c[2]; buf.data[i + 3] = 255;
     };
     const land = (x, y) => x >= 0 && x < w && y >= 0 && y < h && bits[y * w + x] === 1;
-    for (let y = 0; y < H; y++) for (let x = 0; x < VW; x++) px(x, y, VIC.blue);
+    for (let y = 0; y < H_; y++) for (let x = 0; x < VW_; x++) px(x, y, VIC.blue);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       if (land(x, y)) {
         // Snow towards the poles, fading out through a dither, not a ruled line.
@@ -4234,7 +4253,7 @@
     if (!flying) {
       // The pick's name on the map, white on a black shadow, above its ▼.
       const [mx, my] = at(pick.id), label = pick.name.split(/ \(| "/)[0];
-      const lw = label.length * 4 - 1, lx = Math.max(2, Math.min(VW - lw - 2, mx - (lw >> 1))), ly = Math.max(1, my - 16);
+      const lw = label.length * 4 - 1, lx = Math.max(2, Math.min(VW_ - lw - 2, mx - (lw >> 1))), ly = Math.max(1, my - 16);
       for (const [dx, dy, c] of [[1, 1, VIC.black], [0, 0, VIC.white]]) {
         for (let k = 0; k < label.length; k++) {
           const bitsK = FONT3[label[k]] || FONT3[' '];
@@ -4572,7 +4591,7 @@
     }
     champEl.hidden = false;
     P.pick.hidden = c.stage !== 'pick';
-    P.flags.hidden = c.stage !== 'intro';
+    P.flags.hidden = c.stage !== 'intro' && c.stage !== 'pick';
     P.prev.hidden = P.next.hidden = c.stage !== 'pick' || champOptions().length < 2;
     P.list.innerHTML = c.stage === 'intro' ? '' : champListHtml();
     if (c.stage === 'pick') {
@@ -4582,6 +4601,7 @@
       // A bracketed part goes on its own, smaller line.
       const [main, rest] = shortName(m).split(' (');
       P.go.innerHTML = rest ? `${main}<small>(${rest}</small>` : main;
+      P.flags.replaceChildren(...FLAGS_OF[m.id].map(flagCanvas));   // whose mountain it is
       const next = m.unlocks.filter(id => !c.open.has(id) && !skied(id));
       P.text.textContent = `${m.country} · ${m.height}` + (m.id === FINALE ? ' · THE FINALE'
         : next.length ? ` · FINISH TO UNLOCK: ${next.map(id => shortName(mountain(id))).join(', ')}` : '');
@@ -4757,7 +4777,14 @@
     if (champ.stage === 'fly') { champGo(); return; }   // a tap skips the flight
     if (champ.stage !== 'pick' || e.target.closest('.card')) return;
     // A tap on the map: pick the nearest open mountain; tap it again to go.
-    const r = canvas.getBoundingClientRect(), gx = (e.clientX - r.left) / r.width * VW, gy = (e.clientY - r.top) / r.height * H;
+    let gx, gy;
+    if (MAP_WIDE) {   // the map canvas, letterboxed to fit the window
+      const r = mapCanvas.getBoundingClientRect(), k = Math.min(r.width / MAP_W, r.height / MAP_H);
+      gx = (e.clientX - r.left - (r.width - MAP_W * k) / 2) / k; gy = (e.clientY - r.top - (r.height - MAP_H * k) / 2) / k;
+    } else {
+      const r = canvas.getBoundingClientRect();
+      gx = (e.clientX - r.left) / r.width * VW; gy = (e.clientY - r.top) / r.height * H;
+    }
     const opts = champOptions();
     let best = -1, bestD = 12;
     opts.forEach((m, k) => { const [x, y] = mapSpots[m.id] || [-99, -99], d = Math.hypot(gx - x, gy - (y - 1)); if (d < bestD) { bestD = d; best = k; } });

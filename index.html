@@ -127,6 +127,13 @@
   #overlay.visible { opacity: 1; pointer-events: auto; }
   /* Over the world map: no wash, and the card tucked in below the map. */
   #overlay.map-mode { background: none; align-items: flex-end; padding-bottom: 4vh; }
+  /* Desktop: the map fills the window, and the card sits bottom left, over
+     the empty South Pacific. */
+  #map-screen { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; z-index: 9;
+    background: var(--vic-blue); image-rendering: pixelated; image-rendering: crisp-edges; }
+  #map-screen[hidden] { display: none; }
+  body:not(.narrow) #overlay.map-mode { justify-content: flex-start; padding: 0 0 3vh 3vw; }
+  body:not(.narrow) #overlay.map-mode .card { margin: 0; }
   #overlay.map-mode .card { margin: 0 auto; }
   body.map-mode #hud { visibility: hidden; }
   #overlay.flying .card { visibility: hidden; }
@@ -418,6 +425,7 @@
     </div>
   </div>
 
+  <canvas id="map-screen" hidden></canvas>
   <div id="overlay" hidden>
     <div class="card">
       <div id="champ" hidden>
