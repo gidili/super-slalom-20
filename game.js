@@ -3253,16 +3253,16 @@
 
   // A cherry tree in bloom: a round pink crown flecked white, on a trunk.
   // Same footprint as a pine, so it hits and burns the same.
-  const CHERRY = [
-    '..PPPPP..',
-    '.PPWPPPP.',
-    'PPPPPPWPP',
-    'PWPPPPPPP',
-    'PPPPPWPPP',
-    '.PPPPPPP.',
-    '..PPPPP..',
-    '....O....',
-    '....O....',
+  const CHERRY = [   // black branches spreading through it, a brown and black trunk
+    '..PWPPP..',
+    '.PPPPWPP.',
+    'PWKPPPKPP',
+    'PPPKPKPWP',
+    '.PPPKOPP.',
+    '..K.KO.K.',
+    '....KO...',
+    '....KO...',
+    '...KKOO..',
   ];
 
   // A southern rātā in flower: a broad crimson crown with dark leaves
@@ -4261,25 +4261,43 @@
         }
       }
     }
-    if (flying) {
-      // The plane, its dotted trail behind it, nose along the way it's going.
-      const [sx, sy, ang] = planeAt(w, h, 0), [fx, fy] = planeAt(w, h, -1);
-      dots([x0 + fx, y0 + fy], [x0 + sx, y0 + sy], VIC.white, 3);
+    const plane = (sx, sy, ang) => {
       const cs = Math.cos(ang), sn = Math.sin(ang);
       PLANE.forEach((row, r) => [...row].forEach((ch, k) => {
         if (ch === '.') return;
         const u = k - 4, v = r - 3;
-        px(Math.round(x0 + sx + u * cs - v * sn), Math.round(y0 + sy + u * sn + v * cs), ch === 'K' ? VIC.black : VIC.white);
+        px(Math.round(sx + u * cs - v * sn), Math.round(sy + u * sn + v * cs), ch === 'K' ? VIC.black : VIC.white);
       }));
+    };
+    if (flying) {
+      // The plane, its dotted trail behind it, nose along the way it's going.
+      const [sx, sy, ang] = planeAt(w, h, 0), [fx, fy] = planeAt(w, h, -1);
+      dots([x0 + fx, y0 + fy], [x0 + sx, y0 + sy], VIC.white, 3);
+      plane(x0 + sx, y0 + sy, ang);
+    } else if (c.played.length) {
+      // Where you are: the plane parked by the mountain you've just skied,
+      // its name underneath in white. It takes off from here.
+      const here = c.played[c.played.length - 1].id, [hx, hy] = at(here);
+      plane(hx + PARKED[0], hy + PARKED[1], 0);
+      const label = mountain(here).name.split(/ \(| "/)[0], lw = label.length * 4 - 1;
+      const lx = Math.max(2, Math.min(VW_ - lw - 2, hx - (lw >> 1))), ly = hy + 3;
+      for (const [dx, dy, col] of [[1, 1, VIC.black], [0, 0, VIC.white]]) {
+        for (let k = 0; k < label.length; k++) {
+          const bitsK = FONT3[label[k]] || FONT3[' '];
+          for (let b = 0; b < 15; b++) if (bitsK[b] === '1') px(lx + k * 4 + (b % 3) + dx, ly + Math.floor(b / 3) + dy, col);
+        }
+      }
     }
   }
   // A little plane from above, pointing right: wings, tail, a dark nose.
   const PLANE = ['...X.....', '...XX....', 'X..XXX...', 'XXXXXXXXK', 'X..XXX...', '...XX....', '...X.....'];
+  const PARKED = [8, -3];   // where it waits, beside the mountain's flag
   // Where a hop starts and ends, on a map w by h. The first hop of a
   // Championship flies in from off to the west.
   function flightEnds(w, h) {
     const spot = id => { const [lon, lat, dx = 0, dy = 0] = PLACES[id], [x, y] = equalEarth(lon, lat, w, h); return [x + dx, y + dy]; };
-    const b = spot(champ.fly.to), a = champ.fly.from ? spot(champ.fly.from) : [b[0] - 80, b[1] - 25];
+    const b = spot(champ.fly.to), f = champ.fly.from && spot(champ.fly.from);
+    const a = f ? [f[0] + PARKED[0], f[1] + PARKED[1]] : [b[0] - 80, b[1] - 25];   // from where it was parked
     return [a, b];
   }
   // How long a hop takes: longer for further, 1 to 2 seconds.
