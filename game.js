@@ -3802,8 +3802,8 @@
       } else if (course && course.screeAt && course.screeAt(sx, wy) && (off > LINE_HW || line === null)) {
         // Scree: dark volcanic grit, brown and black; or blue-black rock.
         const v = hash(sx + 5, wy + 11);
-        col = course.shape.darkRock ? (v < 0.12 ? VIC.black : v < 0.42 ? VIC.blue : VIC.lightBlue)
-          : v < 0.2 ? VIC.black : VIC.orange;
+        col = course.shape.darkRock ? (v < 0.04 ? VIC.black : v < 0.36 ? VIC.blue : VIC.lightBlue)
+          : v < 0.06 ? VIC.black : VIC.orange;
       }
       // The lip where a steep pitch drops away: a broken dark line right
       // across the slope.

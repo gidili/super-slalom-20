@@ -26,7 +26,19 @@ select cron.schedule(
        and started_at < now() - interval '7 days'$$
 );
 
+-- Championships never finished (no total saved), a week after they
+-- started. Their mountains go with them (on delete cascade); scores
+-- already posted to boards stay.
+select cron.schedule(
+  'prune-orphan-slalom-champs',
+  '52 3 * * *',   -- daily, UTC, just after the sessions' prune
+  $$delete from slalom_champs
+     where used_at is null
+       and started_at < now() - interval '7 days'$$
+);
+
 -- Inspect:   select jobname, schedule, active from cron.job;
 --            select jobid, status, return_message, start_time
 --              from cron.job_run_details order by start_time desc limit 5;
 -- Remove:    select cron.unschedule('prune-orphan-slalom-sessions');
+--            select cron.unschedule('prune-orphan-slalom-champs');
