@@ -103,6 +103,10 @@
   #message { top: 62%; font-size: clamp(8px, 1.9vw, 13px); }
   #message.above-count { top: 39%; }
   #message small { display: block; margin-top: 0.8em; font-size: 0.6em; }
+  /* Paused: on a white strip, readable over any ground. */
+  #tv #message.paused { left: 6%; right: 6%; padding: 0.7em 0.5em; background: var(--vic-white); border: 2px solid var(--vic-blue); text-shadow: none; }
+  body.narrow #tv #message.paused small { font-size: 9px; line-height: 1.6; }
+  body.night #tv #message.paused { color: var(--vic-blue); text-shadow: none; }   /* K2's night: blue on the strip */
   /* A big moment (a bear survived): a flashing banner across the middle,
      its own element, so nothing else can cover it. */
   #tv #banner { top: 46%; left: 8%; right: 8%; padding: 0.6em 0; font-size: clamp(11px, 2.6vw, 20px);

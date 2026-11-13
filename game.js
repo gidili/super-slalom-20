@@ -1473,12 +1473,14 @@
         : course.endless ? 'ENDLESS' : 'SINGLE · RANDOM COURSE';
       msgEl.innerHTML = 'PAUSED<small></small>';
       msgEl.querySelector('small').textContent = where;
+      msgEl.classList.add('paused');   // on a strip of its own, readable over anything
     } else if (state === 'paused') {
       state = 'running';
       pausedMs += performance.now() - pausedAt;
       tellServer('slalom_resume');
       SFX.startSwoosh();
       msgEl.textContent = '';
+      msgEl.classList.remove('paused');
     }
   }
 
@@ -4254,6 +4256,7 @@
   // ------------------------------------------------------------------ hud
   let flashUntil = 0;
   function flash(text, ms = 1100) {
+    msgEl.classList.remove('paused');
     msgEl.textContent = text;
     flashUntil = performance.now() + ms;
   }
@@ -5816,7 +5819,7 @@
     }
     if (particles.length) updateParticles(Math.min(dt, 0.05));
     if (state === 'running' || state === 'crashed' || state === 'finished') paintHud();
-    if (now > flashUntil && state !== 'paused') msgEl.textContent = cardClosed ? startPrompt() : '';
+    if (now > flashUntil && state !== 'paused') { msgEl.textContent = cardClosed ? startPrompt() : ''; msgEl.classList.remove('paused'); }
     if (pops.length) placePops();
     render();
     requestAnimationFrame(frame);
