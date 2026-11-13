@@ -553,13 +553,14 @@
     const tourists = [];
     if (S.tourists && !endless) {
       const rnd4 = mulberry32((seed % 4294967296) ^ 0x70C);
-      for (let y = finishY * 0.08; y < finishY * 0.88; y += 190 + rnd4() * 110) {
+      for (let y = finishY * 0.08; y < finishY * 0.88; y += 130 + rnd4() * 80) {
         if (cherryAt(y) < 0.3) continue;   // no blossom here, no tourists
         const side = rnd4() < 0.5 ? -1 : 1, n = 1 + Math.floor(rnd4() * 3), yy = Math.round(y);
         const base = centerAt(yy) + side * (widthAt(yy) + 7 + rnd4() * 6);
         for (let k = 0; k < n; k++) {
           tourists.push({ x: Math.round(base + side * k * 6), y: yy + Math.round((rnd4() - 0.5) * 5), side,
-            ink: FAN_INKS[Math.floor(rnd4() * FAN_INKS.length)], phase: Math.floor(rnd4() * 8), flee: 0 });
+            ink: FAN_INKS[Math.floor(rnd4() * FAN_INKS.length)], phase: Math.floor(rnd4() * 8), flee: 0,
+            kid: k > 0 && rnd4() < 0.35 });   // now and then a child with them
         }
       }
     }
@@ -1329,7 +1330,7 @@
     ranOut = false;
     // The last run's weather and wildlife go with it.
     if (bannerEl) { bannerEl.hidden = true; bannerQueue = []; clearTimeout(bannerTimer); }
-    sluff = null; slide = null; snowballs = []; rockfall = []; heli = null; icefall = []; wind = null; gustLines = []; fellIn = false; pan = 0;
+    sluff = null; slide = null; snowballs = []; rockfall = []; crossers = []; heli = null; icefall = []; wind = null; gustLines = []; fellIn = false; pan = 0;
     if (!keep) { champ = null; prepareRun(); }
     particles = [];
     hideOverlay();
@@ -1383,7 +1384,7 @@
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     held = []; tapLeft = 0;
-    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null; crossed = 0; pan = 0; wind = null; gustLines = []; fellIn = false; slide = null; snowballs = []; rockfall = []; rockIn = 0.6; icefall = []; iceIn = 0.5;
+    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null; crossed = 0; pan = 0; wind = null; gustLines = []; fellIn = false; slide = null; snowballs = []; rockfall = []; rockIn = 0.6; crossers = []; crossIn = 2; icefall = []; iceIn = 0.5;
     animalSalt = champ || runClassic ? Math.floor(Math.random() * 999983) : 0;
     animals = []; animalSlot = Math.ceil(START_PAD / ANIMAL_SLOT);
     birds = []; birdIn = between(course.endless ? BIRD_EVERY_ENDLESS : BIRD_EVERY);
@@ -1515,8 +1516,9 @@
   // On fire: whatever was hit goes up like a pineapple, for points.
   // A pineapple just explodes; a tree or a fence explodes in flames.
   function burn(hit) {
-    if (hit.tourist) {   // no exploding tourists: they scatter, cameras and all
-      for (const t of course.tourists) if (Math.abs(t.y - hit.t.y) < 8 && t.side === hit.t.side) t.flee = t.side;
+    if (hit.tourist) {   // no exploding tourists: on fire they go over, or scatter
+      if (Math.random() < 0.5) tumble(hit.t);
+      else for (const t of [...course.tourists, ...crossers]) if (Math.abs(t.y - hit.t.y) < 8 && t.side === hit.t.side) t.flee = t.side;
       SFX.playDash();
       return;
     }
@@ -2002,7 +2004,13 @@
     // A crevasse can't be burned through; only a god walks over it.
     if (hit && hit.crevasse && runGod) { /* across */ }
     else if (hit && onFire() && !hit.crevasse) burn(hit);
-    else if (hit) { crash(hit); return; }
+    else if (hit && hit.tourist && hit.kid) {   // a child: you're knocked back, the child tumbles
+      tumble(hit.t);
+      speed *= 0.4; vx *= 0.3;
+      SFX.playDash();
+      pop('WATCH OUT!');
+    }
+    else if (hit) { if (hit.tourist) tumble(hit.t); crash(hit); return; }
 
     // Holding a straight line builds speed: quickly at first, then more
     // the longer you hold it. Any steering cancels it.
@@ -2060,6 +2068,7 @@
       if (chunk && onFire()) smashChunk(chunk);
       else if (chunk) knockedByIce(chunk);
     }
+    if (course.tourists && course.tourists.length) moveCrossers(dt);
     if (course.shape.rockfall) {
       // A small rock knocks you back; a boulder ends the run. On fire (or
       // in god mode) you smash either for points.
@@ -2767,32 +2776,80 @@
     a.side = a.x < course.centerAt(a.y) ? -1 : 1;
   }
 
-  // A tourist only counts if you steer into them, like a dog alongside.
+  // A standing tourist only counts if you steer into them, like a dog
+  // alongside; one crossing the piste counts any way you meet. A grown-up
+  // ends the run (and goes over too, camera and all); a child knocks you
+  // back, tumbles, sits up and carries on.
   function hitTourist(x, y) {
     if (!course.tourists) return null;
-    for (const t of course.tourists) {
-      if (t.flee || Math.sign(vx) !== Math.sign(t.x - x)) continue;
-      if (Math.abs(x - t.x) <= 2 && y >= t.y - 9 && y <= t.y + 2) return { tourist: true, t };
+    for (const t of [...course.tourists, ...crossers]) {
+      if (t.flee || t.down) continue;
+      if (!t.crossing && Math.sign(vx) !== Math.sign(t.x - x)) continue;
+      const tall = t.kid ? 5 : 9;
+      if (Math.abs(x - t.x) <= 2 && y >= t.y - tall && y <= t.y + 2) return { tourist: true, t, kid: t.kid };
     }
     return null;
   }
+  // Knocked over: a grown-up's camera goes flying, with a last flash.
+  function tumble(t) {
+    t.down = performance.now(); t.v = 0;
+    if (!t.kid) {
+      particles.push({ x: t.x, y: t.y - 6, vx: (Math.random() - 0.5) * 50, vy: -50, g: 140, life: 0.7, size: 1, color: VIC.black });
+      particles.push({ x: t.x, y: t.y - 6, vx: 0, vy: -10, g: 0, life: 0.12, size: 1, color: VIC.white });
+    }
+  }
+  // Tourists crossing (Fuji): in the blossom every few seconds someone
+  // wanders over the piste a little way ahead, photographing the trees,
+  // never looking: mostly children, running; now and then a grown-up or
+  // two, strolling. A steady line: watch them and pass behind or in front.
+  const CROSS_EVERY = [2.2, 4], KID_SPEED = [34, 46], ADULT_SPEED = [15, 22], KID_ODDS = 0.65;
+  let crossers = [], crossIn = 2;
+  function moveCrossers(dt) {
+    crossIn -= dt;
+    const y = Math.round(skierY + 75 + Math.random() * 60);
+    if (crossIn <= 0 && state === 'running' && y < course.finishY - 30 && course.cherryAt(y) >= 0.3) {
+      crossIn = between(CROSS_EVERY);
+      const side = Math.random() < 0.5 ? -1 : 1, kid = Math.random() < KID_ODDS, v = -side * between(kid ? KID_SPEED : ADULT_SPEED);
+      const n = kid ? 1 : 1 + (Math.random() < 0.5 ? 1 : 0), x0 = course.centerAt(y) + side * (course.widthAt(y) + 10);
+      for (let k = 0; k < n; k++) crossers.push({ x: x0 + side * k * 6, y: y + k * 2, v, kid, crossing: true, side,
+        ink: FAN_INKS[Math.floor(Math.random() * FAN_INKS.length)], phase: Math.floor(Math.random() * 8) });
+    }
+    const now = performance.now();
+    for (const t of crossers) {
+      if (t.flee) { t.x += t.flee * 45 * dt; continue; }
+      if (t.down) { if (t.kid && now - t.down > 1300) { t.down = 0; t.v = t.v || -t.side * between(KID_SPEED); } continue; }   // up again, off it goes
+      t.x += t.v * dt;
+    }
+    crossers = crossers.filter(t => Math.abs(t.x - course.centerAt(t.y)) < course.widthAt(t.y) + 40 && t.y > cameraTop() - 20);
+  }
+  const KID = [['.K.', 'XXX', '.X.', 'X.X'], ['.K.', 'XXX', '.X.', '.X.']];
+  const WALKER = [['..K..', '.KKK.', 'XXXXX', 'XKKKX', '.KKK.', '..X..', '.K.K.', 'K...K'], ['..K..', '.KKK.', 'XXXXX', 'XKKKX', '.KKK.', '..X..', '.K.K.', '.K.K.']];
+  const FALLEN = ['...KK..', 'XXXXXKK', 'K.K....'], FALLEN_KID = ['.XK', 'XXK'];
   // Tourists: a photographer each, turning to face you; the closer you
-  // get, the more the flashes go off. Scattering ones run off sideways.
+  // get, the more the flashes go off. Scattering ones run off sideways;
+  // knocked-over ones lie in the snow.
+  function drawOneTourist(t, sy, now) {
+    const x = Math.round(t.x);
+    if (t.down) { const f = t.kid ? FALLEN_KID : FALLEN; blit(f, x - (f[0].length >> 1), sy - f.length + 1, t.ink); return; }
+    if (t.flee) { const s = t.kid ? KID[Math.floor(now / 100) % 2] : FAN_CHEER; blit(s, x - (s[0].length >> 1), sy - s.length + 1 - (Math.floor(now / 120) % 2), t.ink); return; }
+    if (t.kid) { const s = KID[t.crossing ? Math.floor(now / 110) % 2 : 1]; blit(s, x - 1, sy - s.length + 1, t.ink); return; }
+    if (t.crossing) { const s = WALKER[Math.floor(now / 220) % 2]; blit(s, x - 2, sy - 7, t.ink); return; }
+    blit(FAN_PHOTO, x - 2, sy - 7, t.ink);
+    const near = Math.abs(t.y - skierY) < 50, every = near ? 420 : 2600, at = (now + t.phase * 397) % every;
+    if (at < 90) {   // the flash
+      const fx = x, fy = sy - 5;
+      put(fx, fy, VIC.white);
+      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) put(fx + dx, fy + dy, VIC.yellow);
+      for (const [dx, dy] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) put(fx + dx, fy + dy, VIC.white);
+    }
+  }
   function drawTourists(camY, dt) {
     const now = performance.now();
-    for (const t of course.tourists) {
-      if (t.flee) t.x += t.flee * 45 * dt;
-      const sy = t.y - camY;
+    for (const t of [...course.tourists, ...crossers]) {
+      if (t.flee && !t.crossing) t.x += t.flee * 45 * dt;
+      const sy = Math.round(t.y) - camY;
       if (sy < -10 || sy > H + 10 || Math.abs(t.x - course.centerAt(t.y)) > W) continue;
-      if (t.flee) { blit(FAN_CHEER, Math.round(t.x) - 2, sy - 7 - (Math.floor(now / 120) % 2), t.ink); continue; }
-      blit(FAN_PHOTO, t.x - 2, sy - 7, t.ink);
-      const near = Math.abs(t.y - skierY) < 50, every = near ? 420 : 2600, at = (now + t.phase * 397) % every;
-      if (at < 90) {   // the flash
-        const fx = t.x, fy = sy - 5;
-        put(fx, fy, VIC.white);
-        for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) put(fx + dx, fy + dy, VIC.yellow);
-        for (const [dx, dy] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) put(fx + dx, fy + dy, VIC.white);
-      }
+      drawOneTourist(t, sy, now);
     }
   }
 
