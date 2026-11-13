@@ -1398,3 +1398,80 @@ begin
   update slalom_sessions set used_at = now() where id = p_session;
   return v_score;
 end $$;
+
+-- ------------------------------------------------ championship: finish anywhere
+-- Finish anywhere: a Championship's 10 mountains can be any 10, in any
+-- order. Drops the "Chomolungma last, and only last" rule from starting a
+-- mountain and from saving the total. Everything else stays as it was.
+
+-- The next mountain of a Championship: its own session, checked like a
+-- Single mountain run. Every mountain before it must already be checked
+-- (a run that's never checked ends the Championship's chance of a score).
+-- 10 in all, no mountain twice, finishing on any of them.
+create or replace function slalom_start_champ_course(p_champ uuid, p_course text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  v_god     boolean;
+  v_started timestamptz;
+  v_used    timestamptz;
+  v_n       int;
+  v_session uuid;
+  v_msg constant text := 'championship not accepted';
+begin
+  select god, started_at, used_at into v_god, v_started, v_used
+    from slalom_champs where id = p_champ for update;
+  if not found or v_used is not null then raise exception '%', v_msg; end if;
+  if v_started < now() - interval '12 hours' then raise exception '%', v_msg; end if;
+  if not exists (select 1 from slalom_courses where id = p_course) then raise exception '%', v_msg; end if;
+
+  if exists (select 1 from slalom_champ_legs where champ = p_champ and points is null) then
+    raise exception '%', v_msg;
+  end if;
+  select count(*) + 1 into v_n from slalom_champ_legs where champ = p_champ;
+  if v_n > 10 then raise exception '%', v_msg; end if;
+  if exists (select 1 from slalom_champ_legs where champ = p_champ and course = p_course) then
+    raise exception '%', v_msg;
+  end if;
+
+  insert into slalom_sessions (seed, god, mode, course)
+    values (0, v_god, 'champ', p_course) returning id into v_session;
+  insert into slalom_champ_legs (champ, n, course, session)
+    values (p_champ, v_n, p_course, v_session);
+  return jsonb_build_object('session', v_session, 'n', v_n);
+end $$;
+
+-- Saving the total: all 10 checked (no rule about which is last).
+create or replace function slalom_submit_champ(p_champ uuid, p_initials text, p_score int)
+returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  v_id      uuid;
+  v_god     boolean;
+  v_started timestamptz;
+  v_used    timestamptz;
+  v_legs    int;
+  v_total   int;
+  v_payload jsonb;
+  v_msg constant text := 'score not accepted: if you wanna be a smarty pants your job is to do the work!';
+begin
+  select god, started_at, used_at into v_god, v_started, v_used
+    from slalom_champs where id = p_champ for update;
+  if not found or v_used is not null then raise exception '%', v_msg; end if;
+  if v_started < now() - interval '13 hours' then raise exception '%', v_msg; end if;
+  if length(coalesce(p_initials, '')) <> 3 then raise exception '%', v_msg; end if;
+
+  select count(*), sum(points) into v_legs, v_total
+    from slalom_champ_legs where champ = p_champ and points is not null;
+  if v_legs <> 10 then raise exception '%', v_msg; end if;
+  if p_score is distinct from v_total then raise exception '%', v_msg; end if;
+
+  select jsonb_agg(jsonb_build_object('n', n, 'course', course, 'points', points) order by n)
+    into v_payload from slalom_champ_legs where champ = p_champ;
+
+  insert into slalom_mode_scores (mode, god, course, initials, score, payload)
+  values ('championship', v_god, null, p_initials, v_total, jsonb_build_object('legs', v_payload))
+  returning id into v_id;
+
+  update slalom_champs set used_at = now() where id = p_champ;
+  return v_id;
+end $$;

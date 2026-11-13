@@ -11,7 +11,7 @@ A super slalom ski game inspired by an old VIC-20 game lost in time
 ## Modes
 
 - **Single:** one mountain, 25 poles, no second chances.
-- **Championship:** 10 out of 14 legendary mountains, up to the North Face of Everest.
+- **Championship:** 10 out of 14 legendary mountains, in the order you choose, from Alaska to the North Face of Everest.
 - **Endless:** a slope that never ends. A crash or 4 misses and it's over.
 
 ## On the slope
