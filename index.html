@@ -66,7 +66,7 @@
   #title-card h1 { font-size: clamp(14px, 3.6vw, 26px); margin: 0 0 1.2em; letter-spacing: 2px; }
   /* The game's own pineapple sprite, scaled up in whole VIC pixels. */
   #title-card h1 canvas {
-    height: 1.4em; width: 1em; vertical-align: middle;
+    height: 1.4em; width: 1em; vertical-align: baseline; margin-left: 0.25em;   /* standing on the line, a space before it */
     image-rendering: pixelated; image-rendering: crisp-edges;
   }
   #title-card p { font-size: clamp(6px, 1.3vw, 9px); line-height: 2; margin: 0; }
@@ -151,7 +151,20 @@
   #map-title { position: fixed; top: 1.6vh; left: 0; right: 0; z-index: 11; pointer-events: none; text-align: center;
     font-size: clamp(11px, 1.7vw, 22px); letter-spacing: 2px; color: var(--vic-white); text-shadow: 3px 3px 0 var(--vic-black); }
   #map-title[hidden] { display: none; }
-  #map-title canvas { height: 1.4em; width: 1em; vertical-align: middle; image-rendering: pixelated; image-rendering: crisp-edges; }
+  /* Desktop: what a mountain on the map is, when you hover it. */
+  #map-tip { position: fixed; z-index: 12; pointer-events: none; width: 250px; box-sizing: border-box; padding: 10px 12px;
+    background: var(--vic-white); border: 2px solid var(--vic-blue); color: var(--vic-blue); font-size: 8px; line-height: 1.7; }
+  #map-tip[hidden] { display: none; }
+  #map-tip .tip-flags { display: flex; gap: 4px; margin-bottom: 6px; }
+  #map-tip .tip-flags canvas { height: 14px; width: auto; image-rendering: pixelated; image-rendering: crisp-edges; outline: 1px solid var(--vic-blue); }
+  #map-tip .tip-name { font-size: 9px; margin-bottom: 2px; }
+  #map-tip .tip-status { margin: 4px 0 6px; }
+  #map-tip .tip-status.open { color: var(--vic-red); }
+  #map-tip .tip-top { border-top: 2px solid var(--vic-blue); padding-top: 4px; }
+  #map-tip ol { list-style: none; margin: 2px 0 0; padding: 0; }
+  #map-tip li { display: flex; justify-content: space-between; }
+  #map-tip li.note { justify-content: flex-start; opacity: 0.7; }
+  #map-title canvas { height: 1.4em; width: 1em; vertical-align: baseline; margin: 0 0.25em; image-rendering: pixelated; image-rendering: crisp-edges; }
   /* Desktop: your scorecard so far, a panel of its own, bottom left. */
   #map-score { position: fixed; z-index: 11; pointer-events: none; left: 3vw; bottom: 3vh;
     background: var(--vic-white); border: 2px solid var(--vic-blue); padding: 12px 14px; width: 340px; box-sizing: border-box; }
@@ -475,6 +488,7 @@
 
   <canvas id="map-screen" hidden></canvas>
   <div id="map-score" hidden><div class="ms-head">YOUR CHAMPIONSHIP</div><ol></ol></div>
+  <div id="map-tip" hidden></div>
   <div id="map-title" hidden>SUPER SLALOM VS <canvas class="pine-icon" width="5" height="7" aria-label="PINEAPPLE"></canvas> CHAMPIONSHIP</div>
   <div id="overlay" hidden>
     <div class="card">
