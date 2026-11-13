@@ -2048,12 +2048,18 @@
   // come to rest as lumps: a patchy stretch on to the finish. A snowball
   // or a lump knocks you back; the wall itself swallows you.
   const SLIDE_RUMBLE = 1.1, SLIDE_HOLD = 34, SLIDE_V = 64, SLIDE_STOP = 90;
-  const SNOWBALLS = 18;
+  const SNOWBALLS = 24;
+  // While it chases you it hurls snowballs, big and small, over your head:
+  // each lands ahead of you (its shadow racing ahead shows where), rolls a
+  // little and sits there as a lump. Hit one and it slows you, a big one a
+  // lot, and then the wall is on you.
+  const THROW_EVERY = [0.7, 1.3], THROW_TIME = 0.9, THROW_ARC = 28, THROW_AHEAD = [28, 75];
+  const KNOCK_BIG = 0.35, KNOCK_SMALL = 0.65;
   function moveAvalanche(dt) {
     const av = course.shape.avalanche, poles = course.poles;
     if (!slide) {
       if (skierY < poles[av.from].y) return false;
-      slide = { rumble: SLIDE_RUMBLE, y: null, v: 0, end: poles[Math.min(av.to, poles.length - 1)].y, hold: av.hold || SLIDE_HOLD };
+      slide = { rumble: SLIDE_RUMBLE, y: null, v: 0, end: poles[Math.min(av.to, poles.length - 1)].y, hold: av.hold || SLIDE_HOLD, throwIn: 1 };
     }
     if (slide.rumble > 0) {
       slide.rumble -= dt;
@@ -2061,8 +2067,10 @@
       return false;
     }
     if (slide.v <= 0) return false;
-    if (slide.y < slide.end) slide.v = Math.max(av.minV || SLIDE_V, Math.min(280, speed + 3 * (skierY - slide.y - slide.hold)));
-    else if (av.breakUp) { breakUp(); return false; }
+    if (slide.y < slide.end) {
+      slide.v = Math.max(av.minV || SLIDE_V, Math.min(280, speed + 3 * (skierY - slide.y - slide.hold)));
+      if (av.throws && (slide.throwIn -= dt) <= 0) { slide.throwIn = between(THROW_EVERY); throwSnowball(); }
+    } else if (av.breakUp) { breakUp(); return false; }
     else slide.v = Math.max(0, slide.v - SLIDE_STOP * dt);
     slide.y += slide.v * dt;
     return !runGod && slide.y >= skierY - 2;
@@ -2077,14 +2085,37 @@
       const fast = k % 2 === 0;   // these overtake you and settle ahead
       const y = slide.y - Math.random() * 5;
       const lo = fast ? Math.min(skierY + 25, finishY - 14) : y + 8, hi = fast ? finishY - 8 : Math.min(y + 50, finishY - 8);
-      snowballs.push({ x, y, r: 3 + Math.floor(Math.random() * 3), v0: speed * (fast ? 1.15 + Math.random() * 0.3 : 0.55 + Math.random() * 0.35),
+      const r = 3 + Math.floor(Math.random() * 3);
+      snowballs.push({ x, y, r, big: r >= 4, v0: speed * (fast ? 1.15 + Math.random() * 0.3 : 0.55 + Math.random() * 0.35),
         v: 1, stopAt: lo + Math.random() * Math.max(0, hi - lo), dx: (Math.random() - 0.5) * 12, top: y, roll: Math.random() * 4 });
     }
     SFX.playBreak();
   }
+  function throwSnowball() {
+    const c = course, big = Math.random() < 0.4;
+    // Lands where you'll be in a moment, give or take, mostly on the piste.
+    const y1 = Math.min(skierY + speed * THROW_TIME + between(THROW_AHEAD), slide.end + 40);
+    const x1 = Math.random() < 0.75 ? c.centerAt(y1) + (Math.random() * 2 - 1) * c.widthAt(y1) * 0.9
+      : skierX + (Math.random() * 2 - 1) * 50;
+    const x0 = x1 + (Math.random() * 2 - 1) * 30;
+    snowballs.push({ x: x0, y: slide.y, r: big ? 4 + Math.floor(Math.random() * 2) : 2 + Math.floor(Math.random() * 2), big,
+      air: { t: 0, x0, y0: slide.y, x1, y1 }, v0: 12 + Math.random() * 14, v: 0, stopAt: y1 + 3 + Math.random() * 8,
+      dx: (Math.random() - 0.5) * 8, top: y1, roll: Math.random() * 4 });
+  }
   // Rolls them on; returns the one you ran into, if any.
   function moveSnowballs(dt) {
     for (const b of snowballs) {
+      if (b.air) {   // in flight: along a line, the height on top
+        const a = b.air;
+        a.t = Math.min(1, a.t + dt / THROW_TIME);
+        b.x = a.x0 + (a.x1 - a.x0) * a.t; b.y = a.y0 + (a.y1 - a.y0) * a.t;
+        if (a.t >= 1) {   // down with a thump and a puff
+          b.air = null; b.v = b.v0;
+          for (let k = 0; k < 6; k++) particles.push({ x: b.x + (Math.random() - 0.5) * b.r * 2, y: b.y, vx: (Math.random() - 0.5) * 30,
+            vy: -10 - Math.random() * 20, g: 120, life: 0.25 + Math.random() * 0.2, size: 1, color: VIC.white });
+        }
+        continue;
+      }
       if (b.v <= 0) continue;
       const left = b.stopAt - b.y;
       b.v = Math.min(b.v0, Math.max(6, left * 2.2));
@@ -2093,11 +2124,13 @@
       b.roll += b.v * dt / b.r;
       if (left < 0.5) b.v = 0;   // a lump now, for good
     }
-    return snowballs.find(b => Math.abs(b.x - skierX) <= b.r + 1 && skierY >= b.y - b.r - 1 && skierY <= b.y + b.r + 1) || null;
+    if (snowballs.length > 60) snowballs = snowballs.filter(b => b.air || b.y > cameraTop() - 80);   // long buried
+    return snowballs.find(b => !b.air && Math.abs(b.x - skierX) <= b.r + 1 && skierY >= b.y - b.r - 1 && skierY <= b.y + b.r + 1) || null;
   }
   function knockedBySnowball(b) {
     snowballs.splice(snowballs.indexOf(b), 1);
-    speed *= 0.35;
+    const big = b.big ?? b.r >= 4;
+    speed *= big ? KNOCK_BIG : KNOCK_SMALL;
     vx *= 0.3;
     SFX.playBreak();
     for (let k = 0; k < 12; k++) particles.push({ x: b.x + (Math.random() - 0.5) * b.r * 2, y: b.y, vx: (Math.random() - 0.5) * 50,
@@ -3068,7 +3101,16 @@
   function drawSnowballs(camY) {
     for (const b of snowballs) {
       const by = Math.round(b.y) - camY, bx = Math.round(b.x);
-      if (by < -12 || by > H + 12) continue;
+      if (by < -12 - THROW_ARC || by > H + 12) continue;
+      if (b.air) {   // its shadow on the snow, the ball up above it
+        const t = b.air.t, lift = Math.round(4 * THROW_ARC * t * (1 - t)), r = b.r;
+        for (let dx = -r; dx <= r; dx++) put(bx + dx, by, VIC.lightBlue);
+        for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+          const d = dx * dx + dy * dy;
+          if (d <= r * r + r * 0.6) put(bx + dx, by - lift + dy, d > (r - 1) * (r - 1) + (r - 1) * 0.6 ? (dx + dy > r * 0.6 ? VIC.blue : VIC.lightBlue) : VIC.white);
+        }
+        continue;
+      }
       // The track it ploughed, patchy.
       for (let y = Math.ceil(b.top); y < b.y - b.r; y += 2) {
         if (hash(bx * 3 + 1, y) < 0.5) continue;
@@ -4394,7 +4436,7 @@
     // tussock grass, no trees.
     aconcagua: { penitentes: 0.6, rocks: 1, forest: 0.4, tussock: true, dogs: 0.06 },
     // Long the deadliest 8,000er, mostly to avalanches; and "full of food".
-    annapurna: { wildlife: { odds: 0.016, kinds: { leopard: 1 } }, avalanche: { from: 9, to: 22, hold: 24, minV: 57, breakUp: true }, pines: 1.6, treeline: 1.1 },
+    annapurna: { wildlife: { odds: 0.016, kinds: { leopard: 1 } }, avalanche: { from: 9, to: 22, hold: 24, minV: 57, breakUp: true, throws: true }, pines: 1.6, treeline: 1.1 },
     // The Savage Mountain: the most technical slalom of all.
     // ...run at night: dim all round, a headlamp ahead.
     // The Bottleneck: a serac over the piste for a long stretch, shedding
