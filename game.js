@@ -4534,6 +4534,7 @@
     sessionId = null; endPromise = null; edges = Promise.resolve();
     sessionGod = c.god;
     if (!c.ranked) return;
+    fetchLeaderboard(boardOf(false, c.god, c.current.id));   // so its end knows what it must beat
     await c.server; await c.check;
     if (!c.ranked || !c.id) { c.ranked = false; return; }
     try {
@@ -4626,6 +4627,7 @@
       P.sub.textContent = `${shortName(mountain(p.id))} +${p.points}` + (p.finished ? ` · TIME ${fmt(p.time_cs)}` : '') + (c.ranked ? '' : ' · UNRANKED');
       P.text.textContent = '';
       P.prompt.textContent = (NARROW ? 'TAP' : 'SPACE') + (c.played.length === CHAMP_COURSES ? ' TO SEE HOW YOU DID' : ' FOR THE NEXT MOUNTAIN');
+      if (c.leg) lendRunCard();
     } else {
       P.head.textContent = 'CHAMPIONSHIP OVER';
       P.sub.textContent = `TOTAL ${champTotal()}`;
@@ -4636,7 +4638,33 @@
     requestAnimationFrame(() => overlayEl.classList.add('visible'));
   }
 
+  // A mountain good enough for its own top 10: the run card's initials box
+  // (and then that mountain's board) borrowed into the result card.
+  const RUN_CARD_PARTS = [newTopEl, submitFormEl, submitStatusEl, leaderboardEl];
+  const runCardHome = RUN_CARD_PARTS.map(el => { const mark = document.createComment(''); el.before(mark); return mark; });
+  let lent = false;
+  function lendRunCard() {
+    lent = true;
+    RUN_CARD_PARTS.forEach(el => champEl.insertBefore(el, champParts.prompt));
+    lastSubmittedId = null;
+    submitStatusEl.classList.remove('error');
+    submitStatusEl.textContent = '';
+    newTopEl.hidden = false; submitFormEl.hidden = false; leaderboardEl.hidden = true;
+    try { initialsInputEl.value = localStorage.getItem('slalom_initials') || ''; } catch (_) {}
+    SFX.playQualify();
+    setTimeout(() => { if (lent) initialsInputEl.focus(); }, 450);
+  }
+  function returnRunCard() {
+    if (!lent) return;
+    lent = false;
+    if (document.activeElement === initialsInputEl) initialsInputEl.blur();
+    RUN_CARD_PARTS.forEach((el, k) => runCardHome[k].after(el));
+    newTopEl.hidden = true; submitFormEl.hidden = true; leaderboardEl.hidden = true;
+    submitStatusEl.textContent = '';
+  }
+
   function hideChamp() {
+    returnRunCard();
     cardEl.classList.remove('champ-mode');
     overlayEl.classList.remove('map-mode');
     document.body.classList.remove('map-mode');
@@ -4665,6 +4693,8 @@
       hideChamp();
       startRun();
     } else if (c.stage === 'result') {
+      returnRunCard();
+      c.leg = null;
       c.stage = c.played.length === CHAMP_COURSES ? 'done' : 'pick';
       c.pick = 0;
       if (c.stage === 'pick') toTitle(true);
@@ -4725,6 +4755,8 @@
     const c = champ, m = c.current;
     c.played.push({ id: m.id, points: points(), stars: finished ? stars() : 0, finished, time_cs: runCs() });
     checkChampCourse(points());
+    // Good enough for this mountain's own top 10? Then its initials box.
+    c.leg = c.ranked && sessionId && points() > 0 && makesTop10(points(), boardOf(false, c.god, m.id)) ? sessionId : null;
     // A crash opens just one: the first neighbour not already open.
     const fresh = m.unlocks.filter(id => !c.open.has(id) && !skied(id));
     (finished ? fresh : fresh.slice(0, 1)).forEach(id => c.open.add(id));
@@ -4737,7 +4769,7 @@
   champParts.go.addEventListener('click', (e) => { e.currentTarget.blur(); champGo(); });
   // A tap anywhere on the card moves things on, except on the pick screen,
   // where the name is the button.
-  cardEl.addEventListener('click', (e) => { if (champUp() && champ.stage !== 'pick' && !e.target.closest('button')) champGo(); });
+  cardEl.addEventListener('click', (e) => { if (champUp() && champ.stage !== 'pick' && !e.target.closest('button, form, #leaderboard')) champGo(); });
   // Single on a mountain: its Championship card first (name, flags, the
   // story), then Space or a tap skis it. RUN AGAIN and R skip the card.
   // (singleIntro, the mountain on the card, is declared up top.)
@@ -4933,7 +4965,8 @@
     (championship ? 'championship' : endless ? 'endless' : classic ? 'classic:' + classic : 'single') + (god ? ':god' : '');
   const currentBoard = () => bestMode() === 'championship' ? champBoard()
     : boardOf(bestMode() === 'endless', godMode, state === 'title' ? classicPick() : runClassic);
-  const runBoard = () => champ ? champBoard() : boardOf(course.endless, runGod, runClassic);
+  const runBoard = () => champ && champ.stage === 'result' ? boardOf(false, champ.god, champ.current.id)
+    : champ ? champBoard() : boardOf(course.endless, runGod, runClassic);
   // What sits above the TOP 10 bar on each board.
   const BOARD_TITLE = { single: 'SINGLE', endless: 'ENDLESS', championship: 'CHAMPIONSHIP' };
   const leaderboardCache = {};
@@ -5015,7 +5048,12 @@
     // ended_at, so wait for it rather than racing it.
     if (endPromise) await endPromise;
 
-    const { data, error } = champ && champ.stage === 'save'
+    const legSession = champ && champ.stage === 'result' ? champ.leg : null;
+    if (legSession) await champ.check;   // its check first
+    const { data, error } = legSession
+      ? (champ.ranked ? await juicer.rpc('slalom_submit_champ_leg', { p_session: legSession, p_initials: raw.padEnd(3, '-') })
+        : { data: null, error: { message: 'x: unranked championship' } })
+      : champ && champ.stage === 'save'
       ? await juicer.rpc('slalom_submit_champ', { p_champ: champ.id, p_initials: raw.padEnd(3, '-'), p_score: champTotal() })
       : await juicer.rpc(course.endless ? 'slalom_submit_endless' : runClassic ? 'slalom_submit_course'
         : runGod ? 'slalom_submit_god_score' : 'slalom_submit_score', {
@@ -5030,6 +5068,7 @@
     }
     submitStatusEl.textContent = "YOU'RE ON THE BOARD!";
     lastSubmittedId = data || null;
+    if (legSession) champ.leg = null;   // once per mountain
     showLeaderboard();
     SFX.playJingle();   // the big moment: your row lights up to this
   });
