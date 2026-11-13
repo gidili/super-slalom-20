@@ -139,6 +139,10 @@
   #map-screen { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; z-index: 9;
     background: var(--vic-blue); image-rendering: pixelated; image-rendering: crisp-edges; }
   #map-screen[hidden] { display: none; }
+  /* A phone: the map at the top, sized and panned from the game, wider than the screen. */
+  body.narrow #map-screen { inset: auto; top: 0; left: 0; object-fit: fill; box-shadow: 0 0 0 200vmax var(--vic-blue); }   /* sea all round, behind the card */
+  body.narrow #map-title { top: 10px; font-size: 10px; letter-spacing: 1px; }
+  body.narrow #map-score { display: none; }
   /* The map's title, across the top above the Arctic. */
   #map-title { position: fixed; top: 1.6vh; left: 0; right: 0; z-index: 11; pointer-events: none; text-align: center;
     font-size: clamp(11px, 1.7vw, 22px); letter-spacing: 2px; color: var(--vic-white); text-shadow: 3px 3px 0 var(--vic-black); }
