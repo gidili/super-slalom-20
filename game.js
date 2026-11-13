@@ -4243,7 +4243,7 @@
     if (mapScoreEl) {   // your scorecard so far, bottom left
       mapScoreEl.hidden = !on;
       if (on) {
-        const html = champListHtml() + champTip();
+        const html = champ && champ.played.length ? champListHtml() + champTip() : '';   // nothing to show before the first mountain
         if (html !== mapScoreHtml) mapScoreList.innerHTML = mapScoreHtml = html;
         mapScoreEl.hidden = !html;
       }
