@@ -4362,37 +4362,37 @@
       unlocks: ['kirinyaga', 'annapurna'],
       fact: 'Italy\'s steepest piste: 76% at the Grand Muret, right after the start. The women\'s World Cup races here, on north-facing, rock-hard snow. It\'s dangerous for anyone but experts.' },
     { id: 'aoraki', name: 'AORAKI', country: 'NEW ZEALAND', height: '3,724 M', lon: 170.1, seed: 1404,
-      unlocks: ['iztactepetl', 'k2'],
+      unlocks: [],
       fact: 'To the Ngai Tahu, the Maori iwi of most of the South Island, Aoraki is an ancestor: he and his brothers were turned to stone on their stranded canoe, which became the South Island. The mountain was returned to Ngai Tahu in 1998, and they gifted it back to the nation. In 1991 a rock avalanche sheared 10 m off its summit, and by 2013 it had shrunk 30 m in all.' },
     { id: 'fuji', name: 'FUJI', country: 'JAPAN', height: '3,776 M', lon: 138.7, seed: 1505,
-      unlocks: ['cervino', 'aconcagua'],
+      unlocks: ['aconcagua', 'cervino'],
       fact: 'Fuji last erupted in 1707, and its ash fell on Edo, today\'s Tokyo, almost 100 km away. The mountain is sacred: from the 8th station up it belongs to a Shinto shrine, and women weren\'t allowed to climb it until 1872.' },
     { id: 'cervino', name: 'CERVINO (MATTERHORN)', country: 'SWITZERLAND - ITALY', height: '4,478 M', lon: 7.66, seed: 1606,
-      unlocks: ['chomolungma', 'iztactepetl'],
+      unlocks: [],
       fact: 'Valley legends told of spirits and a ruined city on its summit. Local guide Jean-Antoine Carrel tried for years from Italy, but in 1865 a British-led party from Zermatt beat him to the top, and four of its seven men died coming down. Carrel summited three days later. Below it you can ski from Switzerland into Italy, 20 km in one run. Its steep east side was first skied only in 1975, by Toni Valeruz. Few have dared since.' },
     { id: 'vinson', name: 'VINSON', country: 'ANTARCTICA', height: '4,892 M', lon: -85.6, seed: 1707,
-      unlocks: ['fuji', 'kirinyaga'],
+      unlocks: ['iztactepetl', 'k2'],
       fact: 'No one saw it until 1958, from a US Navy plane, and the Americans named it after one of their congressmen. Chile counts it as part of its own Antarctic territory, but under the 1959 treaty no country\'s claim is recognised: Antarctica is kept for peace and science. Only about 150 climbers a season reach the top, with nights down to -40 C.' },
     { id: 'kirinyaga', name: 'KIRINYAGA (MOUNT KENYA)', country: 'KENYA', height: '5,199 M', lon: 37.3, seed: 1808,
-      unlocks: ['aoraki', 'k2'],
+      unlocks: [],
       fact: 'To the Kikuyu people, Kirinyaga is home to the god Ngai, so they traditionally built their houses with the door facing the mountain. The country\'s name, Kenya, comes from how the British heard "Kirinyaga". Its summits honour the Maasai leader Mbatian, his brother and his son. Its glaciers, 16 km from the equator, may be gone by 2030.' },
     { id: 'iztactepetl', name: 'IZTACTEPETL (PICO DE ORIZABA)', country: 'MEXICO', height: '5,636 M', lon: -97.3, seed: 1909, venus: true,
-      unlocks: ['vinson', 'annapurna'],
+      unlocks: [],
       fact: 'Locals call it Iztactepetl, the White Mountain. Legend says Quetzalcoatl, the Feathered Serpent god worshipped by the Toltecs and Aztecs, bade farewell to his followers within sight of it, and that Venus, the morning star he became, can be seen settling into its crater. It is Mexico\'s highest peak and a dormant volcano: it last erupted in 1846...' },
     { id: 'kilimanjaro', name: 'KILIMANJARO', country: 'TANZANIA', height: '5,895 M', lon: 37.4, seed: 2010,
-      unlocks: ['alyeska', 'chomolungma'],
+      unlocks: ['chomolungma', 'aoraki'],
       fact: 'The first recorded summit, in 1889, is credited to some German guy, but he was guided by Yohani Kinyala Lauwo, a young Chagga man who later said he had already climbed it many times. Most climbers take 5 to 8 days to summit. Tanzanian Simon Mtuy ran up and back down in 9 hours 19 minutes, a Guinness World Record.' },
     { id: 'aconcagua', name: 'ACONCAGUA', country: 'ARGENTINA', height: '6,961 M', lon: -70.0, seed: 2111,
-      unlocks: ['kunama', 'pista3'],
+      unlocks: [],
       fact: 'The highest peak outside Asia, and stray dogs climb it. Several have tagged along with expeditions all the way to the summit, one napped on top before heading down, and climbers still argue over which dog got there first.' },
     { id: 'annapurna', name: 'ANNAPURNA', country: 'NEPAL', height: '8,091 M', lon: 83.8, seed: 2212,
-      unlocks: ['aconcagua', 'kunama'],
+      unlocks: [],
       fact: 'Its name means "full of food", after the Hindu goddess of nourishment. For decades it was the deadliest of the world\'s 8,000 m peaks: by 2010, one climber had died for every three who reached the top.' },
     { id: 'k2', name: 'K2', country: 'PAKISTAN', height: '8,611 M', lon: 76.5, seed: 2313,
-      unlocks: ['cervino', 'aoraki'],
+      unlocks: [],
       fact: 'The 1954 first recorded ascent made two Italians national heroes. Amir Mehdi, a porter from Hunza, had carried their oxygen high up the mountain, then was forced to spend the night at about 8,100 m in a snow hole with no tent or sleeping bag. He lost all his toes, and his story was buried for decades.' },
     { id: 'chomolungma', name: 'CHOMOLUNGMA (EVEREST NORTH FACE)', short: 'CHOMOLUNGMA (EVEREST NORTH FACE)', list: 'CHOMOLUNGMA (EVEREST)', country: 'TIBET - CHINA (CONTESTED TERRITORY)', height: '8,849 M', lon: 86.9, seed: 2414,
-      unlocks: ['alyeska', 'kilimanjaro'],
+      unlocks: [],
       fact: 'Named in 1865 after George Everest, a British surveyor who probably never saw it and objected to the honour. Only a handful have ever ridden down this face: in 2001 Marco Siffredi, 22, snowboarded the Norton Couloir from the summit, then vanished trying the Hornbein Couloir a year later. In 2025 Jim Morrison finally skied down that line, as you are about to.' },
   ];
   const CHAMP_COURSES = 10;
@@ -4642,10 +4642,12 @@
       }
       // Ones you can pick: red, so they stand out; the one you're on blinks gold.
       const ink = picked ? (wide ? (blink ? PLANE_INKS.Y : VIC.white) : blink ? VIC.yellow : VIC.white) : open ? VIC.crimson : null;
-      if (wide && (open || picked)) {
-        // On the big map: a bigger peak, thickly outlined in black.
+      if (wide) {
+        // On the big map every mountain is a big peak, thickly outlined in
+        // black, easy to find and hover: red where you can fly, white where
+        // you can't (yet), gold blinking on the one you're choosing.
         BIG_PEAK.forEach((row, r) => [...row].forEach((ch, k) => {
-          if (ch !== '.') px(mx + k - 5, my + r - 6, ch === 'K' ? VIC.black : ink);
+          if (ch !== '.') px(mx + k - 5, my + r - 6, ch === 'K' ? VIC.black : ink || VIC.white);
         }));
       } else {
         // A peak: two rows, outlined in black.
@@ -5147,13 +5149,17 @@
   // What can be picked now: open and not yet skied, west to east. Any ten
   // will do, finishing wherever you like. If crashes have left nothing
   // open, the two lowest not yet skied open up, so every Championship
-  // reaches the end. Each mountain opens two far from it, never a neighbour.
+  // reaches the end. The unlocks are a tree: Alyeska and Kunama open two
+  // each, those open two each, the eight at the ends nothing; so every
+  // mountain is opened by exactly one other, never by a neighbour.
   const skied = id => champ.played.some(p => p.id === id);
   // Testing only: ?allmountains opens every mountain, the finale too.
   const ALL_OPEN = /[?&]allmountains\b/.test(location.search);
   function champOptions() {
     if (ALL_OPEN) return MOUNTAINS.filter(m => !skied(m.id)).sort((a, b) => a.lon - b.lon);
     const left = () => MOUNTAINS.filter(m => champ.open.has(m.id) && !skied(m.id));
+    // (Can't run dry: both starts are open and every mountain skied opens
+    // its branches. Just in case: the two lowest not yet skied.)
     if (!left().length) MOUNTAINS.filter(m => !skied(m.id)).slice(0, 2).forEach(m => champ.open.add(m.id));
     return left().sort((a, b) => a.lon - b.lon);
   }
@@ -5209,7 +5215,7 @@
       if (next.length) {   // what finishing it opens, a row each, with flags
         const head = document.createElement('div');
         head.className = 'unlock-head';
-        head.textContent = next.length > 1 ? 'FINISH TO UNLOCK BOTH:' : 'FINISH TO UNLOCK:';
+        head.textContent = 'COMPETE TO UNLOCK:';
         P.text.appendChild(head);
         for (const id of next) {
           const row = document.createElement('div');
@@ -5221,12 +5227,6 @@
           nm.textContent = withLand(plainName(mountain(id)), id);   // short: no nicknames
           row.append(flags, nm);
           P.text.appendChild(row);
-        }
-        if (next.length > 1) {   // and what a wipeout gets you
-          const note = document.createElement('div');
-          note.className = 'unlock-note';
-          note.textContent = 'A WIPEOUT OPENS ONLY ONE';
-          P.text.appendChild(note);
         }
       }
       P.text.style.textAlign = 'center';
@@ -5249,9 +5249,9 @@
       P.head.textContent = p.finished ? 'FINISHED' : 'WIPEOUT';
       P.flags.replaceChildren(...FLAGS_OF[p.id].map(flagCanvas));
       P.sub.textContent = `${withLand(shortName(mountain(p.id)), p.id)} +${p.points}` + (p.finished ? ` · TIME ${fmt(p.time_cs)}` : '') + (c.ranked ? '' : ' · UNRANKED');
-      // What it opened: a wipeout only gets one.
+      // What it opened.
       P.text.textContent = c.played.length === CHAMP_COURSES || !c.opened || !c.opened.length ? ''
-        : (p.finished ? 'UNLOCKED: ' : 'WIPEOUT: ONLY ') + c.opened.map(id => plainName(mountain(id))).join(' · ') + (p.finished ? '' : ' UNLOCKED');
+        : 'UNLOCKED: ' + c.opened.map(id => plainName(mountain(id))).join(' · ');
       P.text.style.textAlign = 'center';
       P.prompt.textContent = (NARROW ? 'TAP' : 'SPACE') + (c.played.length === CHAMP_COURSES ? ' TO SEE HOW YOU DID' : ' FOR THE NEXT MOUNTAIN');
       if (c.leg) lendRunCard();
@@ -5384,10 +5384,8 @@
     checkChampCourse(points());
     // Good enough for this mountain's own top 10? Then its initials box.
     c.leg = c.ranked && sessionId && points() > 0 && makesTop10(points(), boardOf(false, c.god, m.id)) ? sessionId : null;
-    // A crash opens just one: the first neighbour not already open.
-    const fresh = m.unlocks.filter(id => !c.open.has(id) && !skied(id));
-    c.opened = finished ? fresh : fresh.slice(0, 1);
-    c.missedOpen = finished ? [] : fresh.slice(1);
+    // Skiing it, finished or not, opens both of its branches.
+    c.opened = m.unlocks.filter(id => !c.open.has(id) && !skied(id));
     c.opened.forEach(id => c.open.add(id));
     c.stage = 'result';
     showChamp();
