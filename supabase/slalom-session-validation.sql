@@ -166,7 +166,7 @@ alter table slalom_courses enable row level security;
 insert into slalom_courses (id, poles, reds, par_cs) values
   ('alyeska', 25, 4, 3468), ('kunama', 25, 4, 3620), ('pista3', 25, 4, 3887),
   ('aoraki', 25, 4, 3371), ('fuji', 25, 4, 3481), ('cervino', 25, 4, 2860),
-  ('vinson', 25, 4, 3046), ('kirinyaga', 25, 4, 3057), ('iztactepetl', 25, 4, 3017),
+  ('vinson', 25, 4, 3046), ('kirinyaga', 25, 4, 3119), ('iztactepetl', 25, 4, 3017),
   ('kilimanjaro', 35, 6, 4597), ('aconcagua', 25, 4, 2703), ('annapurna', 25, 4, 2716),
   ('k2', 25, 4, 2532), ('chomolungma', 25, 4, 4170)
 on conflict (id) do update set poles = excluded.poles, reds = excluded.reds, par_cs = excluded.par_cs;

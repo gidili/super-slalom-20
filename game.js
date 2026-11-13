@@ -4672,7 +4672,7 @@
         lines.push(line([x0 + fa[0], y0 + fa[1]], [x0 + fb[0], y0 + fb[1]], VIC.white, [2, 3], true, t * t * (3 - 2 * t)));
       }
       for (const id of unlocks) lines.push(line(at(pick.id), at(id), PLANE_INKS.Y, [5, 4]));   // what it would open
-      for (const l of lines) for (const [x, y] of l.pts) for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) px(x + dx, y + dy, VIC.black);
+      for (const l of lines) if (l.col !== PLANE_INKS.Y) for (const [x, y] of l.pts) for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) px(x + dx, y + dy, VIC.black);   // the unlock dashes: thin, no outline
       for (const l of lines) for (const [x, y] of l.pts) px(x, y, l.col);
     } else {
       for (let k = 1; k < c.played.length; k++) dots(at(c.played[k - 1].id), at(c.played[k].id), VIC.white, 2);
@@ -5104,7 +5104,7 @@
     // Bare dark rock beyond a snowfield that shrinks to a strip by the
     // finish (it slows you), boulders on it, giant groundsels.
     kirinyaga: { width: [[0, 46], [0.85, 24], [1, 22]], offset: 13, offsetLast: 9,
-      scree: [[0, 0], [1, 0]], snowBand: [[0, 70], [0.6, 22], [0.9, 6], [1, 4]], darkRock: true,
+      scree: [[0, 0], [1, 0]], snowBand: [[0, 60], [0.35, -2], [0.65, -10], [1, -14]], darkRock: true,   // past 40% the rock eats into the piste's edges
       groundsels: true, rocks: 0.45, forest: 0.4 },
     // The serpent: the twistiest piste, long S-bends.
     // ...run at first light: warm snow and long shadows.
@@ -5138,7 +5138,7 @@
   // autopilot takes on each. Re-run when a course changes.
   const PAR = {
     alyeska: [3468, 3342], kunama: [3620, 3489], pista3: [3887, 3746], aoraki: [3371, 3249],
-    fuji: [3481, 3355], cervino: [2860, 2756], vinson: [3046, 2935], kirinyaga: [3057, 2947],
+    fuji: [3481, 3355], cervino: [2860, 2756], vinson: [3046, 2935], kirinyaga: [3119, 3006],
     iztactepetl: [3017, 2907], kilimanjaro: [4597, 4430], aconcagua: [2703, 2605],
     annapurna: [2716, 2617], k2: [2532, 2440], chomolungma: [4170, 4018],
   };
@@ -5494,9 +5494,9 @@
   const mapTipEl = document.getElementById('map-tip');
   const HAZARDS = {
     alyeska: 'BEARS AND WOLVES', kunama: 'MOTH SWARMS', pista3: 'THE DROP, SAFETY NETS', aoraki: 'ROCKFALL, WIND',
-    fuji: 'TOURISTS IN THE BLOSSOM', cervino: 'THE BORDER, SAFETY NETS', vinson: 'CREVASSES, WIND', kirinyaga: 'DARK ROCK',
-    iztactepetl: 'DAWN, LONG SHADOWS', kilimanjaro: 'SCREE', aconcagua: 'PENITENTES, DOGS, WIND', annapurna: 'AVALANCHE',
-    k2: 'NIGHT, ICEFALL, WIND', chomolungma: 'THE COULOIR, SLUFF, WIND',
+    fuji: 'TOURISTS IN THE BLOSSOM', cervino: 'THE BORDER, SAFETY NETS', vinson: 'CREVASSES, WIND', kirinyaga: 'RECEDING SNOW',
+    iztactepetl: 'DAWN, LONG SHADOWS', kilimanjaro: 'RECEDING SNOW', aconcagua: 'PENITENTES, DOGS, WIND', annapurna: 'AVALANCHE',
+    k2: 'NIGHT, ICEFALL, WIND', chomolungma: 'THE COULOIR, AVALANCHE, WIND',
   };
   const mapPoint = e => {
     const r = mapCanvas.getBoundingClientRect(), k = Math.min(r.width / MAP_W, r.height / MAP_H);
@@ -5518,11 +5518,14 @@
     const status = m.id === hereId ? 'YOU ARE HERE' + (p ? ': ' + skiedLine : '')
       : p ? `SKIED: ${skiedLine}`
       : open ? 'OPEN: YOU CAN FLY HERE'
-      : 'LOCKED: UNLOCKED BY ' + MOUNTAINS.filter(o => o.unlocks.includes(m.id)).map(o => `<span class="tip-by-name"><span class="tip-by" data-id="${o.id}"></span>${plainName(o)}</span>`).join(' OR ');
+      : 'LOCKED: UNLOCKED BY ' + MOUNTAINS.filter(o => o.unlocks.includes(m.id)).map(o => `<span class="tip-by-name"><span class="tip-by" data-id="${o.id}"></span>${plainName(o)}</span>`).join(' OR ');   // flags, then the name
     const board = boardOf(false, c.god, m.id), top = leaderboardCache[board];
     const rows = !top ? '<li class="note">LOADING...</li>' : !top.length ? '<li class="note">NO SCORES YET</li>'
       : top.slice(0, 5).map((r, i) => `<li><span>${i + 1}. ${r.initials}</span><span>${r.score}</span></li>`).join('');
-    return `<div class="tip-name">${withLand(plainName(m), m.id)}</div><div class="tip-row">${m.height} · ${HAZARDS[m.id] || ''}</div>`
+    const by = id => `<span class="tip-by-name"><span class="tip-by" data-id="${id}"></span>${plainName(mountain(id))}</span>`;
+    return `<div class="tip-name">${withLand(plainName(m), m.id)}</div><div class="tip-row">${m.height}</div>`
+      + (HAZARDS[m.id] ? `<div class="tip-row">HAZARDS: ${HAZARDS[m.id]}</div>` : '')
+      + (m.unlocks.length ? `<div class="tip-row">UNLOCKS: ${m.unlocks.map(by).join(' · ')}</div>` : '')
       + `<div class="tip-status ${m.id === hereId ? 'here' : p ? 'done' : open ? 'open' : 'locked'}">${status}</div><div class="tip-top">TOP 5</div><ol>${rows}</ol>`;
   }
   function showMapTip(m, e) {
