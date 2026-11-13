@@ -236,6 +236,7 @@
     camp: false,               // a base camp of tents beside the finish
     fans: 5,                   // people cheering at the finish
     cameras: 0,                // ...of whom this many are taking photos
+    tourists: false,           // little groups of tourists with cameras beside the piste, all the way down
     penguinFans: false,        // ...or penguins instead of people, jumping for joy
     heli: false,               // dropped off by helicopter at the start
     moths: false,              // Bogong moth swarms fluttering past
@@ -255,7 +256,8 @@
     wildlife: null,            // this mountain's own animals: { odds, kinds: { kind: weight } }
     icy: false,                // an ice field: blocks of ice for trees, glinting cyan edges...
     crevasses: false,          // ...and crevasses where fences would be
-    wind: false,               // katabatic gusts that push you sideways
+    wind: false,               // gusts that push you sideways, each its own length and strength ('wild': Everest's, off the couloir)
+    windPower: null,           // ...how hard, [weakest, strongest] (default 0.6 to 1.5)
     avalanche: null,           // { from, to }: an avalanche chases you from pole `from` to pole `to`
     night: null,               // how dark it is down the course, [[t, darkness 0..1], ...]; a headlamp
     serac: null,               // { from, to, side }: a hanging ice cliff shedding chunks across the piste
@@ -546,6 +548,20 @@
       fans.filter(f => !f.chick).slice(0, PENGUIN_WOOL.length).forEach((f, i) => { f.hat = PENGUIN_WOOL[i]; });
       fans.sort((a, b) => a.y - b.y);   // nearer the bottom draws on top
     }
+    // Tourists (Fuji): groups of one to three just off the piste, every so
+    // often all the way down, cameras out.
+    const tourists = [];
+    if (S.tourists && !endless) {
+      const rnd4 = mulberry32((seed % 4294967296) ^ 0x70C);
+      for (let y = finishY * 0.08; y < finishY * 0.88; y += 110 + rnd4() * 80) {
+        const side = rnd4() < 0.5 ? -1 : 1, n = 1 + Math.floor(rnd4() * 3), yy = Math.round(y);
+        const base = centerAt(yy) + side * (widthAt(yy) + 7 + rnd4() * 6);
+        for (let k = 0; k < n; k++) {
+          tourists.push({ x: Math.round(base + side * k * 6), y: yy + Math.round((rnd4() - 0.5) * 5), side,
+            ink: FAN_INKS[Math.floor(rnd4() * FAN_INKS.length)], phase: Math.floor(rnd4() * 8), flee: 0 });
+        }
+      }
+    }
     const fanCols = Math.ceil(S.fans / 2 / FAN_ROWS.length);
     const fanZone = (x, y) => S.penguinFans && !endless ? y > finishY - 30 && y < finishY + 66 && Math.abs(x - centerAt(y)) < widthAt(y) + 56
       : arena ? y > finishY - 40 && y < finishY + arena.ry + 80 && Math.abs(x - arena.cx) < arena.rx + 76
@@ -573,7 +589,7 @@
       liftX = sum / n > W / 2 ? 18 : W - 18;
     }
     course = { seed, centerAt, lineAt, poles, finishY, salt, nets, liftX, titlePine, endless, lineEnd, extend, levelAt, widthAt, slopeAt, lips, borders, signs, arena, wall, rockDepth, inCouloir, camp, fans, fanZone,
-      couloir: K ? { c0, c1, c2 } : null, cherryAt, debrisAt, screeAt, iceAt, iceDepth, penField, shape: S };
+      couloir: K ? { c0, c1, c2 } : null, cherryAt, debrisAt, screeAt, iceAt, iceDepth, penField, tourists, shape: S };
     if (endless) extend(0);
     snowRows.clear();            // cached rows belong to the previous slope
   }
@@ -1436,7 +1452,7 @@
     state = 'crashed';
     mode = 'crash';
     runEnd = performance.now();
-    hitWhat = hit.boulder ? 'BOULDER' : hit.icefall ? 'ICEFALL' : hit.avalanche ? 'AVALANCHE' : hit.crevasse ? 'CREVASSE' : hit.ice ? 'ICE' : hit.pen ? 'PENITENTES' : hit.sluff ? 'SLUFF' : hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.net ? 'NETS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
+    hitWhat = hit.tourist ? 'TOURISTS' : hit.boulder ? 'BOULDER' : hit.icefall ? 'ICEFALL' : hit.avalanche ? 'AVALANCHE' : hit.crevasse ? 'CREVASSE' : hit.ice ? 'ICE' : hit.pen ? 'PENITENTES' : hit.sluff ? 'SLUFF' : hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.net ? 'NETS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
     SFX.stopSwoosh();
     if (hit.avalanche) {   // swallowed: the snow rolls on over you
       fellIn = true;
@@ -1463,6 +1479,11 @@
   // On fire: whatever was hit goes up like a pineapple, for points.
   // A pineapple just explodes; a tree or a fence explodes in flames.
   function burn(hit) {
+    if (hit.tourist) {   // no exploding tourists: they scatter, cameras and all
+      for (const t of course.tourists) if (Math.abs(t.y - hit.t.y) < 8 && t.side === hit.t.side) t.flee = t.side;
+      SFX.playDash();
+      return;
+    }
     if (hit.animal) {   // no exploding animals: it yelps and bolts
       dogLeaves(hit.a);
       if (hit.kind === 'bear' || hit.kind === 'leopard') SFX.playGrowl(); else SFX.playBark();
@@ -1936,7 +1957,7 @@
 
     // The couloir's walls: no fire gets through rock. Only a god does.
     if (course.wall(skierX, skierY) && !runGod) { crash({ wall: true }); return; }
-    const hit = hitTree(skierX, skierY) || hitFence(skierX, skierY) || hitEdgeNet(skierX, skierY) || hitTent(skierX, skierY) || hitAnimal(skierX, skierY);
+    const hit = hitTree(skierX, skierY) || hitFence(skierX, skierY) || hitEdgeNet(skierX, skierY) || hitTent(skierX, skierY) || hitAnimal(skierX, skierY) || hitTourist(skierX, skierY);
     // A crevasse can't be burned through; only a god walks over it.
     if (hit && hit.crevasse && runGod) { /* across */ }
     else if (hit && onFire() && !hit.crevasse) burn(hit);
@@ -2008,21 +2029,29 @@
   // way for two or three seconds. Never a push without the warning.
   const WIND_PUSH = 28, WIND_CALM = [3, 6], WIND_WARN = 1, WIND_GUST = [2, 3];
   let wind = null, gustLines = [];
+  // Every gust is its own: calms, gusts and strengths all over the place.
+  // On Everest, out on the open face only (never in the couloir).
+  const WILD_CALM = [1.5, 6], WILD_GUST = [0.6, 2.2], WILD_POWER = [0.6, 1.5];
   function blowWind(dt) {
-    if (!wind) wind = { phase: 'calm', t: between(WIND_CALM), dir: 1, len: 1 };
+    const wild = true;
+    if (!wind) wind = { phase: 'calm', t: between(wild ? WILD_CALM : WIND_CALM), dir: 1, len: 1, power: 1 };
+    if (wild && course.inCouloir && course.inCouloir(skierY + 60)) { wind.phase = 'calm'; wind.t = Math.max(wind.t, 1.5); return; }
     wind.t -= dt;
     if (wind.t <= 0) {
       if (wind.phase === 'calm') { wind.phase = 'warn'; wind.t = WIND_WARN; wind.dir = Math.random() < 0.5 ? -1 : 1; }
-      else if (wind.phase === 'warn') { wind.phase = 'gust'; wind.len = wind.t = between(WIND_GUST); }
-      else { wind.phase = 'calm'; wind.t = between(WIND_CALM); }
+      else if (wind.phase === 'warn') {
+        wind.phase = 'gust'; wind.len = wind.t = between(wild ? WILD_GUST : WIND_GUST);
+        wind.power = between(course.shape.windPower || WILD_POWER);   // always sideways; only how hard varies
+      }
+      else { wind.phase = 'calm'; wind.t = between(wild ? WILD_CALM : WIND_CALM); }
     }
-    if (wind.phase === 'gust') skierX = Math.max(2, Math.min(W - 3, skierX + wind.dir * WIND_PUSH * gustEnvelope() * dt));
+    if (wind.phase === 'gust') skierX = Math.max(2, Math.min(W - 3, skierX + wind.dir * WIND_PUSH * wind.power * gustEnvelope() * dt));
   }
   const gustEnvelope = () => Math.max(0, Math.min(1, (wind.len - wind.t) / 0.3, wind.t / 0.4));
   // How hard it's blowing, 0..1, for the sound and the streaks.
   const windLevel = () => !wind || state !== 'running' ? 0
     : wind.phase === 'warn' ? 0.1 + 0.25 * (1 - wind.t / WIND_WARN)
-    : wind.phase === 'gust' ? 0.35 + 0.65 * gustEnvelope() : 0;
+    : wind.phase === 'gust' ? Math.min(1, (0.35 + 0.65 * gustEnvelope()) * (0.7 + 0.3 * (wind.power || 1))) : 0;
   // The streaks: thin dashes of blown snow racing across the screen.
   function updateStreaks(dt) {
     const level = windLevel();
@@ -2219,42 +2248,37 @@
     for (const k of icefall) blit(CHUNK, Math.round(k.x) - 2, k.y - camY - 3);
   }
 
-  // Rockfall (Aoraki): every second or so a rock breaks off one side or
-  // the other, a little way ahead, and bounces across the piste, a puff of
-  // dust each time it lands. Small ones knock you back; boulders, a third
-  // or so, end the run. You see them coming: time your line.
-  const ROCK_EVERY = [0.7, 1.4], ROCK_SPEED = [26, 40], ROCK_BIG = 0.35, ROCK_HOP = 0.45;
-  const PEBBLE = ['.VV.', 'VBVV', '.KK.'];
-  const BOULDER = ['..VVV..', '.VBBVV.', 'VBVVVVV', 'VVVVKVV', 'VVKVVVV', '.KKKKK.'];
+  // Rockfall (Aoraki): rocks come down from above, behind you, faster than
+  // you, bouncing past: pebbles at first, then more and more boulders. Each
+  // keeps its place across the piste as it bends. A pebble knocks you
+  // back; a boulder ends the run, so watch them come and get out of the way.
+  const ROCK_EVERY = [[0.8, 1.2], [0.3, 0.5]], ROCK_GAIN = [36, 60], ROCK_HOP = 0.45;
+  // Pale and outlined, so they stand out from the rocks lying about.
+  const PEBBLE = ['.KK.', 'KWBK', 'KBBK', '.KK.'];
+  const BOULDER = ['..KKKK..', '.KWWBBK.', 'KWBBBBBK', 'KBBBBVBK', 'KBBVBBBK', '.KBBBBK.', '..KKKK..'];
   function moveRockfall(dt) {
     const rf = course.shape.rockfall, y0 = rf.from * course.finishY, y1 = rf.to * course.finishY;
-    rockIn -= dt;
-    if (rockIn <= 0 && skierY > y0 - 120 && skierY < y1) {
-      rockIn = between(ROCK_EVERY);
-      // Aimed, roughly, at where you'll be when it gets across: so you
-      // have to time your line, not just keep going.
-      const side = Math.random() < 0.5 ? -1 : 1, v = between(ROCK_SPEED), ahead = Math.max(20, speed);
-      let y = skierY + 80, x = 0;
-      for (let k = 0; k < 3; k++) {   // settle where it starts and when it meets you
-        x = course.centerAt(y) + side * (course.widthAt(y) + 8);
-        y = skierY + ahead * Math.abs(x - skierX) / v;
-      }
-      y = Math.round(Math.max(skierY + 45, y + (Math.random() * 2 - 1) * 14));
-      if (y > y0 && y < y1) {
-        rockfall.push({ x: course.centerAt(y) + side * (course.widthAt(y) + 8), y, v: -side * v,
-          big: Math.random() < ROCK_BIG, t: Math.random() * ROCK_HOP });
-        SFX.playCrack();
-      }
+    const p = Math.max(0, Math.min(1, (skierY - y0) / (y1 - y0)));   // how far through it you are
+    // The wind shakes them loose: far more come down in a gust.
+    rockIn -= dt * (wind && wind.phase === 'gust' ? 1.7 : 0.75);
+    if (rockIn <= 0 && skierY > y0 && skierY < y1) {
+      rockIn = between(ROCK_EVERY[0]) + (between(ROCK_EVERY[1]) - between(ROCK_EVERY[0])) * p;
+      const y = cameraTop() - 8, off = (Math.random() * 2 - 1) * course.widthAt(y) * 0.95;
+      const big = Math.random() < 0.85 * p * p;   // none at first, mostly boulders by the end
+      rockfall.push({ off, x: course.centerAt(y) + off, y, v: speed + between(ROCK_GAIN), big, t: Math.random() * ROCK_HOP });
+      if (big) SFX.playCrack(); else SFX.playClack();
     }
     for (const k of rockfall) {
-      k.x += k.v * dt;
+      k.v = Math.max(k.v, speed + 20);   // always overtaking
+      k.y += k.v * dt;
+      k.x = course.centerAt(k.y) + k.off;
       const before = Math.floor(k.t / ROCK_HOP);
       k.t += dt;
       if (Math.floor(k.t / ROCK_HOP) !== before) dust(k.x, k.y);   // landed
     }
-    rockfall = rockfall.filter(k => Math.abs(k.x - course.centerAt(k.y)) < course.widthAt(k.y) + 30);
-    // A boulder bounces low and heavy, never over you; a small rock only
-    // hits low in its hop.
+    rockfall = rockfall.filter(k => k.y < cameraTop() + H + 20);
+    // A boulder bounces low and heavy, never over you; a pebble only hits
+    // low in its hop.
     return rockfall.find(k => (k.big || rockHop(k) < 3) && Math.abs(k.x - skierX) <= (k.big ? 4 : 2.5) && skierY >= k.y - 3 && skierY <= k.y + 2) || null;
   }
   const rockHop = k => Math.round((k.big ? 3 : 7) * Math.sin(Math.PI * ((k.t % ROCK_HOP) / ROCK_HOP)));
@@ -2280,7 +2304,7 @@
   }
   function drawRockfall(camY) {
     for (const k of rockfall) {
-      const s = k.big ? BOULDER : PEBBLE, hop = rockHop(k), x = Math.round(k.x) - (s[0].length >> 1), y = k.y - camY;
+      const s = k.big ? BOULDER : PEBBLE, hop = rockHop(k), x = Math.round(k.x) - (s[0].length >> 1), y = Math.round(k.y) - camY;
       // Its shadow on the snow, then the rock up above it.
       for (let dx = 1; dx < s[0].length - 1; dx++) put(x + dx, y, VIC.lightBlue);
       blit(s, x, y - s.length + 1 - hop);
@@ -2352,6 +2376,8 @@
   function treeAt(i, j, salt, centerAt) {
     let x = i * TREE_CELL + 2 + Math.floor(hash(i * 7 + salt, j * 3 + 1) * (TREE_CELL - 4));
     const y = j * TREE_CELL + 2 + Math.floor(hash(i * 5 + salt, j * 11 + 7) * (TREE_CELL - 4));
+    // No tree where tourists stand.
+    if (course && course.tourists && course.tourists.some(t => Math.abs(t.x - x) < 7 && y > t.y - 4 && y < t.y + 12)) return null;
     // Nothing grows through a safety net: step it aside, staying on the
     // side of the net it was on.
     if (course && course.nets) {
@@ -2690,6 +2716,35 @@
     a.side = a.x < course.centerAt(a.y) ? -1 : 1;
   }
 
+  // A tourist only counts if you steer into them, like a dog alongside.
+  function hitTourist(x, y) {
+    if (!course.tourists) return null;
+    for (const t of course.tourists) {
+      if (t.flee || Math.sign(vx) !== Math.sign(t.x - x)) continue;
+      if (Math.abs(x - t.x) <= 2 && y >= t.y - 9 && y <= t.y + 2) return { tourist: true, t };
+    }
+    return null;
+  }
+  // Tourists: a photographer each, turning to face you; the closer you
+  // get, the more the flashes go off. Scattering ones run off sideways.
+  function drawTourists(camY, dt) {
+    const now = performance.now();
+    for (const t of course.tourists) {
+      if (t.flee) t.x += t.flee * 45 * dt;
+      const sy = t.y - camY;
+      if (sy < -10 || sy > H + 10 || Math.abs(t.x - course.centerAt(t.y)) > W) continue;
+      if (t.flee) { blit(FAN_CHEER, Math.round(t.x) - 2, sy - 7 - (Math.floor(now / 120) % 2), t.ink); continue; }
+      blit(FAN_PHOTO, t.x - 2, sy - 7, t.ink);
+      const near = Math.abs(t.y - skierY) < 50, every = near ? 420 : 2600, at = (now + t.phase * 397) % every;
+      if (at < 90) {   // the flash
+        const fx = t.x, fy = sy - 5;
+        put(fx, fy, VIC.white);
+        for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) put(fx + dx, fy + dy, VIC.yellow);
+        for (const [dx, dy] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) put(fx + dx, fy + dy, VIC.white);
+      }
+    }
+  }
+
   function hitAnimal(x, y) {
     for (const a of animals) {
       const k = ANIMALS[a.kind];
@@ -2897,7 +2952,7 @@
         const tr = treeAt(i, j, salt, centerAt);
         if (!tr || exploded.has(i + ',' + j) || scorched.has(i + ',' + j)) continue;
         // A pineapple is two pixels shorter and four narrower than a tree.
-        const reach = tr.pine ? 3 : 5, top = tr.pine ? 8 : tr.rock ? ROCKS[tr.rock - 1].length + 1 : tr.bush ? 6 : tr.groundsel ? GROUNDSEL.length + 1 : tr.pen ? PENITENTE.length + 1 : tr.ice ? ICEBLOCK.length + 1 : 10;
+        const reach = tr.pine ? 3 : 5, top = tr.pine ? 8 : tr.rock ? ROCKS[tr.rock - 1].length + 1 : tr.bush ? 6 : tr.groundsel ? GROUNDSEL.length + 1 : tr.pen ? penShape(tr).length + 1 : tr.ice ? ICEBLOCK.length + 1 : 10;
         if (Math.abs(x - tr.x) <= reach && y >= tr.y - top && y <= tr.y + 2) return tr;
       }
     }
@@ -3399,16 +3454,42 @@
 
   // Penitentes: a cluster of tall blades of hard snow, all leaning the
   // same way, outlined so they show against the snow, a shadow at the foot.
-  const PENITENTE = [
-    '.V...V...',
-    '.CV..CV.V',
-    '.WCV.WCVC',
-    'VWCCVWCCV',
-    'VWCCVWCCV',
-    'VCCCVCCCV',
-    'VCCCVCCCV',
-    'BBBBBBBBB',
+  // Penitentes: tall, sharp blades of ice, faceted like Vinson's blocks,
+  // two or three to a clump, each clump its own.
+  const PEN_SHAPES = [
+    ['...V.....',
+     '..VWV....',
+     '..VWCV...',
+     '.VWCCV.V.',
+     '.VWCCVVWV',
+     'VWCCCVWCV',
+     'VWCCCVWCV',
+     'VCCWCVCCV',
+     'VCCCCCCCV',
+     '.BBVBBBB.'],
+    ['......V..',
+     '.V...VWV.',
+     'VWV..VWCV',
+     'VWCV.VWCV',
+     'VWCV.VCCV',
+     'VCCVVWCCV',
+     'VCWCVWCCV',
+     'VCCCVCCCV',
+     'VCCCCCWCV',
+     '.BVBBBVB.'],
+    ['.V.......',
+     'VWV...V..',
+     'VWCV.VWV.',
+     'VWCV.VWCV',
+     'VCCVVWCCV',
+     'VCCVVWCCV',
+     'VCWCVCCCV',
+     'VCCCCCCWV',
+     'VCCCCCCCV',
+     '.BBBVBBB.'],
   ];
+  const PENITENTE = PEN_SHAPES[0];
+  const penShape = tr => PEN_SHAPES[(((tr.i * 5 + tr.j * 7) % 3) + 3) % 3];
   const PEN_PIECES = [VIC.white, VIC.white, VIC.cyan, VIC.lightBlue];
   // Lumps of glacier ice, broken and uneven: a leaning slab, a jagged
   // serac, a low pile of shards. Blue edges, cyan and white faces.
@@ -3798,7 +3879,7 @@
       for (let i = iMin; i < iMax; i++) {
         const tr = treeAt(i, j, salt, centerAt);
         if (!tr || exploded.has(i + ',' + j) || scorched.has(i + ',' + j)) continue;
-        const rows = tr.pine ? PINEAPPLE : tr.pen ? PENITENTE : tr.ice ? ICE_SHAPES[(((tr.i * 7 + tr.j * 3) % 3) + 3) % 3] : tr.rock ? ROCKS[tr.rock - 1] : tr.cherry ? CHERRY : tr.rata ? RATA
+        const rows = tr.pine ? PINEAPPLE : tr.pen ? penShape(tr) : tr.ice ? ICE_SHAPES[(((tr.i * 7 + tr.j * 3) % 3) + 3) % 3] : tr.rock ? ROCKS[tr.rock - 1] : tr.cherry ? CHERRY : tr.rata ? RATA
           : tr.bush ? BUSH : tr.groundsel ? GROUNDSEL : TREE;
         shadowOf(rows, tr.x - (tr.pine ? 2 : 4), tr.y - camY - rows.length + 1);
       }
@@ -3957,7 +4038,7 @@
         const sc = scorched.get(i + ',' + j);
         if (sc) drawScorchedTree(tr, sc, camY);
         else if (exploded.has(i + ',' + j)) continue;
-        else if (tr.pen) blit(PENITENTE, tr.x - 4, tr.y - camY - PENITENTE.length + 1);
+        else if (tr.pen) { const ps = penShape(tr); blit(ps, tr.x - 4, tr.y - camY - ps.length + 1); }
         else if (tr.ice) { const r = ICE_SHAPES[(((tr.i * 7 + tr.j * 3) % 3) + 3) % 3]; blit(r, tr.x - 4, tr.y - camY - r.length + 1); }
         else if (tr.rock) { const r = ROCKS[tr.rock - 1]; blit(r, tr.x - 4, tr.y - camY - r.length + 1); }
         else if (tr.cherry) blit(CHERRY, tr.x - 4, tr.y - camY - 8);
@@ -4006,6 +4087,7 @@
     if (course) for (const g of course.signs) drawSign(g, camY);
     if (course && course.camp) drawCamp(course.camp, camY);
     if (course && course.fans) drawFans(camY);
+    if (course && course.tourists && course.tourists.length) drawTourists(camY, 1 / 60);
     if (sluff && course && course.couloir) drawSluff(camY);
 
     if (course) {
@@ -4267,6 +4349,20 @@
     annapurna: [83.8, 28.6, -2, 0], k2: [76.5, 35.88, 0, -1], chomolungma: [86.9, 27.99, 2, 1],
   };
 
+  // On the big map, neighbours a few pixels apart get pushed further from
+  // each other, so their peaks, marks and names don't pile up.
+  const WIDE_NUDGE = {
+    pista3: [-7, 3], cervino: [6, -4],
+    kirinyaga: [-6, -6], kilimanjaro: [5, 6],
+    annapurna: [-6, 1], chomolungma: [6, 2], k2: [0, -3],
+  };
+  // A mountain's spot on a map w by h (nudged for its neighbours).
+  function mapSpot(id, w, h) {
+    const [lon, lat, dx = 0, dy = 0] = PLACES[id], [x, y] = equalEarth(lon, lat, w, h);
+    const [nx, ny] = w > 300 ? WIDE_NUDGE[id] || [0, 0] : [dx, dy];
+    return [x + nx, y + ny];
+  }
+
   // The map screen: sea, land (snow towards the poles), a pale shore, the
   // road travelled so far, then every mountain: done ones with a little
   // flag, open ones bright, locked ones dithered grey. The one picked
@@ -4320,11 +4416,10 @@
     }
     return (reliefCache[key] = out);
   }
-  let mapPan = null, mapSpots = {};
+  let mapPan = null, mapSpots = {}, cardSide = 1;   // which side of its mountain the choosing card is on
   // On a desktop the map leaves the TV and fills the window, on its own
   // canvas with more (but still chunky) pixels; a phone keeps it in the TV.
   const MAP_WIDE = !NARROW, MAP_W = 520, MAP_H = 272;
-  const CARD_LON = 77;   // where the choosing card sits on the big map
   const mapCanvas = document.getElementById('map-screen');
   const mapTitleEl = document.getElementById('map-title');
   const mapScoreEl = document.getElementById('map-score'), mapScoreList = mapScoreEl && mapScoreEl.querySelector('ol');
@@ -4334,13 +4429,20 @@
     if (!MAP_WIDE || !mapCanvas) return false;
     mapCanvas.hidden = !on;
     if (mapTitleEl) mapTitleEl.hidden = !on;
-    // The choosing card sits over the Indian Ocean, between Africa and
-    // Australia, at the bottom of the screen.
-    if (on) {
-      const r = mapCanvas.getBoundingClientRect(), k = Math.min(r.width / MAP_W, r.height / MAP_H), { w, h } = worldMap('huge');
-      const sx = r.left + (r.width - MAP_W * k) / 2 + (equalEarth(CARD_LON, 0, w, h)[0] + Math.floor((MAP_W - w) / 2)) * k;
-      cardEl.style.marginLeft = Math.max(8, Math.min(window.innerWidth - cardEl.offsetWidth - 8, Math.round(sx - cardEl.offsetWidth / 2))) + 'px';
-    } else cardEl.style.marginLeft = '';
+    // The choosing card sits beside the mountain you're choosing, on
+    // whichever side has room, level with it.
+    if (on && champ && champ.stage === 'pick') {
+      const o = champOptions(), spot = mapSpots[o[champ.pick % o.length].id];
+      if (spot) {
+        const r = mapCanvas.getBoundingClientRect(), k = Math.min(r.width / MAP_W, r.height / MAP_H);
+        const sx = r.left + (r.width - MAP_W * k) / 2 + spot[0] * k, sy = r.top + (r.height - MAP_H * k) / 2 + spot[1] * k;
+        const cw = cardEl.offsetWidth, ch = cardEl.offsetHeight, gap = 16 * k;
+        cardSide = sx + gap + cw < window.innerWidth - 8 ? 1 : -1;
+        const left = cardSide > 0 ? sx + gap : sx - gap - cw;
+        cardEl.style.left = Math.round(Math.max(8, left)) + 'px';
+        cardEl.style.top = Math.round(Math.max(8, Math.min(window.innerHeight - ch - 8, sy - ch / 2))) + 'px';
+      }
+    } else { cardEl.style.left = ''; cardEl.style.top = ''; }
     if (mapScoreEl) {   // your scorecard so far, bottom left
       mapScoreEl.hidden = !on;
       if (on) {
@@ -4387,7 +4489,7 @@
       }
       else if (land(x - 1, y) || land(x + 1, y) || land(x, y - 1) || land(x, y + 1)) px(x0 + x, y0 + y, VIC.lightBlue);
     }
-    const at = id => { const [lon, lat, dx = 0, dy = 0] = PLACES[id], [x, y] = equalEarth(lon, lat, w, h); return [x0 + x + dx, y0 + y + dy]; };
+    const at = id => { const [x, y] = mapSpot(id, w, h); return [x0 + x, y0 + y]; };
     mapSpots = Object.fromEntries(MOUNTAINS.map(m => [m.id, at(m.id)]));   // for tapping
     const dots = (a, b, c, gap) => {
       const n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1])));
@@ -4519,18 +4621,35 @@
       const arrowOn = here || pick.id, [ax, ay] = at(arrowOn);
       taken.push([ax - 7, ay - 26, ax + 7, ay - 9]);
       if (here) { const [hx, hy] = at(here); taken.push([hx + PARKED[0] - 12, hy + PARKED[1] - 10, hx + PARKED[0] + 12, hy + PARKED[1] + 10]); }
+      // The choosing card too, in map pixels.
+      if (!cardEl.hidden && champ.stage === 'pick' && cardEl.getBoundingClientRect) {
+        const mr = mapCanvas.getBoundingClientRect(), kk = Math.min(mr.width / MAP_W, mr.height / MAP_H), cr = cardEl.getBoundingClientRect();
+        const ox = mr.left + (mr.width - MAP_W * kk) / 2, oy = mr.top + (mr.height - MAP_H * kk) / 2;
+        if (cr.width) taken.push([(cr.left - ox) / kk - 2, (cr.top - oy) / kk - 2, (cr.right - ox) / kk + 2, (cr.bottom - oy) / kk + 2]);
+      }
       const clash = (r) => r[0] < 1 || r[2] > VW_ - 1 || r[1] < 1 || r[3] > H_ - 1 || taken.some(t => r[0] < t[2] && r[2] > t[0] && r[1] < t[3] && r[3] > t[1]);
       const place = (id, spots) => {
-        const label = mapLabel(id), lw = label.length * 4 - 1, [mx, my] = at(id);
-        const tries = spots.map(([where, d]) => where === 'up' ? [mx - (lw >> 1), my - d] : where === 'down' ? [mx - (lw >> 1), my + d]
+        const [mx, my] = at(id);
+        const spotsFor = lw => spots.map(([where, d]) => where === 'up' ? [mx - (lw >> 1), my - d] : where === 'down' ? [mx - (lw >> 1), my + d]
+          : where === 'upAway' ? [cardSide > 0 ? mx - lw + 4 : mx - 4, my - d] : where === 'downAway' ? [cardSide > 0 ? mx - lw + 4 : mx - 4, my + d]
           : where === 'right' ? [mx + d, my - 3] : [mx - d - lw, my - 3]);
-        let best = tries.find(([lx, ly]) => !clash([lx - 1, ly - 1, lx + lw + 2, ly + 7])) || tries[0];
+        const fits = (lx, ly, lw) => !clash([lx - 1, ly - 1, lx + lw + 2, ly + 7]);
+        // With its country if there's room anywhere; if not, just its name.
+        let label, best;
+        for (const text of [mapLabel(id), mountain(id).name.split(/ \(| "/)[0]]) {
+          const lw = text.length * 4 - 1, hit = spotsFor(lw).find(([lx, ly]) => fits(lx, ly, lw));
+          if (hit) { label = text; best = hit; break; }
+        }
+        if (!label) { label = mountain(id).name.split(/ \(| "/)[0]; best = spotsFor(label.length * 4 - 1)[0]; }
+        const lw = label.length * 4 - 1;
         best = [Math.max(2, Math.min(VW_ - lw - 2, best[0])), Math.max(1, best[1])];
         taken.push([best[0] - 1, best[1] - 1, best[0] + lw + 2, best[1] + 7]);
         drawLabel(label, best[0], best[1]);
       };
-      place(pick.id, [['up', 15], ['up', 33], ['down', 5], ['right', 8], ['left', 8], ['down', 14], ['up', 24]]);
-      if (here) place(here, [['down', 5], ['down', 14], ['right', 8], ['left', 8], ['up', 33], ['down', 23]]);
+      // Never on the choosing card's side of it.
+      place(pick.id, [['up', 15], ['upAway', 15], ['left', 8], ['right', 8], ['down', 5], ['downAway', 5], ['up', 33], ['upAway', 33], ['down', 14], ['up', 24]]
+        .filter(([where]) => where !== (cardSide > 0 ? 'right' : 'left')));
+      if (here) place(here, [['down', 5], ['left', 8], ['right', 26], ['down', 14], ['up', 33], ['down', 23]]);
     }
   }
   // A little plane from above, pointing right: wings, tail, a dark nose.
@@ -4615,7 +4734,7 @@
   // Where a hop starts and ends, on a map w by h. The first hop of a
   // Championship flies in from off the edge of the map.
   function flightEnds(w, h) {
-    const spot = id => { const [lon, lat, dx = 0, dy = 0] = PLACES[id], [x, y] = equalEarth(lon, lat, w, h); return [x + dx, y + dy]; };
+    const spot = id => mapSpot(id, w, h);
     const b = spot(champ.fly.to), f = champ.fly.from && spot(champ.fly.from);
     // From where it was parked; the first hop flies in from off the map's
     // nearer side edge, level with where it's going.
@@ -4772,23 +4891,23 @@
     // A narrow chute near the bottom: the trees close in, no way out.
     alyeska: { wildlife: { odds: 0.02, kinds: { bear: 1, wolf: 1 } }, fans: 120, cameras: 45, heli: true, edgeNets: 0.5, lift: true, arena: true, width: [[0, 44], [0.7, 44], [0.76, 27], [0.94, 27], [1, 36]] },
     // Broad and gentle: long lazy bends, little on the piste.
-    kunama: { fans: 120, cameras: 45, moths: true, edgeNets: 0.5, lift: true, arena: true, width: 50, sway: 0.55, twist: 1.2, crowd: 0.3, quick: 0 },
+    kunama: { wind: true, windPower: [0.25, 0.5], fans: 120, cameras: 45, moths: true, edgeNets: 0.5, lift: true, arena: true, width: 50, sway: 0.55, twist: 1.2, crowd: 0.3, quick: 0 },
     // The Grand Muret: 76%, right after the start. The slope drops away,
     // you fly for a few poles, then it eases.
     // Room to tuck on the pitch, then the poles close in below it.
     pista3: { fans: 160, cameras: 60, edgeNets: 0.8, lift: true, arena: true, gaps: [[0, 170], [0.42, 160], [0.57, 75], [1, 64]], quick: 0, slope: [[0, 1], [0.05, 1], [0.08, 1.5], [0.6, 1.5], [0.66, 1]],
       signs: [{ t: 0.05, lines: ['GRAND MURET', '76%'] }] },
-    // In 1991 a rock avalanche sheared 10 m off the summit: a stretch of
-    // boulders strewn across the piste high up, and rocks among the trees
-    // all the way down.
+    // In 1991 a rock avalanche sheared 10 m off the summit: high up, rocks
+    // come bouncing down past you, pebbles first, then boulders; and rocks
+    // among the trees all the way down.
     // Below it, clumps of southern rātā flowering crimson.
-    aoraki: { treeline: 0.5, wildlife: { odds: 0.025, kinds: { kea: 1 } }, rocks: 0.3, rata: 0.4, debris: [[0, 0], [0.1, 0], [0.13, 0.1], [0.3, 0.1], [0.34, 0]],
-      signs: [{ t: 0.1, lines: ['ROCKFALL'] }], rockfall: { from: 0.11, to: 0.32 } },
+    aoraki: { treeline: 0.5, wildlife: { odds: 0.025, kinds: { kea: 1 } }, rocks: 0.3, rata: 0.4, debris: 0,
+      signs: [{ t: 0.1, lines: ['ROCKFALL'] }], rockfall: { from: 0.1, to: 0.36 }, wind: true, windPower: [0.35, 0.7] },
     // Even as a metronome: same gap, same swing, no bunching.
     // ...and cherry trees in bloom down the lower half.
     // ...and cherry groves, small at first, bigger and bigger, until by
     // the finish it's nearly all blossom. Photographers at the bottom.
-    fuji: { cherry: [[0, 0], [0.25, 0], [0.45, 0.25], [0.75, 0.55], [0.95, 0.95]], fans: 8, cameras: 5, gapFirst: 82, gapLast: 82, offset: 13, offsetLast: 13, jitter: 0, quick: 0, twist: 0.5 },
+    fuji: { tourists: true, cherry: [[0, 0], [0.25, 0], [0.45, 0.25], [0.75, 0.55], [0.95, 0.95]], fans: 8, cameras: 5, gapFirst: 82, gapLast: 82, offset: 13, offsetLast: 13, jitter: 0, quick: 0, twist: 0.5 },
     // Swiss top tight and technical; Italian bottom opens into long turns.
     cervino: { treeline: 0.7, fans: 120, cameras: 45, edgeNets: 0.5, lift: true, arena: true, borders: [0.5], signs: [{ t: 0.5, lines: ['ITALIA'], flag: 'it' }],
       welcome: 'BENVENUTI IN ITALIA !!!', gapFirst: 62, gapLast: 92, offset: 15, offsetLast: 11,
@@ -4812,7 +4931,7 @@
       rocks: 0.75, forest: 0.45, bushes: true, poles: 35, reds: 6, gapFirst: 86, gapLast: 74, jitter: 2, quick: 1 },
     // A high, dry desert mountain: penitentes in fields, boulders and
     // tussock grass, no trees.
-    aconcagua: { penitentes: 0.6, rocks: 1, forest: 0.4, tussock: true, dogs: 0.06 },
+    aconcagua: { wind: true, windPower: [0.4, 0.9], penitentes: 0.6, rocks: 1, forest: 0.4, tussock: true, dogs: 0.06 },
     // Long the deadliest 8,000er, mostly to avalanches; and "full of food".
     annapurna: { wildlife: { odds: 0.016, kinds: { leopard: 1 } }, avalanche: { from: 9, to: 22, hold: 24, minV: 57, breakUp: true, throws: true }, pines: 1.6, treeline: 1.1 },
     // The Savage Mountain: the most technical slalom of all.
@@ -4824,7 +4943,7 @@
       quick: 2, quickLen: 7, quickGap: 36, offset: 15, offsetLast: 15, gapFirst: 82, gapLast: 50 },
     // The Hornbein Couloir first: steep, narrow, zigzagging between rock
     // walls, no poles; then out onto the North Face.
-    chomolungma: { rocks: 1, fences: 0, camp: true, heli: true, couloir: { start: 100, rows: 1200, open: 90, hw: 15, slope: 1.6,
+    chomolungma: { wind: 'wild', rocks: 1, fences: 0, camp: true, heli: true, couloir: { start: 100, rows: 1200, open: 90, hw: 15, slope: 1.6,
       // Gentle swings, then dangerous ones, each just within reach.
       bends: [[0, 0], [160, 18], [300, -20], [420, 22], [600, 5], [700, -26], [820, 16],
         [960, -10], [1080, 20], [1200, 0]],
@@ -4973,7 +5092,7 @@
           flags.className = 'unlock-flags';
           flags.append(...FLAGS_OF[id].map(flagCanvas));
           const nm = document.createElement('span');
-          nm.textContent = withLand(shortName(mountain(id)), id);
+          nm.textContent = withLand(mountain(id).name.split(/ \(| "/)[0], id);   // short: no nicknames
           row.append(flags, nm);
           P.text.appendChild(row);
         }
