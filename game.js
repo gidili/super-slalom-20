@@ -1253,12 +1253,22 @@
   // ---------------------------------------------------------------- flow
   // The title screen is the top of the next course, built from the seed as
   // soon as the server sends it. Until then, a stand-in slope.
+  // A mountain's slope, built once and shown from the top: behind its card,
+  // and for the run itself, so the run starts on what was already showing.
+  function slopeFor(m) {
+    if (course && course.from === m.id && course.fresh) return;
+    buildCourse(m.seed, false, shapeOf(m));
+    course.from = m.id; course.fresh = true;
+    skierX = course.centerAt(0); skierY = 0; pan = 0;
+  }
+
   function prepareRun() {
     const seq = ++prepareSeq;
     course = null;
     snowRows.clear();
     prepared = openSession(seq).then(seed => {
-      if (seq !== prepareSeq) return;
+      // A mountain's slope put up meanwhile stays.
+      if (seq !== prepareSeq || (course && course.from)) return;
       buildCourse(seed);
       skierX = course.centerAt(0);
       skierY = 0;
@@ -1299,6 +1309,9 @@
     hideOverlay();
     titleCardEl.hidden = true;
     flash('GET READY');
+    // A mountain's slope goes up straight away, from the top.
+    if (champ) slopeFor(champ.current);
+    else if (chosenMode() === 'single' && classicPick()) slopeFor(mountain(classicPick()));
     await prepared;
     runGod = sessionGod;
     // Endless has its own kind of session, asked for now rather than on the
@@ -1307,7 +1320,7 @@
       buildCourse(await openSession(prepareSeq, true), true);
       runGod = sessionGod;
     } else if (champ) {   // its own session, checked the moment it's over
-      buildCourse(champ.current.seed, false, shapeOf(champ.current));
+      slopeFor(champ.current);
       await openChampSession();
       runGod = champ.god;
     }
@@ -1315,9 +1328,8 @@
     // and board.
     runClassic = !champ && chosenMode() === 'single' ? classicPick() : null;
     if (runClassic) {
-      const m = mountain(runClassic);
       await openSession(prepareSeq, false, runClassic);
-      buildCourse(m.seed, false, shapeOf(m));
+      slopeFor(mountain(runClassic));
       runGod = sessionGod;
     }
     skierX = course.centerAt(0);
@@ -1361,6 +1373,7 @@
 
   function go() {
     msgEl.classList.remove('above-count');
+    if (course) course.fresh = false;   // skied now: the next run rebuilds it
     tellServer('slalom_go');
     runStart = performance.now();
     // Physics and clock share an origin; nothing before this moment counts.
@@ -1393,7 +1406,8 @@
       SFX.stopSwoosh();
       closeSession();
     }
-    toTitle();
+    // A Single mountain goes again on its own slope: no new title course.
+    toTitle(chosenMode() === 'single' && !!classicPick());
     startRun();
   }
 
@@ -3267,16 +3281,16 @@
 
   // A southern rātā in flower: a broad crimson crown with dark leaves
   // showing through, on a trunk. Same footprint as a pine.
-  const RATA = [
+  const RATA = [   // black branches, darker red deep in the crown, a brown and black trunk
     '..QQGQQ..',
-    '.QQQQQGQ.',
-    'QGQQQQQQQ',
-    'QQQQGQQQQ',
-    'QQQQQQQGQ',
     '.QGQQQQQ.',
-    '..QQQGQ..',
-    '....O....',
-    '....O....',
+    'QQKQGQKQQ',
+    'QGQKRKQQQ',
+    '.QQRKORQ.',
+    '..KRKOK..',
+    '....KO...',
+    '....KO...',
+    '...KKOO..',
   ];
 
   // Low scrub, wide and squat, darker twigs showing.
@@ -4488,17 +4502,19 @@
     'KKKKKKKKKKK',
   ];
   // Where a hop starts and ends, on a map w by h. The first hop of a
-  // Championship flies in from off to the west.
+  // Championship flies in from off the edge of the map.
   function flightEnds(w, h) {
     const spot = id => { const [lon, lat, dx = 0, dy = 0] = PLACES[id], [x, y] = equalEarth(lon, lat, w, h); return [x + dx, y + dy]; };
     const b = spot(champ.fly.to), f = champ.fly.from && spot(champ.fly.from);
-    const a = f ? [f[0] + PARKED[0], f[1] + PARKED[1]] : [b[0] - 80, b[1] - 25];   // from where it was parked
+    // From where it was parked; the first hop flies in from off the map's
+    // nearer side edge, level with where it's going.
+    const a = f ? [f[0] + PARKED[0], f[1] + PARKED[1]] : [b[0] < w / 2 ? -24 : w + 24, b[1] - 10];
     return [a, b];
   }
-  // How long a hop takes: longer for further, 1 to 2 seconds.
+  // How long a hop takes: longer for further.
   function flightTime() {
     const { w, h } = worldMap('big'), [a, b] = flightEnds(w, h);
-    return 1000 + Math.min(1000, Math.hypot(b[0] - a[0], b[1] - a[1]) * 8);
+    return 2200 + Math.min(2300, Math.hypot(b[0] - a[0], b[1] - a[1]) * 18);   // 2.2 to 4.5 seconds
   }
   // The plane's spot at t (0..1 of the hop): eased, on a gentle arc.
   function flightPos(w, h, t) {
@@ -4821,7 +4837,9 @@
     P.pick.hidden = c.stage !== 'pick';
     P.flags.hidden = c.stage !== 'intro' && c.stage !== 'pick' && c.stage !== 'result';
     P.prev.hidden = P.next.hidden = c.stage !== 'pick' || champOptions().length < 2;
-    P.list.innerHTML = c.stage === 'intro' ? '' : champListHtml();
+    // The running list only at the end; on the big map it's on screen anyway
+    // (a phone, without it, still gets it after each mountain).
+    P.list.innerHTML = c.stage === 'done' || (c.stage === 'result' && !MAP_WIDE) ? champListHtml() : '';
     if (c.stage === 'pick') {
       const opts = champOptions(), m = opts[c.pick % opts.length];
       P.head.textContent = `COURSE ${n} OF ${CHAMP_COURSES}`;
@@ -4930,7 +4948,7 @@
       SFX.playFlight(flightTime() / 1000);
     } else if (c.stage === 'fly') {   // landed, or skipped
       c.stage = 'intro';
-      buildCourse(c.current.seed, false, shapeOf(c.current));   // its slope, behind the card
+      slopeFor(c.current);   // its slope, from the top, behind the card
       showChamp();
     } else if (c.stage === 'intro') {
       c.stage = 'run';
@@ -5022,7 +5040,7 @@
     const P = champParts;
     singleIntro = m;
     titleCardEl.hidden = true;
-    buildCourse(m.seed, false, shapeOf(m));   // its slope, behind the card
+    slopeFor(m);   // its slope, from the top, behind the card
     cardEl.classList.add('champ-mode');
     champEl.hidden = false;
     P.pick.hidden = true;
