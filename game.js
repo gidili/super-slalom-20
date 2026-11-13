@@ -4311,16 +4311,19 @@
         }
         for (const [dx, dy] of [[0, -3], [-1, -2], [1, -2], [-2, -1], [2, -1], [-3, 0], [3, 0]]) px(mx + dx, my + dy, VIC.black);
       }
-      if (picked) {   // ▼ over it (outlined in black on the big map)
-        const n = wide ? 4 : 3, top = wide ? my - 15 : my - 9, col = blink ? VIC.yellow : VIC.white;
-        if (wide) for (let r = -1; r <= n; r++) for (let q = r - n; q <= n - r; q++) px(mx + q, top + r, VIC.black);
-        for (let r = 0; r < n; r++) for (let q = r - (n - 1); q <= n - 1 - r; q++) px(mx + q, top + r, col);
+      if (picked && wide) {   // a big red arrow bouncing over it, outlined white then black
+        const b = Math.round(2.5 * Math.abs(Math.sin(performance.now() / 200)));
+        PICK_ARROW.forEach((row, r) => [...row].forEach((ch, k) => {
+          if (ch !== '.') px(mx + k - 6, my - 21 - b + r, ch === 'K' ? VIC.black : ch === 'W' ? VIC.white : VIC.crimson);
+        }));
+      } else if (picked) {   // ▼ over it
+        for (let r = 0; r < 3; r++) for (let q = r - 2; q <= 2 - r; q++) px(mx + q, my - 9 + r, blink ? VIC.crimson : VIC.white);
       }
     }
     if (!flying) {
       // The pick's name on the map, white on a black shadow, above its ▼.
       const [mx, my] = at(pick.id), label = pick.name.split(/ \(| "/)[0];
-      const lw = label.length * 4 - 1, lx = Math.max(2, Math.min(VW_ - lw - 2, mx - (lw >> 1))), ly = Math.max(1, my - (wide ? 24 : 16));
+      const lw = label.length * 4 - 1, lx = Math.max(2, Math.min(VW_ - lw - 2, mx - (lw >> 1))), ly = Math.max(1, my - (wide ? 30 : 16));
       for (const [dx, dy, c] of [[1, 1, VIC.black], [0, 0, VIC.white]]) {
         for (let k = 0; k < label.length; k++) {
           const bitsK = FONT3[label[k]] || FONT3[' '];
@@ -4388,6 +4391,22 @@
   ];
   const PLANE_INKS = { K: VIC.black, Y: [236, 200, 60], R: VIC.crimson };
   const PLANE_SCALE = 1;
+  // The big map's marker on the mountain you're choosing: a red arrow.
+  const PICK_ARROW = [
+    '...KKKKKKK...',
+    '...KWWWWWK...',
+    '...KWRRRWK...',
+    '...KWRRRWK...',
+    '...KWRRRWK...',
+    'KKKKWRRRWKKKK',
+    'KWWWWRRRWWWWK',
+    '.KWRRRRRRRWK.',
+    '..KWRRRRRWK..',
+    '...KWRRRWK...',
+    '....KWRWK....',
+    '.....KWK.....',
+    '......K......',
+  ];
   // The big map's peak: snow inside a thick black outline.
   const BIG_PEAK = [
     '.....K.....',
@@ -4735,8 +4754,24 @@
       P.go.innerHTML = rest ? `${main}<small>(${rest}</small>` : main;
       P.flags.replaceChildren(...FLAGS_OF[m.id].map(flagCanvas));   // whose mountain it is
       const next = m.unlocks.filter(id => !c.open.has(id) && !skied(id));
-      P.text.textContent = `${m.country} · ${m.height}` + (m.id === FINALE ? ' · THE FINALE'
-        : next.length ? ` · FINISH TO UNLOCK: ${next.map(id => shortName(mountain(id))).join(', ')}` : '');
+      P.text.textContent = `${m.country} · ${m.height}` + (m.id === FINALE ? ' · THE FINALE' : '');
+      if (m.id !== FINALE && next.length) {   // what finishing it opens, a row each, with flags
+        const head = document.createElement('div');
+        head.className = 'unlock-head';
+        head.textContent = 'FINISH TO UNLOCK:';
+        P.text.appendChild(head);
+        for (const id of next) {
+          const row = document.createElement('div');
+          row.className = 'unlock-row';
+          const flags = document.createElement('span');
+          flags.className = 'unlock-flags';
+          flags.append(...FLAGS_OF[id].map(flagCanvas));
+          const nm = document.createElement('span');
+          nm.textContent = shortName(mountain(id));
+          row.append(flags, nm);
+          P.text.appendChild(row);
+        }
+      }
       P.text.style.textAlign = 'center';
       P.prompt.textContent = NARROW ? 'ARROWS TO CHOOSE · TAP THE NAME TO GO' : 'LEFT / RIGHT CHOOSES · SPACE GOES';
       if (MAP_WIDE) P.list.innerHTML = champListHtml() + champTip();   // your scorecard so far
