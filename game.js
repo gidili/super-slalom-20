@@ -5456,14 +5456,19 @@
   function hideMapTip() { if (mapTipEl) mapTipEl.hidden = true; tipFor = null; overlayEl.style.cursor = ''; }
   function mapTipHtml(m) {
     const c = champ, p = c.played.find(q => q.id === m.id), open = champOptions().includes(m);
-    const status = p ? `SKIED: ${p.points} POINTS` + (p.finished ? ` · ${fmt(p.time_cs)} · ${'*'.repeat(p.stars) || 'NO STARS'}` : ' · WIPEOUT')
+    // Where the red arrow is: the mountain just skied, or before the first
+    // one, the one you're choosing.
+    const o = champOptions(), hereId = c.played.length ? c.played[c.played.length - 1].id : o[c.pick % o.length] && o[c.pick % o.length].id;
+    const skiedLine = p && `${p.points} POINTS` + (p.finished ? ` · ${fmt(p.time_cs)} · ${'*'.repeat(p.stars) || 'NO STARS'}` : ' · WIPEOUT');
+    const status = m.id === hereId ? 'YOU ARE HERE' + (p ? ': ' + skiedLine : '')
+      : p ? `SKIED: ${skiedLine}`
       : open ? 'OPEN: YOU CAN FLY HERE'
       : 'LOCKED: UNLOCKED BY ' + MOUNTAINS.filter(o => o.unlocks.includes(m.id)).map(o => plainName(o)).join(' OR ');
     const board = boardOf(false, c.god, m.id), top = leaderboardCache[board];
     const rows = !top ? '<li class="note">LOADING...</li>' : !top.length ? '<li class="note">NO SCORES YET</li>'
       : top.slice(0, 5).map((r, i) => `<li><span>${i + 1}. ${r.initials}</span><span>${r.score}</span></li>`).join('');
     return `<div class="tip-name">${withLand(plainName(m), m.id)}</div><div class="tip-row">${m.height} · ${HAZARDS[m.id] || ''}</div>`
-      + `<div class="tip-status ${p ? 'done' : open ? 'open' : 'locked'}">${status}</div><div class="tip-top">TOP 5</div><ol>${rows}</ol>`;
+      + `<div class="tip-status ${m.id === hereId ? 'here' : p ? 'done' : open ? 'open' : 'locked'}">${status}</div><div class="tip-top">TOP 5</div><ol>${rows}</ol>`;
   }
   function showMapTip(m, e) {
     if (tipFor !== m) {
