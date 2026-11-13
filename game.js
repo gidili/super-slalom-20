@@ -4180,15 +4180,64 @@
   // blinks, with dotted lines to what finishing it would open.
   // On a phone the detailed map is wider than the screen, so the view
   // glides sideways to keep the mountain you've picked in the middle.
+  // The world's main mountain ranges, by hand: each a spine in [lon, lat]
+  // points, a half-width in degrees, how high (1: brown on the spine; over
+  // 1, snow on top).
+  const RANGES = [
+    [[[-165, 61], [-150, 63], [-141, 61]], 3, 1.05],               // Alaska Range, Brooks
+    [[[-140, 62], [-125, 55], [-115, 48], [-110, 42], [-106, 36], [-105, 32]], 5, 1],   // Rockies
+    [[[-110, 30], [-104, 23], [-98, 19], [-92, 16]], 3, 0.85],      // Sierra Madre, the volcanoes
+    [[[-78, 8], [-77, 0], [-76, -10], [-69, -17], [-68, -25], [-70, -33], [-71, -42], [-73, -50]], 3.5, 1.2],   // Andes
+    [[[-84, 34], [-78, 39], [-72, 43], [-67, 46]], 2.5, 0.55],      // Appalachians
+    [[[6, 44.5], [8, 46], [11, 47], [14, 47]], 2.5, 1.15],          // Alps
+    [[[-1.5, 43], [2.5, 42.6]], 1.5, 0.75],                          // Pyrenees
+    [[[-9, 30.5], [-4, 33], [2, 35], [9, 36]], 2.5, 0.75],          // Atlas
+    [[[6, 59], [9, 62], [14, 65], [18, 68], [22, 70]], 3, 0.65],    // Scandinavia
+    [[[59, 50], [60, 56], [60, 62], [63, 67]], 2, 0.55],            // Urals
+    [[[38, 44], [44, 42.5], [49, 41]], 2, 0.9],                     // Caucasus
+    [[[45, 36], [50, 32], [56, 28]], 3, 0.65],                      // Zagros
+    [[[72, 36], [78, 33], [84, 29], [90, 28], [96, 28]], 3, 1.3],   // Himalaya
+    [[[78, 33], [85, 33], [92, 32], [98, 32]], 6, 0.8],             // Tibetan plateau
+    [[[66, 35], [71, 37], [76, 36], [80, 36]], 2.5, 1.25],          // Hindu Kush, Karakoram
+    [[[70, 41], [78, 42], [86, 43], [92, 43]], 2.5, 0.75],          // Tian Shan
+    [[[85, 50], [90, 49], [96, 48]], 2, 0.55],                      // Altai
+    [[[38, 14], [39, 9], [37, 3], [36, -1], [37, -3], [35, -8]], 3, 0.75],   // East African highlands
+    [[[27, -29], [30, -27]], 2, 0.55],                               // Drakensberg
+    [[[146, -16], [148, -22], [151, -28], [150, -33], [148, -37]], 2.5, 0.65],   // Great Dividing Range
+    [[[168, -45], [170, -43.5], [172, -42]], 1.5, 1.1],             // Southern Alps
+    [[[132, 34], [136, 36], [139, 37], [141, 40], [143, 43]], 1.5, 0.7],   // Japan
+  ];
+  const reliefCache = {};
+  function reliefMap(w, h) {
+    const key = w + 'x' + h;
+    if (reliefCache[key]) return reliefCache[key];
+    const out = new Float32Array(w * h), perDeg = w / 360;
+    for (const [pts, half, top] of RANGES) {
+      const P = pts.map(([lo, la]) => equalEarth(lo, la, w, h)), r = half * perDeg;
+      for (let k = 0; k + 1 < P.length; k++) {
+        const [ax, ay] = P[k], [bx, by] = P[k + 1], L2 = (bx - ax) ** 2 + (by - ay) ** 2 || 1;
+        const x0 = Math.floor(Math.min(ax, bx) - r), x1 = Math.ceil(Math.max(ax, bx) + r);
+        const y0 = Math.floor(Math.min(ay, by) - r), y1 = Math.ceil(Math.max(ay, by) + r);
+        for (let y = Math.max(0, y0); y <= Math.min(h - 1, y1); y++) for (let x = Math.max(0, x0); x <= Math.min(w - 1, x1); x++) {
+          const t = Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / L2));
+          const d = Math.hypot(x - (ax + t * (bx - ax)), y - (ay + t * (by - ay)));
+          if (d < r) out[y * w + x] = Math.max(out[y * w + x], top * (1 - d / r));
+        }
+      }
+    }
+    return (reliefCache[key] = out);
+  }
   let mapPan = null, mapSpots = {};
   // On a desktop the map leaves the TV and fills the window, on its own
   // canvas with more (but still chunky) pixels; a phone keeps it in the TV.
   const MAP_WIDE = !NARROW, MAP_W = 520, MAP_H = 272;
   const mapCanvas = document.getElementById('map-screen');
+  const mapTitleEl = document.getElementById('map-title');
   let mapCtx = null, mapImg = null;
   function showMap(on) {
     if (!MAP_WIDE || !mapCanvas) return false;
     mapCanvas.hidden = !on;
+    if (mapTitleEl) mapTitleEl.hidden = !on;
     if (on && !mapCtx) {
       mapCanvas.width = MAP_W; mapCanvas.height = MAP_H;
       mapCtx = mapCanvas.getContext('2d');
@@ -4213,13 +4262,17 @@
       const i = (y * VW_ + x) * 4; buf.data[i] = c[0]; buf.data[i + 1] = c[1]; buf.data[i + 2] = c[2]; buf.data[i + 3] = 255;
     };
     const land = (x, y) => x >= 0 && x < w && y >= 0 && y < h && bits[y * w + x] === 1;
+    const relief = wide ? reliefMap(w, h) : null;
     for (let y = 0; y < H_; y++) for (let x = 0; x < VW_; x++) px(x, y, VIC.blue);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       if (land(x, y)) {
         // Snow towards the poles, fading out through a dither, not a ruled line.
         const f = y < h / 2 ? (h * 0.15 - y) / (h * 0.06) : (y - h * 0.84) / (h * 0.03);
         const snow = f >= 1 || (f > 0 && hash(x * 13 + 5, y * 7) < f);
-        px(x0 + x, y0 + y, snow ? VIC.white : VIC.green);
+        // On the big map, the mountain ranges: green to brown, a dither in
+        // between, snow on the highest spines.
+        const hi = wide && !snow ? relief[y * w + x] : 0, d = hash(x * 5 + 17, y * 11 + 3);
+        px(x0 + x, y0 + y, snow ? VIC.white : hi > 0 ? (hi > 1 && d < (hi - 1) * 2 ? VIC.white : hi > 0.62 || d < hi * 1.3 - 0.25 ? VIC.orange : VIC.green) : VIC.green);
       }
       else if (land(x - 1, y) || land(x + 1, y) || land(x, y - 1) || land(x, y + 1)) px(x0 + x, y0 + y, VIC.lightBlue);
     }
@@ -4236,24 +4289,38 @@
     for (const m of MOUNTAINS) {
       const [mx, base] = at(m.id), open = opts.includes(m), picked = m === pick;
       // The ones you can pick bob gently, each to its own beat.
-      const my = base - (open && !picked && !flying && Math.sin(performance.now() / 260 + mx) > 0 ? 1 : 0);
+      const bob = wide ? 2 : 1;
+      const my = base - (open && !picked && !flying && Math.sin(performance.now() / 260 + mx) > 0 ? bob : 0);
       if (skied(m.id)) {   // a little flag planted
-        for (let r = -4; r <= 0; r++) px(mx, my + r, VIC.black);
-        px(mx + 1, my - 4, VIC.red); px(mx + 2, my - 4, VIC.red); px(mx + 1, my - 3, VIC.red);
+        const pole = wide ? 8 : 4;
+        for (let r = -pole; r <= 0; r++) px(mx, my + r, VIC.black);
+        const fw = wide ? 4 : 2, fh = wide ? 3 : 2;
+        for (let y = 0; y < fh; y++) for (let x = 1; x <= fw - y; x++) px(mx + x, my - pole + y, VIC.red);
         continue;
       }
-      // A peak: two rows, outlined in black.
       const ink = picked ? (blink ? VIC.yellow : VIC.white) : open ? VIC.white : null;
-      for (const [dx, dy] of [[0, -2], [-1, -1], [0, -1], [1, -1], [-2, 0], [-1, 0], [0, 0], [1, 0], [2, 0]]) {
-        px(mx + dx, my + dy, ink || ((mx + dx + my + dy) % 2 ? VIC.black : VIC.white));   // locked: dithered grey
+      if (wide && (open || picked)) {
+        // On the big map: a bigger peak, thickly outlined in black.
+        BIG_PEAK.forEach((row, r) => [...row].forEach((ch, k) => {
+          if (ch !== '.') px(mx + k - 5, my + r - 6, ch === 'K' ? VIC.black : ink);
+        }));
+      } else {
+        // A peak: two rows, outlined in black.
+        for (const [dx, dy] of [[0, -2], [-1, -1], [0, -1], [1, -1], [-2, 0], [-1, 0], [0, 0], [1, 0], [2, 0]]) {
+          px(mx + dx, my + dy, ink || ((mx + dx + my + dy) % 2 ? VIC.black : VIC.white));   // locked: dithered grey
+        }
+        for (const [dx, dy] of [[0, -3], [-1, -2], [1, -2], [-2, -1], [2, -1], [-3, 0], [3, 0]]) px(mx + dx, my + dy, VIC.black);
       }
-      for (const [dx, dy] of [[0, -3], [-1, -2], [1, -2], [-2, -1], [2, -1], [-3, 0], [3, 0]]) px(mx + dx, my + dy, VIC.black);
-      if (picked) for (let r = 0; r < 3; r++) for (let q = r - 2; q <= 2 - r; q++) px(mx + q, my - 9 + r, blink ? VIC.yellow : VIC.white);   // ▼ over it
+      if (picked) {   // ▼ over it (outlined in black on the big map)
+        const n = wide ? 4 : 3, top = wide ? my - 15 : my - 9, col = blink ? VIC.yellow : VIC.white;
+        if (wide) for (let r = -1; r <= n; r++) for (let q = r - n; q <= n - r; q++) px(mx + q, top + r, VIC.black);
+        for (let r = 0; r < n; r++) for (let q = r - (n - 1); q <= n - 1 - r; q++) px(mx + q, top + r, col);
+      }
     }
     if (!flying) {
       // The pick's name on the map, white on a black shadow, above its ▼.
       const [mx, my] = at(pick.id), label = pick.name.split(/ \(| "/)[0];
-      const lw = label.length * 4 - 1, lx = Math.max(2, Math.min(VW_ - lw - 2, mx - (lw >> 1))), ly = Math.max(1, my - 16);
+      const lw = label.length * 4 - 1, lx = Math.max(2, Math.min(VW_ - lw - 2, mx - (lw >> 1))), ly = Math.max(1, my - (wide ? 24 : 16));
       for (const [dx, dy, c] of [[1, 1, VIC.black], [0, 0, VIC.white]]) {
         for (let k = 0; k < label.length; k++) {
           const bitsK = FONT3[label[k]] || FONT3[' '];
@@ -4263,6 +4330,15 @@
     }
     const plane = (sx, sy, ang) => {
       const cs = Math.cos(ang), sn = Math.sin(ang);
+      if (wide) {   // the big one: every pixel round it looked up in the sprite, turned back
+        const S = BIG_PLANE, k = PLANE_SCALE, cx = (S[0].length - 1) / 2, cy = (S.length - 1) / 2, R = Math.ceil(Math.hypot(cx, cy) * k) + 1;
+        for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+          const u = Math.round((dx * cs + dy * sn) / k + cx), v = Math.round((-dx * sn + dy * cs) / k + cy);
+          const ch = S[v] && S[v][u];
+          if (ch && ch !== '.') px(Math.round(sx) + dx, Math.round(sy) + dy, PLANE_INKS[ch]);
+        }
+        return;
+      }
       PLANE.forEach((row, r) => [...row].forEach((ch, k) => {
         if (ch === '.') return;
         const u = k - 4, v = r - 3;
@@ -4291,7 +4367,37 @@
   }
   // A little plane from above, pointing right: wings, tail, a dark nose.
   const PLANE = ['...X.....', '...XX....', 'X..XXX...', 'XXXXXXXXK', 'X..XXX...', '...XX....', '...X.....'];
-  const PARKED = [8, -3];   // where it waits, beside the mountain's flag
+  const PARKED = [12, -4];   // where it waits, beside the mountain's flag
+  // The big map's plane: bright gold, red tips and tail, outlined in black.
+  const BIG_PLANE = [
+    '.........KK........',
+    '........KRK........',
+    '........KYK........',
+    '.......KYYK........',
+    '..KK...KYYK........',
+    '..KRK..KYYYK.......',
+    '..KYYKKKYYYYKKKKK..',
+    '.KRYYYYYYYYYYYYYYKK',
+    '..KYYKKKYYYYKKKKK..',
+    '..KRK..KYYYK.......',
+    '..KK...KYYK........',
+    '.......KYYK........',
+    '........KYK........',
+    '........KRK........',
+    '.........KK........',
+  ];
+  const PLANE_INKS = { K: VIC.black, Y: [236, 200, 60], R: VIC.crimson };
+  const PLANE_SCALE = 1;
+  // The big map's peak: snow inside a thick black outline.
+  const BIG_PEAK = [
+    '.....K.....',
+    '....KWK....',
+    '...KWWWK...',
+    '..KWWWWWK..',
+    '.KWWWWWWWK.',
+    'KWWWWWWWWWK',
+    'KKKKKKKKKKK',
+  ];
   // Where a hop starts and ends, on a map w by h. The first hop of a
   // Championship flies in from off to the west.
   function flightEnds(w, h) {
@@ -4585,6 +4691,13 @@
   }
 
   const champTotal = () => champ.played.reduce((t, p) => t + p.points, 0);
+  // What it takes to make the Championship top 10, from the last look at it.
+  function champTip() {
+    if (!champ.ranked) return '<li class="tip">UNRANKED CHAMPIONSHIP</li>';
+    const top = leaderboardCache[champBoard()];
+    if (!top) return '';
+    return `<li class="tip">${top.length < 10 ? 'TOP 10 HAS ROOM: ANY SCORE GETS IN' : 'THE TOP 10 NEEDS ' + (top[9].score + 1)}</li>`;
+  }
   function champListHtml() {
     if (!champ.played.length) return '';
     // Stars, time (a wipeout has none), points, in columns.
@@ -4626,6 +4739,7 @@
         : next.length ? ` · FINISH TO UNLOCK: ${next.map(id => shortName(mountain(id))).join(', ')}` : '');
       P.text.style.textAlign = 'center';
       P.prompt.textContent = NARROW ? 'ARROWS TO CHOOSE · TAP THE NAME TO GO' : 'LEFT / RIGHT CHOOSES · SPACE GOES';
+      if (MAP_WIDE) P.list.innerHTML = champListHtml() + champTip();   // your scorecard so far
     } else if (c.stage === 'intro') {
       const m = c.current;
       P.head.textContent = `COURSE ${n}: ${m.name}`;
