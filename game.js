@@ -5227,7 +5227,7 @@
         }
       }
       P.text.style.textAlign = 'center';
-      P.prompt.textContent = NARROW ? 'ARROWS TO CHOOSE · TAP THE NAME TO GO' : 'LEFT / RIGHT CHOOSES · SPACE GOES';
+      P.prompt.textContent = NARROW ? 'ARROWS CHOOSE · TAP NAME TO GO' : 'LEFT / RIGHT CHOOSES · SPACE GOES';
     } else if (c.stage === 'intro') {
       const m = c.current;
       P.head.textContent = `COURSE ${n}: ${m.name}`;

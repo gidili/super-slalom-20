@@ -318,6 +318,10 @@
     cursor: pointer;
   }
   body.narrow .arrow-btn:active { background: var(--vic-cyan); }
+  /* A card or the map up: the arrows step aside rather than peek out from behind it. */
+  body.narrow:has(#overlay:not([hidden])) .arrow-btn { visibility: hidden; }
+  /* No R key on a phone. */
+  body.narrow #restart-hint { display: none; }
   body.narrow .arrow-btn[data-dir="left"] { left: 24px; }
   body.narrow .arrow-btn[data-dir="right"] { right: 24px; }
   .arrow-btn canvas {
