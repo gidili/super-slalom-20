@@ -1270,8 +1270,16 @@
     passed * POLE_POINTS + reds * RED_POINTS + clipPoints +
     burned.pine * BURN_POINTS.pine + burned.tree * BURN_POINTS.tree + burned.fence * BURN_POINTS.fence +
     survived.fox * ANIMALS.fox.bonus + survived.wolf * ANIMALS.wolf.bonus + survived.bear * ANIMALS.bear.bonus +
-    mothsCaught * MOTH_POINTS +
+    mothsCaught * MOTH_POINTS + escapeBonus() +
     (state === 'finished' ? FINISH_POINTS + (mothsCaught ? MOTHMAN_POINTS : 0) : 0);
+  // Outrunning Annapurna's avalanche, out of Everest's couloir alive: worked
+  // out from how far down you got, the same way the server does.
+  const ESCAPE_POINTS = 300, AVALANCHE_SAFE = 23, SLUFF_SAFE = 1;
+  const runMountain = () => runClassic || (champ && champ.current ? champ.current.id : null);
+  function escapeBonus() {
+    const id = runMountain(), down = passed + missed + forgiven;
+    return (id === 'annapurna' && down >= AVALANCHE_SAFE ? ESCAPE_POINTS : 0) + (id === 'chomolungma' && down >= SLUFF_SAFE ? ESCAPE_POINTS : 0);
+  }
   const bonusCs = () => runCs() + missed * MISS_CS;
   const timeBonus = () =>
     missed > MISS_LIMIT ? 0 : Math.max(0, (course.shape.par - bonusCs()) * BONUS_PER_CS);
@@ -1332,7 +1340,7 @@
     bonusEl.hidden = true;
     passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
     streak = 0; streaks = []; clipPoints = 0; burned = { pine: 0, tree: 0, fence: 0 };
-    survived = { fox: 0, wolf: 0, bear: 0 }; forgiven = 0; mothsCaught = 0; caughtSwarms = new Set();
+    survived = { fox: 0, wolf: 0, bear: 0 }; forgiven = 0; mothsCaught = 0; caughtSwarms = new Set(); firedYet = false; escapedYet = false;
     msgEl.textContent = '';
     paintHud();
   }
@@ -1382,7 +1390,7 @@
     moths = []; mothIn = 2; petals = [];
     passed = 0; missed = 0; reds = 0; clips = 0; nextPole = 0;
     streak = 0; streaks = []; clipPoints = 0; burned = { pine: 0, tree: 0, fence: 0 };
-    survived = { fox: 0, wolf: 0, bear: 0 }; forgiven = 0; mothsCaught = 0; caughtSwarms = new Set();
+    survived = { fox: 0, wolf: 0, bear: 0 }; forgiven = 0; mothsCaught = 0; caughtSwarms = new Set(); firedYet = false; escapedYet = false;
     shownBonus = 0;
     runEnd = null;
     pausedMs = 0;
@@ -1562,6 +1570,8 @@
     SFX.playFanfare();
     flash(`FINISH +${FINISH_POINTS}`);
     if (mothsCaught) setTimeout(() => { if (state === 'finished') { banner(`MOTHMAN SPECIAL BONUS +${MOTHMAN_POINTS}`, 2500); SFX.playJingle(); } }, 500);
+    // Three stars, nothing missed: no points, just the glory.
+    if (missed === 0 && stars() === 3) setTimeout(() => { if (state === 'finished') { banner('PERFECT RUN!!!', 2500); SFX.playJingle(); } }, 600);
     runEnd = performance.now();
     closeSession();
     // Time to glide to a stop past the line before the bonus counts up.
@@ -1688,8 +1698,10 @@
         SFX.playCoin(Math.min(streak, COMBO_CAP));
         if (streak === FIRE_AT) {
           if (!runGod) { SFX.playIgnite(); SFX.playPowerUp(); }
-          const id = runId;
-          setTimeout(() => { if (runId === id && streak >= FIRE_AT) pop('YOU ARE ON FIRE !!!'); }, 1000);
+          const id = runId, first = !firedYet;
+          firedYet = true;
+          // The first time on a run it gets the banner; after that, a pop.
+          setTimeout(() => { if (runId === id && streak >= FIRE_AT) { if (first) banner('ON FIRE!', 2000); else pop('YOU ARE ON FIRE !!!'); } }, 1000);
         }
       } else endStreak();
       if (said.length) pop(said.join('  '));
@@ -2026,6 +2038,13 @@
       resolvePole(through, brushed);
       // Clipped on fire, it burns where it fell, then goes to ash.
       if (through && brushed && onFire()) p.burning = { at: performance.now(), god: runGod };
+    }
+    // Made it: the avalanche gave up, or out of the couloir alive.
+    if (!escapedYet && escapeBonus()) {
+      escapedYet = true;
+      banner(runMountain() === 'annapurna' ? `OUTRAN THE AVALANCHE! +${ESCAPE_POINTS}` : `ESCAPED THE SLUFF! +${ESCAPE_POINTS}`, 2500);
+      SFX.playJingle();
+      paintHud();
     }
 
     if (onFire()) scorchPassed();
@@ -2839,6 +2858,7 @@
   // server's checks (at most MOTH_MAX a run).
   const MOTH_POINTS = 100, MOTHMAN_POINTS = 300, MOTH_MAX = 12;
   let mothsCaught = 0, caughtSwarms = new Set();
+  let firedYet = false, escapedYet = false;   // this run's first fire, and its escape, have had their banners
   function updateMoths(dt) {
     if (!course.shape.moths) { moths = []; return; }
     mothIn -= dt;
