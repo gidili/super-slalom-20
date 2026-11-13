@@ -1475,3 +1475,290 @@ begin
   update slalom_champs set used_at = now() where id = p_champ;
   return v_id;
 end $$;
+
+-- ------------------------------------------------ escape bonuses (Annapurna, Chomolungma)
+-- a Single run on a mountain.
+-- Same check as before, plus OUTRAN THE AVALANCHE (+300, Annapurna) and
+-- ESCAPED THE SLUFF (+300, Chomolungma), from how far down the run got.
+
+create or replace function slalom_submit_course(p_session uuid, p_payload jsonb)
+returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  v_id       uuid;
+  v_god      boolean;
+  v_mode     text;
+  v_course   text;
+  v_poles    int;
+  v_red_max  int;
+  v_par      int;
+  v_initials text;
+  v_score    int;
+  v_passed   int;
+  v_missed   int;
+  v_reds     int;
+  v_clips    int;
+  v_streaks  jsonb;
+  v_n        int;
+  v_sum      int := 0;
+  v_clip_pts int := 0;
+  v_max_streak int := 0;
+  v_pine     int;
+  v_tree     int;
+  v_fence    int;
+  v_fox      int;
+  v_wolf     int;
+  v_bear     int;
+  v_forgiven int;
+  v_moths    int;
+  v_time_cs  int;
+  v_finished boolean;
+  v_expected int;
+  v_started  timestamptz;
+  v_paused_cs numeric;
+  v_pauses   int;
+  v_ended    timestamptz;
+  v_used     timestamptz;
+  v_elapsed_cs numeric;
+  v_msg constant text := 'score not accepted: if you wanna be a smarty pants your job is to do the work!';
+begin
+  v_initials := p_payload->>'initials';
+  v_score    := (p_payload->>'score')::int;
+  v_passed   := (p_payload->>'passed')::int;
+  v_missed   := (p_payload->>'missed')::int;
+  v_reds     := (p_payload->>'reds')::int;
+  v_clips    := coalesce((p_payload->>'clips')::int, 0);
+  v_streaks  := p_payload->'streaks';
+  v_pine     := coalesce((p_payload#>>'{burned,pine}')::int, 0);
+  v_tree     := coalesce((p_payload#>>'{burned,tree}')::int, 0);
+  v_fence    := coalesce((p_payload#>>'{burned,fence}')::int, 0);
+  v_fox      := coalesce((p_payload#>>'{survived,fox}')::int, 0);
+  v_wolf     := coalesce((p_payload#>>'{survived,wolf}')::int, 0);
+  v_bear     := coalesce((p_payload#>>'{survived,bear}')::int, 0);
+  v_forgiven := coalesce((p_payload->>'forgiven')::int, 0);
+  v_moths    := coalesce((p_payload->>'moths')::int, 0);
+  v_time_cs  := (p_payload->>'time_cs')::int;
+  v_finished := coalesce((p_payload->>'finished')::boolean, false);
+
+  select go_at, paused_cs, pauses, ended_at, used_at, god, mode, course
+    into v_started, v_paused_cs, v_pauses, v_ended, v_used, v_god, v_mode, v_course
+    from slalom_sessions
+   where id = p_session
+     for update;
+
+  if not found              then raise exception '%', v_msg; end if;
+  if v_mode <> 'classic'    then raise exception '%', v_msg; end if;
+  if v_started is null      then raise exception '%', v_msg; end if;
+  if v_ended is null        then raise exception '%', v_msg; end if;
+  if v_used  is not null    then raise exception '%', v_msg; end if;
+
+  -- The mountain's own numbers.
+  select poles, reds, par_cs into v_poles, v_red_max, v_par from slalom_courses where id = v_course;
+  if not found then raise exception '%', v_msg; end if;
+
+  -- The clock, as for Single.
+  v_elapsed_cs := extract(epoch from (v_ended - v_started)) * 100;
+  if v_elapsed_cs > 360000 then raise exception '%', v_msg; end if;  -- 1 hour
+  v_elapsed_cs := v_elapsed_cs - v_paused_cs;
+  if abs(v_time_cs - v_elapsed_cs) > 400 + 100 * v_pauses then raise exception '%', v_msg; end if;
+
+  -- Poles: each cleared or missed at most once; all of them on a finish.
+  if v_passed < 0 or v_forgiven < 0 or v_missed + v_forgiven < 0 then raise exception '%', v_msg; end if;
+  if v_forgiven > v_pine then raise exception '%', v_msg; end if;
+  if v_passed + v_missed + v_forgiven > v_poles then raise exception '%', v_msg; end if;
+  if v_finished and v_passed + v_missed + v_forgiven <> v_poles then raise exception '%', v_msg; end if;
+  if v_reds < 0 or v_reds > v_red_max or v_reds > v_passed then raise exception '%', v_msg; end if;
+  if v_clips < 0 or v_clips > v_passed then raise exception '%', v_msg; end if;
+
+  -- Streaks, as for Single.
+  if jsonb_typeof(v_streaks) <> 'array' then raise exception '%', v_msg; end if;
+  if jsonb_array_length(v_streaks) > (v_passed - v_clips) + v_missed + v_forgiven + 1 then raise exception '%', v_msg; end if;
+  for v_n in select (e #>> '{}')::int from jsonb_array_elements(v_streaks) e loop
+    if v_n is null or v_n < 1 then raise exception '%', v_msg; end if;
+    v_sum := v_sum + v_n;
+    v_max_streak := greatest(v_max_streak, v_n);
+    v_clip_pts := v_clip_pts + 10 * (least(v_n, 12) * (least(v_n, 12) + 1) / 2 + greatest(v_n - 12, 0) * 12);
+  end loop;
+  if v_sum <> v_clips then raise exception '%', v_msg; end if;
+
+  -- Burning (rocks, ice, tents and nets count as trees and fences) and
+  -- animals, as for Single.
+  if v_pine < 0 or v_tree < 0 or v_fence < 0 then raise exception '%', v_msg; end if;
+  if v_pine + v_tree + v_fence > (case when v_god then 400 else 100 end) then raise exception '%', v_msg; end if;
+  if not v_god and v_pine + v_tree + v_fence > 0 and v_max_streak < 4 then raise exception '%', v_msg; end if;
+  if v_fox < 0 or v_wolf < 0 or v_bear < 0 or v_fox + v_wolf + v_bear > 20 then raise exception '%', v_msg; end if;
+  -- Moth swarms caught in your flame: only Kunama has them, only on fire
+  -- (a streak of 4, or god mode), at most 12 a run.
+  if v_moths < 0 or v_moths > 12 then raise exception '%', v_msg; end if;
+  if v_moths > 0 and v_course <> 'kunama' then raise exception '%', v_msg; end if;
+  if v_moths > 0 and not v_god and v_max_streak < 4 then raise exception '%', v_msg; end if;
+
+  if length(coalesce(v_initials, '')) <> 3 then raise exception '%', v_msg; end if;
+  if v_time_cs <= 0 then raise exception '%', v_msg; end if;
+
+  -- The score, with this mountain's par.
+  v_expected := v_passed * 10 + v_reds * 25 + v_clip_pts
+              + v_pine * 50 + v_tree * 25 + v_fence * 25
+              + v_fox * 50 + v_wolf * 100 + v_bear * 300
+              + v_moths * 100                        -- MOTH TO THE FIRE
+              -- Outran Annapurna's avalanche (past pole 23) / out of
+              -- Everest's couloir alive (reached the first pole).
+              + case when v_course = 'annapurna'   and v_passed + v_missed + v_forgiven >= 23 then 300 else 0 end
+              + case when v_course = 'chomolungma' and v_passed + v_missed + v_forgiven >= 1  then 300 else 0 end;
+  if v_finished then
+    v_expected := v_expected + 50;
+    if v_moths > 0 then v_expected := v_expected + 300; end if;   -- MOTHMAN SPECIAL BONUS
+    if v_missed <= 3 then
+      v_expected := v_expected + greatest(0, (v_par - (v_time_cs + v_missed * 60)) * 5);
+    end if;
+  end if;
+  if v_score <> v_expected then raise exception '%', v_msg; end if;
+
+  insert into slalom_mode_scores (mode, god, course, initials, score, payload)
+  values ('classic', v_god, v_course, v_initials, v_score, p_payload)
+  returning id into v_id;
+
+  update slalom_sessions set used_at = now() where id = p_session;
+  return v_id;
+end $$;
+
+-- a mountain in a Championship.
+-- Same check as before, plus the same escape bonuses.
+
+create or replace function slalom_check_champ_course(p_session uuid, p_payload jsonb)
+returns int
+language plpgsql security definer set search_path = public as $$
+declare
+  v_god      boolean;
+  v_mode     text;
+  v_course   text;
+  v_poles    int;
+  v_red_max  int;
+  v_par      int;
+  v_score    int;
+  v_passed   int;
+  v_missed   int;
+  v_reds     int;
+  v_clips    int;
+  v_streaks  jsonb;
+  v_n        int;
+  v_sum      int := 0;
+  v_clip_pts int := 0;
+  v_max_streak int := 0;
+  v_pine     int;
+  v_tree     int;
+  v_fence    int;
+  v_fox      int;
+  v_wolf     int;
+  v_bear     int;
+  v_forgiven int;
+  v_moths    int;
+  v_time_cs  int;
+  v_finished boolean;
+  v_expected int;
+  v_started  timestamptz;
+  v_paused_cs numeric;
+  v_pauses   int;
+  v_ended    timestamptz;
+  v_used     timestamptz;
+  v_elapsed_cs numeric;
+  v_msg constant text := 'score not accepted: if you wanna be a smarty pants your job is to do the work!';
+begin
+  v_score    := (p_payload->>'score')::int;
+  v_passed   := (p_payload->>'passed')::int;
+  v_missed   := (p_payload->>'missed')::int;
+  v_reds     := (p_payload->>'reds')::int;
+  v_clips    := coalesce((p_payload->>'clips')::int, 0);
+  v_streaks  := p_payload->'streaks';
+  v_pine     := coalesce((p_payload#>>'{burned,pine}')::int, 0);
+  v_tree     := coalesce((p_payload#>>'{burned,tree}')::int, 0);
+  v_fence    := coalesce((p_payload#>>'{burned,fence}')::int, 0);
+  v_fox      := coalesce((p_payload#>>'{survived,fox}')::int, 0);
+  v_wolf     := coalesce((p_payload#>>'{survived,wolf}')::int, 0);
+  v_bear     := coalesce((p_payload#>>'{survived,bear}')::int, 0);
+  v_forgiven := coalesce((p_payload->>'forgiven')::int, 0);
+  v_moths    := coalesce((p_payload->>'moths')::int, 0);
+  v_time_cs  := (p_payload->>'time_cs')::int;
+  v_finished := coalesce((p_payload->>'finished')::boolean, false);
+
+  select go_at, paused_cs, pauses, ended_at, used_at, god, mode, course
+    into v_started, v_paused_cs, v_pauses, v_ended, v_used, v_god, v_mode, v_course
+    from slalom_sessions
+   where id = p_session
+     for update;
+
+  if not found              then raise exception '%', v_msg; end if;
+  if v_mode <> 'champ'      then raise exception '%', v_msg; end if;
+  if v_started is null      then raise exception '%', v_msg; end if;
+  if v_ended is null        then raise exception '%', v_msg; end if;
+  if v_used  is not null    then raise exception '%', v_msg; end if;
+
+  -- The mountain's own numbers.
+  select poles, reds, par_cs into v_poles, v_red_max, v_par from slalom_courses where id = v_course;
+  if not found then raise exception '%', v_msg; end if;
+
+  -- The clock, as for Single.
+  v_elapsed_cs := extract(epoch from (v_ended - v_started)) * 100;
+  if v_elapsed_cs > 360000 then raise exception '%', v_msg; end if;  -- 1 hour
+  v_elapsed_cs := v_elapsed_cs - v_paused_cs;
+  if abs(v_time_cs - v_elapsed_cs) > 400 + 100 * v_pauses then raise exception '%', v_msg; end if;
+
+  -- Poles: each cleared or missed at most once; all of them on a finish.
+  if v_passed < 0 or v_forgiven < 0 or v_missed + v_forgiven < 0 then raise exception '%', v_msg; end if;
+  if v_forgiven > v_pine then raise exception '%', v_msg; end if;
+  if v_passed + v_missed + v_forgiven > v_poles then raise exception '%', v_msg; end if;
+  if v_finished and v_passed + v_missed + v_forgiven <> v_poles then raise exception '%', v_msg; end if;
+  if v_reds < 0 or v_reds > v_red_max or v_reds > v_passed then raise exception '%', v_msg; end if;
+  if v_clips < 0 or v_clips > v_passed then raise exception '%', v_msg; end if;
+
+  -- Streaks, as for Single.
+  if jsonb_typeof(v_streaks) <> 'array' then raise exception '%', v_msg; end if;
+  if jsonb_array_length(v_streaks) > (v_passed - v_clips) + v_missed + v_forgiven + 1 then raise exception '%', v_msg; end if;
+  for v_n in select (e #>> '{}')::int from jsonb_array_elements(v_streaks) e loop
+    if v_n is null or v_n < 1 then raise exception '%', v_msg; end if;
+    v_sum := v_sum + v_n;
+    v_max_streak := greatest(v_max_streak, v_n);
+    v_clip_pts := v_clip_pts + 10 * (least(v_n, 12) * (least(v_n, 12) + 1) / 2 + greatest(v_n - 12, 0) * 12);
+  end loop;
+  if v_sum <> v_clips then raise exception '%', v_msg; end if;
+
+  -- Burning (rocks, ice, tents and nets count as trees and fences) and
+  -- animals, as for Single.
+  if v_pine < 0 or v_tree < 0 or v_fence < 0 then raise exception '%', v_msg; end if;
+  if v_pine + v_tree + v_fence > (case when v_god then 400 else 100 end) then raise exception '%', v_msg; end if;
+  if not v_god and v_pine + v_tree + v_fence > 0 and v_max_streak < 4 then raise exception '%', v_msg; end if;
+  if v_fox < 0 or v_wolf < 0 or v_bear < 0 or v_fox + v_wolf + v_bear > 20 then raise exception '%', v_msg; end if;
+  -- Moth swarms caught in your flame: only Kunama has them, only on fire
+  -- (a streak of 4, or god mode), at most 12 a run.
+  if v_moths < 0 or v_moths > 12 then raise exception '%', v_msg; end if;
+  if v_moths > 0 and v_course <> 'kunama' then raise exception '%', v_msg; end if;
+  if v_moths > 0 and not v_god and v_max_streak < 4 then raise exception '%', v_msg; end if;
+
+  if v_time_cs <= 0 then raise exception '%', v_msg; end if;
+
+  -- The score, with this mountain's par.
+  v_expected := v_passed * 10 + v_reds * 25 + v_clip_pts
+              + v_pine * 50 + v_tree * 25 + v_fence * 25
+              + v_fox * 50 + v_wolf * 100 + v_bear * 300
+              + v_moths * 100                        -- MOTH TO THE FIRE
+              -- Outran Annapurna's avalanche (past pole 23) / out of
+              -- Everest's couloir alive (reached the first pole).
+              + case when v_course = 'annapurna'   and v_passed + v_missed + v_forgiven >= 23 then 300 else 0 end
+              + case when v_course = 'chomolungma' and v_passed + v_missed + v_forgiven >= 1  then 300 else 0 end;
+  if v_finished then
+    v_expected := v_expected + 50;
+    if v_moths > 0 then v_expected := v_expected + 300; end if;   -- MOTHMAN SPECIAL BONUS
+    if v_missed <= 3 then
+      v_expected := v_expected + greatest(0, (v_par - (v_time_cs + v_missed * 60)) * 5);
+    end if;
+  end if;
+  if v_score <> v_expected then raise exception '%', v_msg; end if;
+
+  -- Checked: the mountain's points go to its Championship.
+  update slalom_champ_legs set points = v_score, checked_at = now(), payload = p_payload
+   where session = p_session and points is null;
+  if not found then raise exception '%', v_msg; end if;
+
+  update slalom_sessions set used_at = now() where id = p_session;
+  return v_score;
+end $$;
