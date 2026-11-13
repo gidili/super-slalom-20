@@ -4592,7 +4592,7 @@
     }
     champEl.hidden = false;
     P.pick.hidden = c.stage !== 'pick';
-    P.flags.hidden = c.stage !== 'intro' && c.stage !== 'pick';
+    P.flags.hidden = c.stage !== 'intro' && c.stage !== 'pick' && c.stage !== 'result';
     P.prev.hidden = P.next.hidden = c.stage !== 'pick' || champOptions().length < 2;
     P.list.innerHTML = c.stage === 'intro' ? '' : champListHtml();
     if (c.stage === 'pick') {
@@ -4624,6 +4624,7 @@
     } else if (c.stage === 'result') {
       const p = c.played[c.played.length - 1];
       P.head.textContent = p.finished ? 'FINISHED' : 'WIPEOUT';
+      P.flags.replaceChildren(...FLAGS_OF[p.id].map(flagCanvas));
       P.sub.textContent = `${shortName(mountain(p.id))} +${p.points}` + (p.finished ? ` · TIME ${fmt(p.time_cs)}` : '') + (c.ranked ? '' : ' · UNRANKED');
       P.text.textContent = '';
       P.prompt.textContent = (NARROW ? 'TAP' : 'SPACE') + (c.played.length === CHAMP_COURSES ? ' TO SEE HOW YOU DID' : ' FOR THE NEXT MOUNTAIN');
