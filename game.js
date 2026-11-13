@@ -259,6 +259,7 @@
     avalanche: null,           // { from, to }: an avalanche chases you from pole `from` to pole `to`
     night: null,               // how dark it is down the course, [[t, darkness 0..1], ...]; a headlamp
     serac: null,               // { from, to, side }: a hanging ice cliff shedding chunks across the piste
+    rockfall: null,            // { from, to }: rocks bouncing down across the piste from either side
     treeline: 0,               // above this t (0..1 down the course) nothing grows: bare rock, sparser
     pines: 1,                  // pineapples, times Single's
     twist: 1,                  // how far the piste wanders
@@ -672,6 +673,7 @@
   let fellIn = false;          // swallowed by a crevasse: no skier left to draw
   let slide = null;            // an avalanche on the way down, if there is one
   let snowballs = [];          // ...and what it breaks up into near the end: rolling, then lumps
+  let rockfall = [], rockIn = 0.6;   // rocks bouncing across the piste, and when the next comes
   let icefall = [], iceIn = 0; // chunks off a serac, sliding across the piste
   // Championship courses are fixed, so where the animals turn up is
   // shuffled per run instead; Single's come from its seed as ever.
@@ -1282,7 +1284,7 @@
     state = 'title';
     ranOut = false;
     // The last run's weather and wildlife go with it.
-    sluff = null; slide = null; snowballs = []; heli = null; icefall = []; wind = null; gustLines = []; fellIn = false; pan = 0;
+    sluff = null; slide = null; snowballs = []; rockfall = []; heli = null; icefall = []; wind = null; gustLines = []; fellIn = false; pan = 0;
     if (!keep) { champ = null; prepareRun(); }
     particles = [];
     hideOverlay();
@@ -1336,7 +1338,7 @@
     skierY = 0;
     vx = 0; speed = 0; mode = 'down'; straightFor = 0; heading = 'down';
     held = []; tapLeft = 0;
-    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null; crossed = 0; pan = 0; wind = null; gustLines = []; fellIn = false; slide = null; snowballs = []; icefall = []; iceIn = 0.5;
+    hitWhat = 'TREES'; exploded = new Set(); scorched = new Map(); particles = []; sluff = null; heli = null; crossed = 0; pan = 0; wind = null; gustLines = []; fellIn = false; slide = null; snowballs = []; rockfall = []; rockIn = 0.6; icefall = []; iceIn = 0.5;
     animalSalt = champ || runClassic ? Math.floor(Math.random() * 999983) : 0;
     animals = []; animalSlot = Math.ceil(START_PAD / ANIMAL_SLOT);
     birds = []; birdIn = between(course.endless ? BIRD_EVERY_ENDLESS : BIRD_EVERY);
@@ -1434,7 +1436,7 @@
     state = 'crashed';
     mode = 'crash';
     runEnd = performance.now();
-    hitWhat = hit.icefall ? 'ICEFALL' : hit.avalanche ? 'AVALANCHE' : hit.crevasse ? 'CREVASSE' : hit.ice ? 'ICE' : hit.pen ? 'PENITENTES' : hit.sluff ? 'SLUFF' : hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.net ? 'NETS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
+    hitWhat = hit.boulder ? 'BOULDER' : hit.icefall ? 'ICEFALL' : hit.avalanche ? 'AVALANCHE' : hit.crevasse ? 'CREVASSE' : hit.ice ? 'ICE' : hit.pen ? 'PENITENTES' : hit.sluff ? 'SLUFF' : hit.wall || hit.rock ? 'ROCKS' : hit.tent ? 'TENTS' : hit.net ? 'NETS' : hit.animal ? hit.kind.toUpperCase() : hit.pine ? 'PINEAPPLE' : hit.fence ? 'FENCE' : 'TREES';
     SFX.stopSwoosh();
     if (hit.avalanche) {   // swallowed: the snow rolls on over you
       fellIn = true;
@@ -1989,6 +1991,14 @@
       if (chunk && onFire()) smashChunk(chunk);
       else if (chunk) knockedByIce(chunk);
     }
+    if (course.shape.rockfall) {
+      // A small rock knocks you back; a boulder ends the run. On fire (or
+      // in god mode) you smash either for points.
+      const rock = moveRockfall(dt);
+      if (rock && (onFire() || runGod)) smashRock(rock);
+      else if (rock && rock.big) { rockfall.splice(rockfall.indexOf(rock), 1); crash({ boulder: true }); return; }
+      else if (rock) knockedByRock(rock);
+    }
     if (crossed < course.borders.length && skierY >= course.borders[crossed]) { crossed++; flash(course.shape.welcome, 1800); }
     if (skierY >= course.finishY) finish();
   }
@@ -2207,6 +2217,74 @@
   }
   function drawIcefall(camY) {
     for (const k of icefall) blit(CHUNK, Math.round(k.x) - 2, k.y - camY - 3);
+  }
+
+  // Rockfall (Aoraki): every second or so a rock breaks off one side or
+  // the other, a little way ahead, and bounces across the piste, a puff of
+  // dust each time it lands. Small ones knock you back; boulders, a third
+  // or so, end the run. You see them coming: time your line.
+  const ROCK_EVERY = [0.7, 1.4], ROCK_SPEED = [26, 40], ROCK_BIG = 0.35, ROCK_HOP = 0.45;
+  const PEBBLE = ['.VV.', 'VBVV', '.KK.'];
+  const BOULDER = ['..VVV..', '.VBBVV.', 'VBVVVVV', 'VVVVKVV', 'VVKVVVV', '.KKKKK.'];
+  function moveRockfall(dt) {
+    const rf = course.shape.rockfall, y0 = rf.from * course.finishY, y1 = rf.to * course.finishY;
+    rockIn -= dt;
+    if (rockIn <= 0 && skierY > y0 - 120 && skierY < y1) {
+      rockIn = between(ROCK_EVERY);
+      // Aimed, roughly, at where you'll be when it gets across: so you
+      // have to time your line, not just keep going.
+      const side = Math.random() < 0.5 ? -1 : 1, v = between(ROCK_SPEED), ahead = Math.max(20, speed);
+      let y = skierY + 80, x = 0;
+      for (let k = 0; k < 3; k++) {   // settle where it starts and when it meets you
+        x = course.centerAt(y) + side * (course.widthAt(y) + 8);
+        y = skierY + ahead * Math.abs(x - skierX) / v;
+      }
+      y = Math.round(Math.max(skierY + 45, y + (Math.random() * 2 - 1) * 14));
+      if (y > y0 && y < y1) {
+        rockfall.push({ x: course.centerAt(y) + side * (course.widthAt(y) + 8), y, v: -side * v,
+          big: Math.random() < ROCK_BIG, t: Math.random() * ROCK_HOP });
+        SFX.playCrack();
+      }
+    }
+    for (const k of rockfall) {
+      k.x += k.v * dt;
+      const before = Math.floor(k.t / ROCK_HOP);
+      k.t += dt;
+      if (Math.floor(k.t / ROCK_HOP) !== before) dust(k.x, k.y);   // landed
+    }
+    rockfall = rockfall.filter(k => Math.abs(k.x - course.centerAt(k.y)) < course.widthAt(k.y) + 30);
+    // A boulder bounces low and heavy, never over you; a small rock only
+    // hits low in its hop.
+    return rockfall.find(k => (k.big || rockHop(k) < 3) && Math.abs(k.x - skierX) <= (k.big ? 4 : 2.5) && skierY >= k.y - 3 && skierY <= k.y + 2) || null;
+  }
+  const rockHop = k => Math.round((k.big ? 3 : 7) * Math.sin(Math.PI * ((k.t % ROCK_HOP) / ROCK_HOP)));
+  function dust(x, y) {
+    for (let k = 0; k < 4; k++) particles.push({ x: x + (Math.random() - 0.5) * 6, y, vx: (Math.random() - 0.5) * 24,
+      vy: -8 - Math.random() * 12, g: 80, life: 0.25 + Math.random() * 0.2, size: 1, color: Math.random() < 0.5 ? VIC.orange : VIC.lightBlue });
+  }
+  function knockedByRock(k) {
+    rockfall.splice(rockfall.indexOf(k), 1);
+    speed *= 0.45;
+    vx *= 0.3;
+    SFX.playBreak();
+    spawnExplosion(k.x, k.y - 2, ROCK_PIECES);
+    pop('ROCKFALL!');
+  }
+  function smashRock(k) {
+    rockfall.splice(rockfall.indexOf(k), 1);
+    burned.tree++;
+    SFX.playExplosion();
+    spawnExplosion(k.x, k.y - 2, ROCK_PIECES);
+    pop(`ROCK +${BURN_POINTS.tree}`);
+    paintHud();
+  }
+  function drawRockfall(camY) {
+    for (const k of rockfall) {
+      const s = k.big ? BOULDER : PEBBLE, hop = rockHop(k), x = Math.round(k.x) - (s[0].length >> 1), y = k.y - camY;
+      // Its shadow on the snow, then the rock up above it.
+      for (let dx = 1; dx < s[0].length - 1; dx++) put(x + dx, y, VIC.lightBlue);
+      blit(s, x, y - s.length + 1 - hop);
+    }
   }
 
   // How loud and shaky it is, 0..1.
@@ -3948,6 +4026,7 @@
       if (slide && slide.y !== null) drawAvalanche(camY);   // over the poles it buries
       if (snowballs.length) drawSnowballs(camY);
       if (icefall.length) drawIcefall(camY);
+      if (rockfall.length) drawRockfall(camY);
       if (state !== 'title') {
         drawAnimals(camY);
         const s = SPRITES[mode] || SPRITES.down;
@@ -4245,6 +4324,7 @@
   // On a desktop the map leaves the TV and fills the window, on its own
   // canvas with more (but still chunky) pixels; a phone keeps it in the TV.
   const MAP_WIDE = !NARROW, MAP_W = 520, MAP_H = 272;
+  const CARD_LON = 77;   // where the choosing card sits on the big map
   const mapCanvas = document.getElementById('map-screen');
   const mapTitleEl = document.getElementById('map-title');
   const mapScoreEl = document.getElementById('map-score'), mapScoreList = mapScoreEl && mapScoreEl.querySelector('ol');
@@ -4254,6 +4334,13 @@
     if (!MAP_WIDE || !mapCanvas) return false;
     mapCanvas.hidden = !on;
     if (mapTitleEl) mapTitleEl.hidden = !on;
+    // The choosing card sits over the Indian Ocean, between Africa and
+    // Australia, at the bottom of the screen.
+    if (on) {
+      const r = mapCanvas.getBoundingClientRect(), k = Math.min(r.width / MAP_W, r.height / MAP_H), { w, h } = worldMap('huge');
+      const sx = r.left + (r.width - MAP_W * k) / 2 + (equalEarth(CARD_LON, 0, w, h)[0] + Math.floor((MAP_W - w) / 2)) * k;
+      cardEl.style.marginLeft = Math.max(8, Math.min(window.innerWidth - cardEl.offsetWidth - 8, Math.round(sx - cardEl.offsetWidth / 2))) + 'px';
+    } else cardEl.style.marginLeft = '';
     if (mapScoreEl) {   // your scorecard so far, bottom left
       mapScoreEl.hidden = !on;
       if (on) {
@@ -4372,7 +4459,16 @@
     };
     const startArrow = wide && !flying && !c.played.length;
     if (startArrow) { const [ax, ay] = at(pick.id); arrowAt(ax, ay); }
-    if (!flying) {
+    const mapLabel = id => withLand(mountain(id).name.split(/ \(| "/)[0], id).replace(/ \/ /g, '/');
+    const drawLabel = (label, lx, ly) => {
+      for (const [dx, dy, col] of [[1, 1, VIC.black], [0, 0, VIC.white]]) {
+        for (let k = 0; k < label.length; k++) {
+          const bitsK = FONT3[label[k]] || FONT3[' '];
+          for (let b = 0; b < 15; b++) if (bitsK[b] === '1') px(lx + k * 4 + (b % 3) + dx, ly + Math.floor(b / 3) + dy, col);
+        }
+      }
+    };
+    if (!flying && !wide) {
       // The pick's name on the map, white on a black shadow, above its ▼.
       const [mx, my] = at(pick.id), label = withLand(pick.name.split(/ \(| "/)[0], pick.id).replace(/ \/ /g, '/');
       const lw = label.length * 4 - 1, lx = Math.max(2, Math.min(VW_ - lw - 2, mx - (lw >> 1))), ly = Math.max(1, my - (startArrow ? 31 : wide ? 15 : 16));
@@ -4412,14 +4508,29 @@
       const here = c.played[c.played.length - 1].id, [hx, hy] = at(here);
       if (wide) arrowAt(hx, hy);   // you are here
       plane(hx + PARKED[0], hy + PARKED[1], 0);
-      const label = withLand(mountain(here).name.split(/ \(| "/)[0], here).replace(/ \/ /g, '/'), lw = label.length * 4 - 1;
-      const lx = Math.max(2, Math.min(VW_ - lw - 2, hx - (lw >> 1))), ly = hy + 3;
-      for (const [dx, dy, col] of [[1, 1, VIC.black], [0, 0, VIC.white]]) {
-        for (let k = 0; k < label.length; k++) {
-          const bitsK = FONT3[label[k]] || FONT3[' '];
-          for (let b = 0; b < 15; b++) if (bitsK[b] === '1') px(lx + k * 4 + (b % 3) + dx, ly + Math.floor(b / 3) + dy, col);
-        }
-      }
+      if (!wide) { const label = mapLabel(here), lw = label.length * 4 - 1; drawLabel(label, Math.max(2, Math.min(VW_ - lw - 2, hx - (lw >> 1))), hy + 3); }
+    }
+    if (wide && !flying) {
+      // The names, placed so they keep clear of each other, of every peak,
+      // the arrow and the plane: the one you're choosing first, then where
+      // you are, each trying a few spots in turn.
+      const taken = MOUNTAINS.map(m => { const [x, y] = at(m.id); return [x - 6, y - 8, x + 6, y + 3]; });
+      const here = c.played.length ? c.played[c.played.length - 1].id : null;
+      const arrowOn = here || pick.id, [ax, ay] = at(arrowOn);
+      taken.push([ax - 7, ay - 26, ax + 7, ay - 9]);
+      if (here) { const [hx, hy] = at(here); taken.push([hx + PARKED[0] - 12, hy + PARKED[1] - 10, hx + PARKED[0] + 12, hy + PARKED[1] + 10]); }
+      const clash = (r) => r[0] < 1 || r[2] > VW_ - 1 || r[1] < 1 || r[3] > H_ - 1 || taken.some(t => r[0] < t[2] && r[2] > t[0] && r[1] < t[3] && r[3] > t[1]);
+      const place = (id, spots) => {
+        const label = mapLabel(id), lw = label.length * 4 - 1, [mx, my] = at(id);
+        const tries = spots.map(([where, d]) => where === 'up' ? [mx - (lw >> 1), my - d] : where === 'down' ? [mx - (lw >> 1), my + d]
+          : where === 'right' ? [mx + d, my - 3] : [mx - d - lw, my - 3]);
+        let best = tries.find(([lx, ly]) => !clash([lx - 1, ly - 1, lx + lw + 2, ly + 7])) || tries[0];
+        best = [Math.max(2, Math.min(VW_ - lw - 2, best[0])), Math.max(1, best[1])];
+        taken.push([best[0] - 1, best[1] - 1, best[0] + lw + 2, best[1] + 7]);
+        drawLabel(label, best[0], best[1]);
+      };
+      place(pick.id, [['up', 15], ['up', 33], ['down', 5], ['right', 8], ['left', 8], ['down', 14], ['up', 24]]);
+      if (here) place(here, [['down', 5], ['down', 14], ['right', 8], ['left', 8], ['up', 33], ['down', 23]]);
     }
   }
   // A little plane from above, pointing right: wings, tail, a dark nose.
@@ -4672,7 +4783,7 @@
     // all the way down.
     // Below it, clumps of southern rātā flowering crimson.
     aoraki: { treeline: 0.5, wildlife: { odds: 0.025, kinds: { kea: 1 } }, rocks: 0.3, rata: 0.4, debris: [[0, 0], [0.1, 0], [0.13, 0.1], [0.3, 0.1], [0.34, 0]],
-      signs: [{ t: 0.1, lines: ['ROCKFALL'] }] },
+      signs: [{ t: 0.1, lines: ['ROCKFALL'] }], rockfall: { from: 0.11, to: 0.32 } },
     // Even as a metronome: same gap, same swing, no bunching.
     // ...and cherry trees in bloom down the lower half.
     // ...and cherry groves, small at first, bigger and bigger, until by
@@ -5112,7 +5223,7 @@
     if (finished) paintCardStars(stars());
     // What happened on the run, never how it was scored: the arithmetic
     // stays in the server's check, not on screen as a recipe.
-    breakdownEl.textContent = finished ? `TIME ${fmt(runCs())}` : ranOut ? 'OUT OF MISSES' : hitWhat === 'SLUFF' ? 'CAUGHT BY THE SLUFF' : hitWhat === 'AVALANCHE' ? 'CAUGHT BY THE AVALANCHE' : hitWhat === 'ICEFALL' ? 'HIT BY THE ICEFALL' : `INTO THE ${hitWhat}`;
+    breakdownEl.textContent = finished ? `TIME ${fmt(runCs())}` : ranOut ? 'OUT OF MISSES' : hitWhat === 'SLUFF' ? 'CAUGHT BY THE SLUFF' : hitWhat === 'AVALANCHE' ? 'CAUGHT BY THE AVALANCHE' : hitWhat === 'ICEFALL' ? 'HIT BY THE ICEFALL' : hitWhat === 'BOULDER' ? 'HIT BY A FALLING BOULDER' : `INTO THE ${hitWhat}`;
     breakdownEl.hidden = false;
     lastSubmittedId = null;
     submitStatusEl.classList.remove('error');

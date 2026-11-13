@@ -127,8 +127,8 @@
   #overlay.visible { opacity: 1; pointer-events: auto; }
   /* Over the world map: no wash, and the card tucked in below the map. */
   #overlay.map-mode { background: none; align-items: flex-end; padding-bottom: 4vh; }
-  /* Desktop: the map fills the window; the choosing card sits bottom centre,
-     your scorecard bottom left over the empty South Pacific. */
+  /* Desktop: the map fills the window; the choosing card sits at the bottom
+     over the Indian Ocean, your scorecard bottom left over the South Pacific. */
   #map-screen { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; z-index: 9;
     background: var(--vic-blue); image-rendering: pixelated; image-rendering: crisp-edges; }
   #map-screen[hidden] { display: none; }
@@ -151,8 +151,8 @@
   #map-score .cols b:nth-child(3) { width: 6.5em; }
   #map-score li.total { border-top: 2px solid var(--vic-blue); margin-top: 4px; padding-top: 4px; }
   #map-score li.tip { justify-content: center; margin-top: 6px; color: var(--vic-red); }
-  body:not(.narrow) #overlay.map-mode { justify-content: center; padding: 0 0 3vh; }
-  body:not(.narrow) #overlay.map-mode .card { margin: 0 auto; }
+  body:not(.narrow) #overlay.map-mode { justify-content: flex-start; padding: 0 0 3vh; }
+  body:not(.narrow) #overlay.map-mode .card { margin: 0; }   /* its left set from the map, over the Indian Ocean */
   #overlay.map-mode .card { margin: 0 auto; }
   body.map-mode #hud { visibility: hidden; }
   #overlay.flying .card { visibility: hidden; }
