@@ -1473,12 +1473,14 @@
         : course.endless ? 'ENDLESS' : 'SINGLE · RANDOM COURSE';
       msgEl.innerHTML = 'PAUSED<small></small>';
       msgEl.querySelector('small').textContent = where;
+      msgEl.classList.add('paused');   // on a strip of its own, readable over anything
     } else if (state === 'paused') {
       state = 'running';
       pausedMs += performance.now() - pausedAt;
       tellServer('slalom_resume');
       SFX.startSwoosh();
       msgEl.textContent = '';
+      msgEl.classList.remove('paused');
     }
   }
 
@@ -1892,7 +1894,7 @@
         const li = document.createElement('li'), m = id === 'random' ? null : mountain(id);
         const flag = document.createElement('span'); flag.className = 'flag-cell';
         flag.append(...(m ? FLAGS_OF[id] : ['random']).map(flagCanvas));   // both, where a mountain has two
-        const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = m ? m.short || m.name.split(/ \(| "/)[0] : 'RANDOM';
+        const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = m ? (NARROW && m.list) || m.short || m.name.split(/ \(| "/)[0] : 'RANDOM';   // a phone: the shorter name
         const alt = document.createElement('span'); alt.className = 'alt'; alt.textContent = m ? m.height.replace('~', '') : '';
         li.append(flag, nm, alt);
         li.addEventListener('click', (e) => {
@@ -4254,6 +4256,7 @@
   // ------------------------------------------------------------------ hud
   let flashUntil = 0;
   function flash(text, ms = 1100) {
+    msgEl.classList.remove('paused');
     msgEl.textContent = text;
     flashUntil = performance.now() + ms;
   }
@@ -4499,7 +4502,11 @@
   let mapPan = null, mapSpots = {}, cardSide = 1;   // which side of its mountain the choosing card is on
   // On a desktop the map leaves the TV and fills the window, on its own
   // canvas with more (but still chunky) pixels; a phone keeps it in the TV.
-  const MAP_WIDE = !NARROW, MAP_W = 520, MAP_H = 272;
+  // A phone gets the same map, taller than wide is: zoomed to fill the
+  // screen above the card, gliding sideways to keep the mountain you're
+  // choosing (or the plane) in the middle.
+  const MAP_WIDE = true, MAP_W = 520, MAP_H = 272;
+  let phonePan = null, mapFocusX = MAP_W / 2;
   const mapCanvas = document.getElementById('map-screen');
   const mapTitleEl = document.getElementById('map-title');
   const mapScoreEl = document.getElementById('map-score'), mapScoreList = mapScoreEl && mapScoreEl.querySelector('ol');
@@ -4509,9 +4516,18 @@
     if (!MAP_WIDE || !mapCanvas) return false;
     mapCanvas.hidden = !on;
     if (mapTitleEl) mapTitleEl.hidden = !on;
+    if (on && NARROW) {
+      // The map fills the screen down to the card, as wide as that makes it,
+      // panned to keep the focus in the middle.
+      const cardTop = !cardEl.hidden && champ.stage === 'pick' ? cardEl.getBoundingClientRect().top : window.innerHeight * 0.62;
+      const mh = Math.max(180, cardTop - 6), mw = mh * MAP_W / MAP_H, k = mh / MAP_H;
+      const want = Math.max(window.innerWidth - mw, Math.min(0, window.innerWidth / 2 - mapFocusX * k));
+      phonePan = phonePan === null ? want : phonePan + (want - phonePan) * 0.15;
+      Object.assign(mapCanvas.style, { width: Math.round(mw) + 'px', height: Math.round(mh) + 'px', left: Math.round(phonePan) + 'px', top: '0px' });
+    }
     // The choosing card sits beside the mountain you're choosing, on
-    // whichever side has room, level with it.
-    if (on && champ && champ.stage === 'pick') {
+    // whichever side has room, level with it. (On a phone, at the bottom.)
+    if (on && !NARROW && champ && champ.stage === 'pick') {
       const o = champOptions(), spot = mapSpots[o[champ.pick % o.length].id];
       if (spot) {
         const r = mapCanvas.getBoundingClientRect(), k = Math.min(r.width / MAP_W, r.height / MAP_H);
@@ -4523,7 +4539,7 @@
         cardEl.style.top = Math.round(Math.max(8, Math.min(window.innerHeight - ch - 8, sy - ch / 2))) + 'px';
       }
     } else { cardEl.style.left = ''; cardEl.style.top = ''; }
-    if (mapScoreEl) {   // your scorecard so far, bottom left
+    if (mapScoreEl && !NARROW) {   // your scorecard so far, bottom left (a phone keeps it on the result card)
       mapScoreEl.hidden = !on;
       if (on) {
         const html = champ && champ.played.length ? champListHtml() + champTip() : '';   // nothing to show before the first mountain
@@ -4571,6 +4587,7 @@
     }
     const at = id => { const [x, y] = mapSpot(id, w, h); return [x0 + x, y0 + y]; };
     mapSpots = Object.fromEntries(MOUNTAINS.map(m => [m.id, at(m.id)]));   // for tapping
+    if (wide && champ.stage === 'pick') { const o = champOptions(); mapFocusX = mapSpots[o[champ.pick % o.length].id][0]; }
     const dots = (a, b, c, gap) => {
       const n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1])));
       for (let k = 0; k <= n; k += gap) px(Math.round(a[0] + (b[0] - a[0]) * k / n), Math.round(a[1] + (b[1] - a[1]) * k / n), c);
@@ -4688,6 +4705,7 @@
     if (flying) {
       // The plane, its dotted trail behind it, nose along the way it's going.
       const [sx, sy, ang] = planeAt(w, h, 0);
+      if (wide) mapFocusX = x0 + sx;   // a phone follows the plane
       if (!wide) { const [fx, fy] = planeAt(w, h, -1); dots([x0 + fx, y0 + fy], [x0 + sx, y0 + sy], VIC.white, 3); }
       plane(x0 + sx, y0 + sy, ang, true);
     } else if (c.played.length) {
@@ -5209,7 +5227,7 @@
         }
       }
       P.text.style.textAlign = 'center';
-      P.prompt.textContent = NARROW ? 'ARROWS TO CHOOSE · TAP THE NAME TO GO' : 'LEFT / RIGHT CHOOSES · SPACE GOES';
+      P.prompt.textContent = NARROW ? 'ARROWS CHOOSE · TAP NAME TO GO' : 'LEFT / RIGHT CHOOSES · SPACE GOES';
     } else if (c.stage === 'intro') {
       const m = c.current;
       P.head.textContent = `COURSE ${n}: ${m.name}`;
@@ -5801,7 +5819,7 @@
     }
     if (particles.length) updateParticles(Math.min(dt, 0.05));
     if (state === 'running' || state === 'crashed' || state === 'finished') paintHud();
-    if (now > flashUntil && state !== 'paused') msgEl.textContent = cardClosed ? startPrompt() : '';
+    if (now > flashUntil && state !== 'paused') { msgEl.textContent = cardClosed ? startPrompt() : ''; msgEl.classList.remove('paused'); }
     if (pops.length) placePops();
     render();
     requestAnimationFrame(frame);

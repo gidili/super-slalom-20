@@ -103,6 +103,10 @@
   #message { top: 62%; font-size: clamp(8px, 1.9vw, 13px); }
   #message.above-count { top: 39%; }
   #message small { display: block; margin-top: 0.8em; font-size: 0.6em; }
+  /* Paused: on a white strip, readable over any ground. */
+  #tv #message.paused { left: 6%; right: 6%; padding: 0.7em 0.5em; background: var(--vic-white); border: 2px solid var(--vic-blue); text-shadow: none; }
+  body.narrow #tv #message.paused small { font-size: 9px; line-height: 1.6; }
+  body.night #tv #message.paused { color: var(--vic-blue); text-shadow: none; }   /* K2's night: blue on the strip */
   /* A big moment (a bear survived): a flashing banner across the middle,
      its own element, so nothing else can cover it. */
   #tv #banner { top: 46%; left: 8%; right: 8%; padding: 0.6em 0; font-size: clamp(11px, 2.6vw, 20px);
@@ -139,6 +143,10 @@
   #map-screen { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; z-index: 9;
     background: var(--vic-blue); image-rendering: pixelated; image-rendering: crisp-edges; }
   #map-screen[hidden] { display: none; }
+  /* A phone: the map at the top, sized and panned from the game, wider than the screen. */
+  body.narrow #map-screen { inset: auto; top: 0; left: 0; object-fit: fill; box-shadow: 0 0 0 200vmax var(--vic-blue); }   /* sea all round, behind the card */
+  body.narrow #map-title { top: 10px; font-size: 10px; letter-spacing: 1px; }
+  body.narrow #map-score { display: none; }
   /* The map's title, across the top above the Arctic. */
   #map-title { position: fixed; top: 1.6vh; left: 0; right: 0; z-index: 11; pointer-events: none; text-align: center;
     font-size: clamp(11px, 1.7vw, 22px); letter-spacing: 2px; color: var(--vic-white); text-shadow: 3px 3px 0 var(--vic-black); }
@@ -288,9 +296,12 @@
   body.narrow .narrow-only { display: inline; }
   body.narrow .wide-only { display: none; }
   body.narrow #hud { font-size: 9px; top: calc(8px + env(safe-area-inset-top, 0px)); }
-  body.narrow #title-card { top: 26%; padding: 0 12px; }
+  body.narrow #title-card { top: 17%; padding: 0 12px; }
   body.narrow #title-card h1 { font-size: 15px; }
   body.narrow #title-card p { font-size: 8px; }
+  /* A phone: the mountain list big enough to read and tap; it scrolls. */
+  body.narrow #course-list { font-size: 9px; max-height: 30vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  body.narrow #course-list li { height: 2.6em; }
   body.narrow .mode-btn { font-size: 9px; padding: 14px 0.7em; }
   body.narrow #message { top: 58%; font-size: 11px; }
   body.narrow #message.above-count { top: 34%; }
@@ -307,6 +318,10 @@
     cursor: pointer;
   }
   body.narrow .arrow-btn:active { background: var(--vic-cyan); }
+  /* A card or the map up: the arrows step aside rather than peek out from behind it. */
+  body.narrow:has(#overlay:not([hidden])) .arrow-btn { visibility: hidden; }
+  /* No R key on a phone. */
+  body.narrow #restart-hint { display: none; }
   body.narrow .arrow-btn[data-dir="left"] { left: 24px; }
   body.narrow .arrow-btn[data-dir="right"] { right: 24px; }
   .arrow-btn canvas {
