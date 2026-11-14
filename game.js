@@ -4542,7 +4542,8 @@
   // screen above the card, gliding sideways to keep the mountain you're
   // choosing (or the plane) in the middle.
   const MAP_WIDE = true, MAP_W = 520, MAP_H = 272;
-  let phonePan = null, mapFocusX = MAP_W / 2;
+  const PHONE_ZOOM = 1.6;
+  let phoneView = null, mapView = null, mapFocusX = MAP_W / 2;
   const mapCanvas = document.getElementById('map-screen');
   const mapTitleEl = document.getElementById('map-title');
   const mapScoreEl = document.getElementById('map-score'), mapScoreList = mapScoreEl && mapScoreEl.querySelector('ol');
@@ -4554,13 +4555,32 @@
     if (mapTitleEl) mapTitleEl.hidden = !on;
     if (!on && tipFor) hideMapTip();
     if (on && NARROW) {
-      // The map fills the screen down to the card, as wide as that makes it,
-      // panned to keep the focus in the middle.
-      const cardTop = !cardEl.hidden && champ.stage === 'pick' ? cardEl.getBoundingClientRect().top : window.innerHeight * 0.62;
-      const mh = Math.max(180, cardTop - 6), mw = mh * MAP_W / MAP_H, k = mh / MAP_H;
-      const want = Math.max(window.innerWidth - mw, Math.min(0, window.innerWidth / 2 - mapFocusX * k));
-      phonePan = phonePan === null ? want : phonePan + (want - phonePan) * 0.15;
-      Object.assign(mapCanvas.style, { width: Math.round(mw) + 'px', height: Math.round(mh) + 'px', left: Math.round(phonePan) + 'px', top: '0px' });
+      // The screen above the card, under the title: zoomed so both choices
+      // (or both ends of the flight) are in it with room for the arrow,
+      // as close as that allows, up to PHONE_ZOOM times a map as tall as
+      // the space. The sea goes on all round.
+      const W = window.innerWidth;
+      const A = Math.max(180, (!cardEl.hidden && champ.stage === 'pick' ? cardEl.getBoundingClientRect().top : window.innerHeight * 0.62) - 6);
+      const top0 = mapTitleEl ? mapTitleEl.getBoundingClientRect().bottom + 4 : 8;
+      const fly = champ.stage === 'fly';
+      const pts = (fly ? [champ.fly.from, champ.fly.to].filter(Boolean) : champOptions().map(m => m.id)).map(id => mapSpots[id]).filter(Boolean);
+      let k = PHONE_ZOOM * A / MAP_H, fx = mapFocusX, fy = MAP_H / 2;
+      if (pts.length) {
+        const xs = pts.map(q => q[0]), ys = pts.map(q => q[1]);
+        const x0 = Math.min(...xs) - 18, x1 = Math.max(...xs) + 18, y0 = Math.min(...ys) - 32, y1 = Math.max(...ys) + 8;
+        k = Math.min(k, (W - 16) / (x1 - x0), (A - top0) / (y1 - y0));
+        fy = (y0 + y1) / 2;
+        if (!(fly && pts.length < 2)) fx = (x0 + x1) / 2;   // a first flight follows the plane in
+      }
+      const mw = MAP_W * k, mh = MAP_H * k;
+      const fit = (want, room, size, lo) => size <= room ? Math.max(lo, Math.min(lo + room - size, want)) : Math.max(lo + room - size, Math.min(lo, want));
+      const want = { k, left: fit(W / 2 - fx * k, W, mw, 0), top: fit((top0 + A) / 2 - fy * k, A, mh, 0) };
+      phoneView = phoneView ? Object.fromEntries(Object.entries(want).map(([n, v]) => [n, phoneView[n] + (v - phoneView[n]) * 0.15])) : want;
+      const v = phoneView;
+      // What of the map is on screen, under the title and above the card,
+      // in map pixels: the labels stay inside it.
+      mapView = [Math.max(0, -v.left / v.k), Math.max(0, (top0 - v.top) / v.k), Math.min(MAP_W, (W - v.left) / v.k), Math.min(MAP_H, (A - v.top) / v.k)];
+      Object.assign(mapCanvas.style, { width: Math.round(MAP_W * v.k) + 'px', height: Math.round(MAP_H * v.k) + 'px', left: Math.round(v.left) + 'px', top: Math.round(v.top) + 'px' });
     }
     // The choosing card sits beside the mountain you're choosing, on
     // whichever side has room, level with it. (On a phone, at the bottom.)
@@ -4769,7 +4789,8 @@
         const ox = mr.left + (mr.width - MAP_W * kk) / 2, oy = mr.top + (mr.height - MAP_H * kk) / 2;
         if (cr.width) taken.push([(cr.left - ox) / kk - 2, (cr.top - oy) / kk - 2, (cr.right - ox) / kk + 2, (cr.bottom - oy) / kk + 2]);
       }
-      const clash = (r) => r[0] < 1 || r[2] > VW_ - 1 || r[1] < 1 || r[3] > H_ - 1 || taken.some(t => r[0] < t[2] && r[2] > t[0] && r[1] < t[3] && r[3] > t[1]);
+      const [vx0, vy0, vx1, vy1] = NARROW && mapView ? mapView : [0, 0, VW_, H_];
+      const clash = (r) => r[0] < vx0 + 1 || r[2] > vx1 - 1 || r[1] < vy0 + 1 || r[3] > vy1 - 1 || taken.some(t => r[0] < t[2] && r[2] > t[0] && r[1] < t[3] && r[3] > t[1]);
       const place = (id, spots) => {
         const [mx, my] = at(id);
         const spotsFor = lw => spots.map(([where, d]) => where === 'up' ? [mx - (lw >> 1), my - d] : where === 'down' ? [mx - (lw >> 1), my + d]
@@ -4784,7 +4805,7 @@
         }
         if (!label) { label = plainName(mountain(id)); best = spotsFor(label.length * 4 - 1)[0]; }
         const lw = label.length * 4 - 1;
-        best = [Math.max(2, Math.min(VW_ - lw - 2, best[0])), Math.max(1, best[1])];
+        best = [Math.max(vx0 + 2, Math.min(vx1 - lw - 2, best[0])), Math.max(vy0 + 1, best[1])];
         taken.push([best[0] - 1, best[1] - 1, best[0] + lw + 2, best[1] + 7]);
         drawLabel(label, best[0], best[1]);
       };

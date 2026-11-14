@@ -142,7 +142,9 @@
   #map-screen[hidden] { display: none; }
   /* A phone: the map at the top, sized and panned from the game, wider than the screen. */
   body.narrow #map-screen { inset: auto; top: 0; left: 0; object-fit: fill; box-shadow: 0 0 0 200vmax var(--vic-blue); }   /* sea all round, behind the card */
-  body.narrow #map-title { top: 10px; font-size: 10px; letter-spacing: 1px; }
+  /* A phone: just CHAMPIONSHIP, big enough to read. */
+  body.narrow #map-title { top: 12px; font-size: 16px; letter-spacing: 2px; text-shadow: 2px 2px 0 var(--vic-black); }
+  body.narrow #map-title .long { display: none; }
   body.narrow #map-score { display: none; }
   /* The map's title, across the top above the Arctic. */
   #map-title { position: fixed; top: 1.6vh; left: 0; right: 0; z-index: 11; pointer-events: none; text-align: center;
@@ -499,7 +501,7 @@
   <canvas id="map-screen" hidden></canvas>
   <div id="map-score" hidden><div class="ms-head">YOUR CHAMPIONSHIP</div><ol></ol></div>
   <div id="map-tip" hidden></div>
-  <div id="map-title" hidden>SUPER SLALOM VS&nbsp;<canvas class="pine-icon" width="5" height="7" aria-label="PINEAPPLE"></canvas>&nbsp;CHAMPIONSHIP</div>
+  <div id="map-title" hidden><span class="long">SUPER SLALOM VS&nbsp;<canvas class="pine-icon" width="5" height="7" aria-label="PINEAPPLE"></canvas>&nbsp;</span>CHAMPIONSHIP</div>
   <div id="overlay" hidden>
     <div class="card">
       <div id="champ" hidden>
