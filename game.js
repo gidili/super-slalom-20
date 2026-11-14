@@ -4392,56 +4392,45 @@
   }
 
   // ------------------------------------------------------------ championship
-  // Ten courses out of these fourteen, lowest to highest. Two are open at
-  // the start; finishing a course opens all of its `unlocks`, a crash only
-  // the first. Each can be skied once per Championship, and Chomolungma
-  // opens only after nine. `lon` orders the choices west to east, as they
-  // sit on the map. Seeds are placeholders until the courses are tuned.
+  // Ten courses out of these fourteen, lowest to highest, along ROUTE.
+  // `lon` orders the choices west to east, as they sit on the map. Seeds
+  // are placeholders until the courses are tuned.
   const MOUNTAINS = [
     { id: 'alyeska', name: 'ALYESKA', country: 'ALASKA, USA', height: '1,200 M', lon: -149.1, seed: 1101,
-      unlocks: ['fuji', 'pista3'],
       fact: 'Its name is the Aleut word that gave Alaska its name: Alaxsxaq, "the mainland". Its North Face claims to be North America\'s longest double-black-diamond run, a rating that means experts only: steep, ungroomed slopes, narrow chutes, rocks and cliffs, and no easy way out once you\'re in.' },
     { id: 'kunama', name: 'KUNAMA NAMADGI (KOSCIUSZKO)', country: 'AUSTRALIA', height: '2,228 M', lon: 148.3, seed: 1202,
-      unlocks: ['vinson', 'kilimanjaro'],
       fact: 'Every summer for thousands of years, Aboriginal clans met on these peaks to trade, hold initiations and feast on Bogong moths. In 1840 two Aboriginal guides, Charley Tarra and Jackey, led a Polish explorer up here, and Tarra\'s hunting kept the party from starving. The explorer "named" it. A dual Aboriginal name, Kunama Namadgi ("snow mountain"), was proposed in 2019 and is still debated.' },
     { id: 'pista3', name: 'PISTA 3 "FRANCO BERTHOD"', country: 'LA THUILE, ITALY', height: '~2,500 M', lon: 6.95, seed: 1303,
-      unlocks: ['kirinyaga', 'annapurna'],
       fact: 'Italy\'s steepest piste: 76% at the Grand Muret, right after the start. The women\'s World Cup races here, on north-facing, rock-hard snow. It\'s dangerous for anyone but experts.' },
     { id: 'aoraki', name: 'AORAKI', country: 'NEW ZEALAND', height: '3,724 M', lon: 170.1, seed: 1404,
-      unlocks: [],
       fact: 'To the Ngai Tahu, the Maori iwi of most of the South Island, Aoraki is an ancestor: he and his brothers were turned to stone on their stranded canoe, which became the South Island. The mountain was returned to Ngai Tahu in 1998, and they gifted it back to the nation. In 1991 a rock avalanche sheared 10 m off its summit, and by 2013 it had shrunk 30 m in all.' },
     { id: 'fuji', name: 'FUJI', country: 'JAPAN', height: '3,776 M', lon: 138.7, seed: 1505,
-      unlocks: ['aconcagua', 'cervino'],
       fact: 'Fuji last erupted in 1707, and its ash fell on Edo, today\'s Tokyo, almost 100 km away. The mountain is sacred: from the 8th station up it belongs to a Shinto shrine, and women weren\'t allowed to climb it until 1872.' },
     { id: 'cervino', name: 'CERVINO (MATTERHORN)', country: 'SWITZERLAND - ITALY', height: '4,478 M', lon: 7.66, seed: 1606,
-      unlocks: [],
       fact: 'Valley legends told of spirits and a ruined city on its summit. Local guide Jean-Antoine Carrel tried for years from Italy, but in 1865 a British-led party from Zermatt beat him to the top, and four of its seven men died coming down. Carrel summited three days later. Below it you can ski from Switzerland into Italy, 20 km in one run. Its steep east side was first skied only in 1975, by Toni Valeruz. Few have dared since.' },
     { id: 'vinson', name: 'VINSON', country: 'ANTARCTICA', height: '4,892 M', lon: -85.6, seed: 1707,
-      unlocks: ['iztactepetl', 'k2'],
       fact: 'No one saw it until 1958, from a US Navy plane, and the Americans named it after one of their congressmen. Chile counts it as part of its own Antarctic territory, but under the 1959 treaty no country\'s claim is recognised: Antarctica is kept for peace and science. Only about 150 climbers a season reach the top, with nights down to -40 C.' },
     { id: 'kirinyaga', name: 'KIRINYAGA (MOUNT KENYA)', country: 'KENYA', height: '5,199 M', lon: 37.3, seed: 1808,
-      unlocks: [],
       fact: 'To the Kikuyu people, Kirinyaga is home to the god Ngai, so they traditionally built their houses with the door facing the mountain. The country\'s name, Kenya, comes from how the British heard "Kirinyaga". Its summits honour the Maasai leader Mbatian, his brother and his son. Its glaciers, 16 km from the equator, may be gone by 2030.' },
     { id: 'iztactepetl', name: 'IZTACTEPETL (PICO DE ORIZABA)', country: 'MEXICO', height: '5,636 M', lon: -97.3, seed: 1909, venus: true,
-      unlocks: [],
       fact: 'Locals call it Iztactepetl, the White Mountain. Legend says Quetzalcoatl, the Feathered Serpent god worshipped by the Toltecs and Aztecs, bade farewell to his followers within sight of it, and that Venus, the morning star he became, can be seen settling into its crater. It is Mexico\'s highest peak and a dormant volcano: it last erupted in 1846...' },
     { id: 'kilimanjaro', name: 'KILIMANJARO', country: 'TANZANIA', height: '5,895 M', lon: 37.4, seed: 2010,
-      unlocks: ['chomolungma', 'aoraki'],
       fact: 'The first recorded summit, in 1889, is credited to some German guy, but he was guided by Yohani Kinyala Lauwo, a young Chagga man who later said he had already climbed it many times. Most climbers take 5 to 8 days to summit. Tanzanian Simon Mtuy ran up and back down in 9 hours 19 minutes, a Guinness World Record.' },
     { id: 'aconcagua', name: 'ACONCAGUA', country: 'ARGENTINA', height: '6,961 M', lon: -70.0, seed: 2111,
-      unlocks: [],
       fact: 'The highest peak outside Asia, and stray dogs climb it. Several have tagged along with expeditions all the way to the summit, one napped on top before heading down, and climbers still argue over which dog got there first.' },
     { id: 'annapurna', name: 'ANNAPURNA', country: 'NEPAL', height: '8,091 M', lon: 83.8, seed: 2212,
-      unlocks: [],
       fact: 'Its name means "full of food", after the Hindu goddess of nourishment. For decades it was the deadliest of the world\'s 8,000 m peaks: by 2010, one climber had died for every three who reached the top.' },
     { id: 'k2', name: 'K2', country: 'PAKISTAN', height: '8,611 M', lon: 76.5, seed: 2313,
-      unlocks: [],
       fact: 'The 1954 first recorded ascent made two Italians national heroes. Amir Mehdi, a porter from Hunza, had carried their oxygen high up the mountain, then was forced to spend the night at about 8,100 m in a snow hole with no tent or sleeping bag. He lost all his toes, and his story was buried for decades.' },
     { id: 'chomolungma', name: 'CHOMOLUNGMA (EVEREST NORTH FACE)', short: 'CHOMOLUNGMA (EVEREST NORTH FACE)', list: 'CHOMOLUNGMA (EVEREST)', country: 'TIBET - CHINA (CONTESTED TERRITORY)', height: '8,849 M', lon: 86.9, seed: 2414,
-      unlocks: [],
       fact: 'Named in 1865 after George Everest, a British surveyor who probably never saw it and objected to the honour. Only a handful have ever ridden down this face: in 2001 Marco Siffredi, 22, snowboarded the Norton Couloir from the summit, then vanished trying the Hornbein Couloir a year later. In 2025 Jim Morrison finally skied down that line, as you are about to.' },
   ];
   const CHAMP_COURSES = 10;
+  // The Championship climbs: each step one mountain, or a choice of two of
+  // much the same height, the last between the two giants.
+  const ROUTE = [['alyeska', 'kunama'], ['pista3'], ['aoraki', 'fuji'], ['cervino'], ['vinson', 'kirinyaga'],
+    ['iztactepetl'], ['kilimanjaro'], ['aconcagua'], ['annapurna'], ['k2', 'chomolungma']];
+  const routeStep = id => ROUTE.findIndex(s => s.includes(id));
 
   // ------------------------------------------------------------------- map
   // The world between courses, Street Fighter 2 style: land from Natural
@@ -4494,8 +4483,8 @@
 
   // The map screen: sea, land (snow towards the poles), a pale shore, the
   // road travelled so far, then every mountain: done ones with a little
-  // flag, open ones bright, locked ones dithered grey. The one picked
-  // blinks, with dotted lines to what finishing it would open.
+  // flag, the ones you can pick bright, the rest dithered grey. The one
+  // picked blinks.
   // On a phone the detailed map is wider than the screen, so the view
   // glides sideways to keep the mountain you've picked in the middle.
   // The world's main mountain ranges, by hand: each a spine in [lon, lat]
@@ -4643,11 +4632,10 @@
     };
     const c = champ, opts = champOptions(), blink = Math.floor(performance.now() / 300) % 2;
     const flying = c.stage === 'fly', pick = flying ? c.current : opts[c.pick % opts.length];
-    const unlocks = flying ? [] : pick.unlocks.filter(id => !c.open.has(id) && !skied(id));
     if (wide) {
       // Thick lines, outlined in black: [on, off] pixels for dashes, none
       // for solid. Outlines first, then the colour on top, so they cross cleanly.
-      // Flights follow the arc the plane flies; the unlock lines are straight.
+      // Flights follow the arc the plane flies.
       const line = (a, b, col, dash, arc = false, u1 = 1) => {
         const all = arc ? curvePoints(a, b, w, 0, u1) : curvePoints(a, b, 0);   // w 0: no lift, a straight line
         return { pts: dash ? all.filter((_, k) => k % (dash[0] + dash[1]) < dash[0]) : all, col };
@@ -4660,12 +4648,10 @@
         const [fa, fb] = flightEnds(w, h), t = Math.min(1, (performance.now() - c.fly.at) / flightTime());
         lines.push(line([x0 + fa[0], y0 + fa[1]], [x0 + fb[0], y0 + fb[1]], VIC.white, [2, 3], true, t * t * (3 - 2 * t)));
       }
-      for (const id of unlocks) lines.push(line(at(pick.id), at(id), PLANE_INKS.Y, [5, 4]));   // what it would open
-      for (const l of lines) if (l.col !== PLANE_INKS.Y) for (const [x, y] of l.pts) for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) px(x + dx, y + dy, VIC.black);   // the unlock dashes: thin, no outline
+      for (const l of lines) for (const [x, y] of l.pts) for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) px(x + dx, y + dy, VIC.black);
       for (const l of lines) for (const [x, y] of l.pts) px(x, y, l.col);
     } else {
       for (let k = 1; k < c.played.length; k++) dots(at(c.played[k - 1].id), at(c.played[k].id), VIC.white, 2);
-      for (const id of unlocks) dots(at(pick.id), at(id), VIC.yellow, 3);
     }
     for (const m of MOUNTAINS) {
       const [mx, base] = at(m.id), open = opts.includes(m), picked = m === pick;
@@ -4691,14 +4677,14 @@
       if (wide) {
         // On the big map every mountain is a big peak, thickly outlined in
         // black, easy to find and hover: red where you can fly, white where
-        // you can't (yet), gold blinking on the one you're choosing.
+        // you can't, gold blinking on the one you're choosing.
         BIG_PEAK.forEach((row, r) => [...row].forEach((ch, k) => {
           if (ch !== '.') px(mx + k - 5, my + r - 6, ch === 'K' ? VIC.black : ink || VIC.white);
         }));
       } else {
         // A peak: two rows, outlined in black.
         for (const [dx, dy] of [[0, -2], [-1, -1], [0, -1], [1, -1], [-2, 0], [-1, 0], [0, 0], [1, 0], [2, 0]]) {
-          px(mx + dx, my + dy, ink || ((mx + dx + my + dy) % 2 ? VIC.black : VIC.white));   // locked: dithered grey
+          px(mx + dx, my + dy, ink || ((mx + dx + my + dy) % 2 ? VIC.black : VIC.white));   // not now: dithered grey
         }
         for (const [dx, dy] of [[0, -3], [-1, -2], [1, -2], [-2, -1], [2, -1], [-3, 0], [3, 0]]) px(mx + dx, my + dy, VIC.black);
       }
@@ -4899,7 +4885,7 @@
   // How long a hop takes: longer for further.
   function flightTime() {
     const { w, h } = worldMap('big'), [a, b] = flightEnds(w, h);
-    return 2200 + Math.min(2300, Math.hypot(b[0] - a[0], b[1] - a[1]) * 18);   // 2.2 to 4.5 seconds
+    return 3500 + Math.min(2500, Math.hypot(b[0] - a[0], b[1] - a[1]) * 20);   // 3.5 to 6 seconds
   }
   // The plane's spot at t (0..1 of the hop): eased, on a gentle arc.
   function flightPos(w, h, t) {
@@ -5154,7 +5140,7 @@
 
   function startChampionship() {
     titleCardEl.hidden = true;
-    champ = { played: [], open: new Set(['alyeska', 'kunama']), pick: 0, current: null, stage: 'pick',
+    champ = { played: [], pick: 0, current: null, stage: 'pick',
       god: godMode, id: null, ranked: !!juicer, server: null, check: Promise.resolve() };
     showChamp();
     // Ranked from here, if the server's there: it hands out the id now,
@@ -5192,22 +5178,14 @@
       .then(({ data, error }) => { if (error || data !== points) c.ranked = false; }, () => { c.ranked = false; });
   }
 
-  // What can be picked now: open and not yet skied, west to east. Any ten
-  // will do, finishing wherever you like. If crashes have left nothing
-  // open, the two lowest not yet skied open up, so every Championship
-  // reaches the end. The unlocks are a tree: Alyeska and Kunama open two
-  // each, those open two each, the eight at the ends nothing; so every
-  // mountain is opened by exactly one other, never by a neighbour.
+  // What can be picked now: this step of the ROUTE, west to east.
   const skied = id => champ.played.some(p => p.id === id);
   // Testing only: ?allmountains opens every mountain, the finale too.
   const ALL_OPEN = /[?&]allmountains\b/.test(location.search);
   function champOptions() {
     if (ALL_OPEN) return MOUNTAINS.filter(m => !skied(m.id)).sort((a, b) => a.lon - b.lon);
-    const left = () => MOUNTAINS.filter(m => champ.open.has(m.id) && !skied(m.id));
-    // (Can't run dry: both starts are open and every mountain skied opens
-    // its branches. Just in case: the two lowest not yet skied.)
-    if (!left().length) MOUNTAINS.filter(m => !skied(m.id)).slice(0, 2).forEach(m => champ.open.add(m.id));
-    return left().sort((a, b) => a.lon - b.lon);
+    const step = ROUTE[Math.min(champ.played.length, ROUTE.length - 1)];
+    return step.map(mountain).sort((a, b) => a.lon - b.lon);
   }
 
   const champTotal = () => champ.played.reduce((t, p) => t + p.points, 0);
@@ -5256,25 +5234,7 @@
       const [main, rest] = shortName(m).split(' (');
       P.go.innerHTML = rest ? `${main}<small>(${rest}</small>` : main;
       P.flags.replaceChildren(...FLAGS_OF[m.id].map(flagCanvas));   // whose mountain it is
-      const next = m.unlocks.filter(id => !c.open.has(id) && !skied(id));
       P.text.textContent = `${m.country} · ${m.height}`;
-      if (next.length) {   // what finishing it opens, a row each, with flags
-        const head = document.createElement('div');
-        head.className = 'unlock-head';
-        head.textContent = 'COMPETE TO UNLOCK:';
-        P.text.appendChild(head);
-        for (const id of next) {
-          const row = document.createElement('div');
-          row.className = 'unlock-row';
-          const flags = document.createElement('span');
-          flags.className = 'unlock-flags';
-          flags.append(...FLAGS_OF[id].map(flagCanvas));
-          const nm = document.createElement('span');
-          nm.textContent = withLand(plainName(mountain(id)), id);   // short: no nicknames
-          row.append(flags, nm);
-          P.text.appendChild(row);
-        }
-      }
       P.text.style.textAlign = 'center';
       P.prompt.textContent = NARROW ? 'ARROWS CHOOSE · TAP NAME TO GO' : 'LEFT / RIGHT CHOOSES · SPACE GOES';
     } else if (c.stage === 'intro') {
@@ -5295,9 +5255,9 @@
       P.head.textContent = p.finished ? 'FINISHED' : 'WIPEOUT';
       P.flags.replaceChildren(...FLAGS_OF[p.id].map(flagCanvas));
       P.sub.textContent = `${withLand(shortName(mountain(p.id)), p.id)} +${p.points}` + (p.finished ? ` · TIME ${fmt(p.time_cs)}` : '') + (c.ranked ? '' : ' · UNRANKED');
-      // What it opened.
-      P.text.textContent = c.played.length === CHAMP_COURSES || !c.opened || !c.opened.length ? ''
-        : 'UNLOCKED: ' + c.opened.map(id => plainName(mountain(id))).join(' · ');
+      // Where the route goes next.
+      P.text.textContent = c.played.length === CHAMP_COURSES ? ''
+        : 'NEXT: ' + champOptions().map(o => plainName(o)).join(' OR ');
       P.text.style.textAlign = 'center';
       P.prompt.textContent = (NARROW ? 'TAP' : 'SPACE') + (c.played.length === CHAMP_COURSES ? ' TO SEE HOW YOU DID' : ' FOR THE NEXT MOUNTAIN');
       if (c.leg) lendRunCard();
@@ -5423,16 +5383,13 @@
     showChamp();
   }
 
-  // A course is over: keep its points, open what it earned, show the tally.
+  // A course is over: keep its points, show the tally.
   function champCourseOver(finished) {
     const c = champ, m = c.current;
     c.played.push({ id: m.id, points: points(), stars: finished ? stars() : 0, finished, time_cs: runCs() });
     checkChampCourse(points());
     // Good enough for this mountain's own top 10? Then its initials box.
     c.leg = c.ranked && sessionId && points() > 0 && makesTop10(points(), boardOf(false, c.god, m.id)) ? sessionId : null;
-    // Skiing it, finished or not, opens both of its branches.
-    c.opened = m.unlocks.filter(id => !c.open.has(id) && !skied(id));
-    c.opened.forEach(id => c.open.add(id));
     c.stage = 'result';
     showChamp();
   }
@@ -5507,14 +5464,13 @@
     const status = m.id === hereId ? 'YOU ARE HERE' + (p ? ': ' + skiedLine : '')
       : p ? `SKIED: ${skiedLine}`
       : open ? 'OPEN: YOU CAN FLY HERE'
-      : 'LOCKED: UNLOCKED BY ' + MOUNTAINS.filter(o => o.unlocks.includes(m.id)).map(o => `<span class="tip-by-name"><span class="tip-by" data-id="${o.id}"></span>${plainName(o)}</span>`).join(' OR ');   // flags, then the name
+      : routeStep(m.id) > c.played.length ? `COMING UP: COURSE ${routeStep(m.id) + 1}`
+      : 'NOT ON YOUR ROUTE';
     const board = boardOf(false, c.god, m.id), top = leaderboardCache[board];
     const rows = !top ? '<li class="note">LOADING...</li>' : !top.length ? '<li class="note">NO SCORES YET</li>'
       : top.slice(0, 5).map((r, i) => `<li><span>${i + 1}. ${r.initials}</span><span>${r.score}</span></li>`).join('');
-    const by = id => `<span class="tip-by-name"><span class="tip-by" data-id="${id}"></span>${plainName(mountain(id))}</span>`;
     return `<div class="tip-name">${withLand(plainName(m), m.id)}</div><div class="tip-row">${m.height}</div>`
       + (HAZARDS[m.id] ? `<div class="tip-row">HAZARDS: ${HAZARDS[m.id]}</div>` : '')
-      + (m.unlocks.length ? `<div class="tip-row">UNLOCKS: ${m.unlocks.map(by).join(' · ')}</div>` : '')
       + `<div class="tip-status ${m.id === hereId ? 'here' : p ? 'done' : open ? 'open' : 'locked'}">${status}</div><div class="tip-top">TOP 5</div><ol>${rows}</ol>`;
   }
   function showMapTip(m, e) {
@@ -5524,7 +5480,6 @@
       const fillBody = () => {
         const body = mapTipEl.querySelector('.tip-body');
         body.innerHTML = mapTipHtml(m);
-        body.querySelectorAll('.tip-by').forEach(el => el.append(...FLAGS_OF[el.dataset.id].map(flagCanvas)));   // whose flags open it
       };
       if (!leaderboardCache[board] && juicer) fetchLeaderboard(board).then(() => { if (tipFor === m) fillBody(); });
       mapTipEl.innerHTML = '<div class="tip-flags"></div><div class="tip-body"></div>';
