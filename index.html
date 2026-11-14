@@ -107,14 +107,10 @@
   #tv #message.paused { left: 6%; right: 6%; padding: 0.7em 0.5em; background: var(--vic-white); border: 2px solid var(--vic-blue); text-shadow: none; }
   body.narrow #tv #message.paused small { font-size: 9px; line-height: 1.6; }
   body.night #tv #message.paused { color: var(--vic-blue); text-shadow: none; }   /* K2's night: blue on the strip */
-  /* A big moment (a bear survived): a flashing banner across the middle,
-     its own element, so nothing else can cover it. */
-  #tv #banner { top: 46%; left: 8%; right: 8%; padding: 0.6em 0; font-size: clamp(11px, 2.6vw, 20px);
-    text-shadow: none; animation: row-flash 0.4s step-end infinite; }
-  #tv #banner.small { left: 20%; right: 20%; font-size: clamp(9px, 1.8vw, 14px); }
-  #tv #banner[hidden] { display: none; }
   /* What just happened, right under the skier, where the eyes are. */
   #tv #pop, #tv .pop { right: auto; white-space: nowrap; transform: translateX(-50%); font-size: clamp(7px, 1.5vw, 11px); }
+  /* A big moment (a bear survived, an escape): same stack, in red. */
+  #tv .pop.special { color: var(--vic-red); }
   /* Below the skier, who stands at about 30% down the screen. */
   #countdown { top: 45%; font-size: clamp(20px, 5.5vw, 38px); }
   #bonus { top: 20%; }
@@ -123,6 +119,7 @@
     color: var(--vic-white);
     text-shadow: 2px 0 0 var(--vic-blue), -2px 0 0 var(--vic-blue), 0 2px 0 var(--vic-blue), 0 -2px 0 var(--vic-blue);
   }
+  body.night #tv .pop.special { color: rgb(236, 200, 60); }   /* yellow in the dark */
   #bonus-time { font-size: clamp(8px, 1.9vw, 13px); margin-bottom: 0.8em; }
   #bonus-score { font-size: clamp(14px, 3.6vw, 26px); margin-bottom: 0.4em; }
   #bonus-points { font-size: clamp(8px, 1.9vw, 13px); }
@@ -472,7 +469,6 @@
     </div>
 
     <div id="message" class="ontv"></div>
-    <div id="banner" class="ontv" hidden></div>
     <div id="pop" class="ontv" hidden></div>
 
     <div id="countdown" class="ontv" hidden></div>

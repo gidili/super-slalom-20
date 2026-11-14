@@ -632,23 +632,6 @@
   const missLabelEl = document.getElementById('hud-miss-label');
   const bestEl = document.getElementById('hud-best');
   const msgEl = document.getElementById('message');
-  const bannerEl = document.getElementById('banner');
-  // A big moment, flashing across the middle for a while; nothing covers it.
-  // Two at once take turns: the next waits for the one up to finish.
-  let bannerTimer = null, bannerQueue = [];
-  function banner(text, ms, small = false) {
-    if (!bannerEl) return;
-    if (!bannerEl.hidden) { bannerQueue.push([text, ms, small]); return; }
-    bannerEl.textContent = text;
-    bannerEl.classList.toggle('small', small);
-    bannerEl.hidden = false;
-    clearTimeout(bannerTimer);
-    bannerTimer = setTimeout(() => {
-      bannerEl.hidden = true;
-      const next = bannerQueue.shift();
-      if (next) banner(...next);
-    }, ms);
-  }
   const overlayEl = document.getElementById('overlay');
   const overlayTitleEl = document.getElementById('overlay-title');
   const overlayWordEl = document.getElementById('overlay-word');
@@ -1329,7 +1312,6 @@
     state = 'title';
     ranOut = false;
     // The last run's weather and wildlife go with it.
-    if (bannerEl) { bannerEl.hidden = true; bannerQueue = []; clearTimeout(bannerTimer); }
     sluff = null; slide = null; snowballs = []; rockfall = []; crossers = []; heli = null; icefall = []; wind = null; gustLines = []; fellIn = false; pan = 0;
     if (!keep) { champ = null; prepareRun(); }
     particles = [];
@@ -1573,9 +1555,9 @@
     SFX.stopSwoosh();
     SFX.playFanfare();
     flash(`FINISH +${FINISH_POINTS}`);
-    if (mothsCaught) setTimeout(() => { if (state === 'finished') { banner(`MOTHMAN SPECIAL BONUS +${MOTHMAN_POINTS}`, 2500); SFX.playJingle(); } }, 500);
+    if (mothsCaught) setTimeout(() => { if (state === 'finished') { pop(`MOTHMAN SPECIAL BONUS +${MOTHMAN_POINTS}`, true); SFX.playJingle(); } }, 500);
     // Three stars, nothing missed: no points, just the glory.
-    if (missed === 0 && stars() === 3) setTimeout(() => { if (state === 'finished') { banner('PERFECT RUN!!!', 2500); SFX.playJingle(); } }, 600);
+    if (missed === 0 && stars() === 3) setTimeout(() => { if (state === 'finished') { pop('PERFECT RUN!!!', true); SFX.playJingle(); } }, 600);
     runEnd = performance.now();
     closeSession();
     // Time to glide to a stop past the line before the bonus counts up.
@@ -1704,8 +1686,8 @@
           if (!runGod) { SFX.playIgnite(); SFX.playPowerUp(); }
           const id = runId, first = !firedYet;
           firedYet = true;
-          // The first time on a run it gets the banner; after that, a pop.
-          setTimeout(() => { if (runId === id && streak >= FIRE_AT) { if (first) banner('ON FIRE!', 2000); else pop('YOU ARE ON FIRE !!!'); } }, 1000);
+          // The first time on a run it is a big moment; after that, a plain pop.
+          setTimeout(() => { if (runId === id && streak >= FIRE_AT) pop('YOU ARE ON FIRE !!!', first); }, 1000);
         }
       } else endStreak();
       if (said.length) pop(said.join('  '));
@@ -2052,7 +2034,7 @@
     // Made it: the avalanche gave up, or out of the couloir alive.
     if (!escapedYet && escapeBonus()) {
       escapedYet = true;
-      banner(runMountain() === 'annapurna' ? `OUTRAN THE AVALANCHE! +${ESCAPE_POINTS}` : `ESCAPED THE SLUFF! +${ESCAPE_POINTS}`, 2500);
+      pop(runMountain() === 'annapurna' ? `OUTRAN THE AVALANCHE! +${ESCAPE_POINTS}` : `ESCAPED THE SLUFF! +${ESCAPE_POINTS}`, true);
       SFX.playJingle();
       paintHud();
     }
@@ -2676,10 +2658,10 @@
   // Worth more the rarer the animal; also in slalom_submit.
   function survivedChase(a) {
     survived[a.kind]++;
-    // A bear is a big deal: a banner and the jingle. Wolves and foxes, a
-    // smaller one and a ding.
+    // A big moment in the stack; a bear gets the jingle, wolves and foxes
+    // a ding.
     const big = a.kind === 'bear';
-    banner(`${a.kind.toUpperCase()} SURVIVED! +${ANIMALS[a.kind].bonus}`, big ? 2500 : 1600, !big);
+    pop(`${a.kind.toUpperCase()} SURVIVED! +${ANIMALS[a.kind].bonus}`, true);
     if (big) SFX.playJingle(); else SFX.playDing();
     paintHud();
   }
@@ -2917,7 +2899,7 @@
   // server's checks (at most MOTH_MAX a run).
   const MOTH_POINTS = 100, MOTHMAN_POINTS = 300, MOTH_MAX = 12;
   let mothsCaught = 0, caughtSwarms = new Set();
-  let firedYet = false, escapedYet = false;   // this run's first fire, and its escape, have had their banners
+  let firedYet = false, escapedYet = false;   // this run's first fire, and its escape, have had their big moment
   function updateMoths(dt) {
     if (!course.shape.moths) { moths = []; return; }
     mothIn -= dt;
@@ -4322,21 +4304,24 @@
   // side has more room and well clear of the poles. It rides along with
   // the skier for POP_STAY, then is left behind: it drifts up the screen at
   // POP_DRIFT of the slope's speed, only half following, and blinks out at
-  // POP_MS.
-  const POP_MS = 1700, POP_STAY = 450, POP_GAP = 18, POP_DRIFT = 0.7, POP_FOLLOW = 0.5, POP_BLINK = 350;
+  // POP_MS. A big moment (special) is in its own colour, rides along for
+  // SPECIAL_STAY and goes at SPECIAL_MS.
+  const POP_MS = 1700, SPECIAL_MS = 2600, SPECIAL_STAY = 1300, POP_STAY = 450, POP_GAP = 18, POP_DRIFT = 0.7, POP_FOLLOW = 0.5, POP_BLINK = 350;
   // Several can be up at once: a new one slides in below the others, each
   // keeps its own time, and the rest close up when one goes. At most
   // POP_MAX; past that the oldest goes early.
   const POP_MAX = 4, POP_LINE = 8;   // rows apart on the slope
   const popEl = document.getElementById('pop');
   let pops = [];
-  function pop(text) {
+  function pop(text, special = false) {
     const el = (pops.length || !popEl.hidden) && popEl.cloneNode ? popEl.cloneNode(false) : popEl;
     if (el !== popEl) { el.removeAttribute('id'); popEl.parentElement.appendChild(el); }
     el.classList.add('pop');
+    el.classList.toggle('special', special);
     el.textContent = text;
     el.hidden = false;
-    pops.push({ el, until: performance.now() + POP_MS, from: { x: skierX - camX, side: skierX - camX < VW / 2 ? 1 : -1 } });
+    const ms = special ? SPECIAL_MS : POP_MS, stay = special ? SPECIAL_STAY : POP_STAY;
+    pops.push({ el, ms, stay, until: performance.now() + ms, from: { x: skierX - camX, side: skierX - camX < VW / 2 ? 1 : -1 } });
     while (pops.length > POP_MAX) dropPop(pops[0]);
     placePops();
   }
@@ -4347,18 +4332,22 @@
   function placePops() {
     const now = performance.now();
     for (const p of pops.filter(p => now > p.until || state === 'title')) dropPop(p);
+    let above = -Infinity;   // the row of the one above
     pops.forEach((p, k) => {
-      const el = p.el, left = Math.max(0, p.until - now), age = POP_MS - left;
-      const behind = Math.max(0, age - POP_STAY) / 1000;   // seconds since it let go
+      const el = p.el, left = Math.max(0, p.until - now), age = p.ms - left;
+      const behind = Math.max(0, age - p.stay) / 1000;   // seconds since it let go
       if (!behind) p.from.x = skierX - camX;   // still riding along
       const tvW = el.parentElement.clientWidth, w = el.offsetWidth, scale = tvW / VW;
       const sx = p.from.x + (skierX - camX - p.from.x) * POP_FOLLOW;
       const x = (sx + p.from.side * POP_GAP) * scale;
       el.style.left = (p.from.side > 0 ? Math.min(x, tvW - w - 4) : Math.max(x, w + 4)) + 'px';
       el.style.transform = p.from.side > 0 ? 'none' : 'translateX(-100%)';
-      // Stacked: the newest lowest, none drifting up into the one above.
+      // Stacked: the newest lowest, none drifting up into the one above
+      // (a big moment rides along longer, so a newer one could catch it).
       const below = (k - (pops.length - 1)) * POP_LINE;
-      el.style.top = ((SKIER_Y - 4 + below - speed * POP_DRIFT * behind) / H * 100) + '%';
+      const row = Math.max(SKIER_Y - 4 + below - speed * POP_DRIFT * behind, above + POP_LINE);
+      above = row;
+      el.style.top = (row / H * 100) + '%';
       el.style.visibility = left < POP_BLINK && Math.floor(left / 75) % 2 ? 'hidden' : 'visible';
     });
   }
