@@ -1773,6 +1773,7 @@
       const dir = SHIFTS[e.code] || (LEFT.has(e.key) ? 'left' : RIGHT.has(e.key) ? 'right' : null);
       if (GO.has(e.key)) { e.preventDefault(); champGo(); }
       else if (dir) { e.preventDefault(); if (!e.repeat) champStep(dir === 'left' ? -1 : 1); }
+      else if (e.key === '1' || e.key === '2') champChoose(+e.key - 1);
       else if (e.key === 'Escape') toTitle();
       else if (e.key === 'r' || e.key === 'R') restart();
       else if (e.key === 'm' || e.key === 'M') flash(SFX.toggleMute() ? 'SOUND OFF' : 'SOUND ON');
@@ -5133,7 +5134,7 @@
   // (the mountain's card), 'run', 'result' (after a course), 'done'.
   let champ = null;
   const champEl = document.getElementById('champ');
-  const champParts = Object.fromEntries(['head', 'sub', 'flags', 'pick', 'prev', 'go', 'next', 'text', 'list', 'prompt']
+  const champParts = Object.fromEntries(['head', 'sub', 'flags', 'pick', 'opts', 'go', 'text', 'list', 'prompt']
     .map(k => [k, document.getElementById('champ-' + k)]));
   const cardEl = champEl.parentElement;
   const champUp = () => !!champ && champ.stage !== 'run' && champ.stage !== 'save' && !overlayEl.hidden;
@@ -5221,22 +5222,42 @@
     }
     champEl.hidden = false;
     P.pick.hidden = c.stage !== 'pick';
-    P.flags.hidden = c.stage !== 'intro' && c.stage !== 'pick' && c.stage !== 'result';
-    P.prev.hidden = P.next.hidden = c.stage !== 'pick' || champOptions().length < 2;
+    P.flags.hidden = c.stage !== 'intro' && c.stage !== 'result';
     // The running list only at the end; on the big map it's on screen anyway
     // (a phone, without it, still gets it after each mountain).
     P.list.innerHTML = c.stage === 'done' || (c.stage === 'result' && !MAP_WIDE) ? champListHtml() : '';
     if (c.stage === 'pick') {
-      const opts = champOptions(), m = opts[c.pick % opts.length];
+      const opts = champOptions(), k = c.pick % opts.length, m = opts[k];
       P.head.textContent = `COURSE ${n} OF ${CHAMP_COURSES}`;
-      P.sub.textContent = n === 1 ? 'A WORLD TOUR ON SKIS. WHERE TO FIRST?' : 'WHERE NEXT?';
-      // A bracketed part goes on its own, smaller line.
-      const [main, rest] = shortName(m).split(' (');
-      P.go.innerHTML = rest ? `${main}<small>(${rest}</small>` : main;
-      P.flags.replaceChildren(...FLAGS_OF[m.id].map(flagCanvas));   // whose mountain it is
-      P.text.textContent = `${m.country} · ${m.height}`;
-      P.text.style.textAlign = 'center';
-      P.prompt.textContent = NARROW ? 'ARROWS CHOOSE · TAP NAME TO GO' : 'LEFT / RIGHT CHOOSES · SPACE GOES';
+      P.sub.textContent = opts.length < 2 ? 'YOUR NEXT MOUNTAIN' : n === 1 ? 'CHOOSE WHERE TO START' : 'CHOOSE YOUR NEXT MOUNTAIN';
+      // A card each: number, flags and name, where, what to watch for.
+      P.opts.replaceChildren(...opts.map((o, i) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'champ-opt' + (i === k ? ' chosen' : '');
+        const num = document.createElement('span');
+        num.className = 'num';
+        num.textContent = i + 1;
+        const info = document.createElement('span');
+        info.className = 'info';
+        const name = document.createElement('b');
+        name.append(...FLAGS_OF[o.id].map(flagCanvas), plainName(o));
+        const where = document.createElement('span');
+        where.textContent = `${o.country} · ${o.height}`;
+        info.append(name, where);
+        if (HAZARDS[o.id]) {
+          const watch = document.createElement('span');
+          watch.textContent = 'WATCH FOR: ' + HAZARDS[o.id];
+          info.append(watch);
+        }
+        b.append(num, info);
+        b.addEventListener('click', (e) => { e.currentTarget.blur(); champChoose(i); });
+        return b;
+      }));
+      P.go.textContent = 'FLY TO ' + plainName(m);
+      P.text.textContent = '';
+      P.prompt.textContent = NARROW ? (opts.length > 1 ? 'TAP A MOUNTAIN, THEN FLY' : '')
+        : opts.length > 1 ? 'CLICK OR 1 / 2 · SPACE FLIES' : 'SPACE FLIES';
     } else if (c.stage === 'intro') {
       const m = c.current;
       P.head.textContent = `COURSE ${n}: ${m.name}`;
@@ -5382,6 +5403,12 @@
     champ.pick = (champ.pick + d + n) % n;
     showChamp();
   }
+  // Straight to option i (0-based): a tap on its card, or its number key.
+  function champChoose(i) {
+    if (champ.stage !== 'pick' || i >= champOptions().length) return;
+    champ.pick = i;
+    showChamp();
+  }
 
   // A course is over: keep its points, show the tally.
   function champCourseOver(finished) {
@@ -5394,8 +5421,6 @@
     showChamp();
   }
 
-  champParts.prev.addEventListener('click', (e) => { e.currentTarget.blur(); champStep(-1); });
-  champParts.next.addEventListener('click', (e) => { e.currentTarget.blur(); champStep(1); });
   champParts.go.addEventListener('click', (e) => { e.currentTarget.blur(); champGo(); });
   // A tap anywhere on the card moves things on, except on the pick screen,
   // where the name is the button.

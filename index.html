@@ -215,7 +215,25 @@
     0% { box-shadow: 0 -2px #bfce72, 0 2px #bfce72, -2px 0 #bfce72, 2px 0 #bfce72; }
     50% { box-shadow: 0 -4px #bfce72, 0 4px #bfce72, -4px 0 #bfce72, 4px 0 #bfce72, 0 -2px #8080ff, 0 2px #8080ff, -2px 0 #8080ff, 2px 0 #8080ff; }
   }
-  #champ-go small { display: block; font-size: 7px; opacity: 0.85; }
+  /* Choosing the next mountain: a numbered card each, the chosen one gold,
+     then the button that flies there. */
+  #champ-pick { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+  #champ-pick[hidden] { display: none; }
+  #champ-opts { display: flex; flex-direction: column; gap: 8px; }
+  #overlay button.champ-opt { display: flex; gap: 10px; align-items: center; width: 100%; padding: 8px 10px; text-align: left;
+    background: var(--vic-white); color: var(--vic-blue); font-size: 8px; line-height: 1.7; text-transform: none; }
+  #overlay button.champ-opt.chosen { background: rgb(236, 200, 60); border-width: 3px; padding: 7px 9px; }
+  #overlay button.champ-opt:active { background: rgb(236, 200, 60); color: var(--vic-blue); }
+  .champ-opt .num { flex: none; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    background: var(--vic-blue); color: var(--vic-white); font-size: 10px; }
+  .champ-opt.chosen .num { background: var(--vic-black); color: rgb(236, 200, 60); }
+  .champ-opt .info { display: flex; flex-direction: column; min-width: 0; }
+  .champ-opt b { font-weight: normal; font-size: 9px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .champ-opt b canvas { height: 9px; width: auto; image-rendering: pixelated; image-rendering: crisp-edges; outline: 1px solid var(--vic-blue); }
+  .champ-opt b canvas.shaped { outline: none; }
+  #champ-go { padding: 12px; font-size: 10px; }
+  body.narrow #overlay button.champ-opt { min-height: 56px; }
+  body.narrow #champ-go { min-height: 48px; }
   #overlay .card {
     background: var(--vic-white); border: 2px solid var(--vic-blue);
     padding: 20px; width: 100%; max-width: 320px; margin: auto;
@@ -488,10 +506,9 @@
         <h2 id="champ-head"></h2>
         <div id="champ-sub"></div>
         <div id="champ-flags" hidden></div>
-        <div class="btn-row" id="champ-pick">
-          <button id="champ-prev" type="button" class="secondary">&lt;</button>
+        <div id="champ-pick">
+          <div id="champ-opts"></div>
           <button id="champ-go" type="button"></button>
-          <button id="champ-next" type="button" class="secondary">&gt;</button>
         </div>
         <p id="champ-text"></p>
         <ol id="champ-list"></ol>
